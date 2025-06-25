@@ -1,0 +1,3 @@
+[D-BUS Service]
+Name=com.nedrichards.octopusagile
+Exec=@bindir@/octopusagile --gapplication-service

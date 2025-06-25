@@ -1,0 +1,8 @@
+# List of source files containing translatable strings.
+# Please keep this file sorted alphabetically.
+data/com.nedrichards.octopusagile.desktop.in
+data/com.nedrichards.octopusagile.metainfo.xml.in
+data/com.nedrichards.octopusagile.gschema.xml
+src/main.py
+src/window.py
+src/window.ui

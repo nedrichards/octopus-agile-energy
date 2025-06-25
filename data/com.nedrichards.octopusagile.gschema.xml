@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="com.nedrichards.octopusagile" path="/com/nedrichards/octopusagile/">
+    <key name="selected-tariff-code" type="s">
+      <default>''</default>
+      <summary>Selected Octopus Agile Tariff Code</summary>
+      <description>The specific tariff code selected by the user for fetching electricity prices. If empty, the app will attempt to auto-detect a default.</description>
+    </key>
+    <key name="selected-region-code" type="s">
+      <default>''</default>
+      <summary>Selected Octopus Agile Region Code</summary>
+      <description>The region code (e.g., '_A', '_B') for the selected tariff. If empty, the app will attempt to auto-detect a default.</description>
+    </key>
+  </schema>
+</schemalist>

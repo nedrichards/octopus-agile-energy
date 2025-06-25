@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=Octopus Agile Prices
+Comment=Track live Octopus Energy Agile electricity prices
+Exec=@APP_EXEC@
+Icon=@APP_ICON@
+Terminal=false
+Categories=Utility;Finance;Office;
+Keywords=energy;electricity;octopus;agile;price;chart;
+StartupNotify=true
+Actions=Preferences;
+
+[Desktop Action Preferences]
+Name=Preferences
+Exec=@APP_EXEC@ --gapplication-service app.preferences
