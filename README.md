@@ -7,6 +7,8 @@ This is a simple application for GNOME built to track and visualise Octopus Ener
 * 24-Hour Price Forecast Chart: Displays a bar chart of the next 24 hours of half-hourly price data, helping users plan their energy consumption.
 * Region and Tariff Selection: Allows users to select their specific Octopus Energy region and Agile tariff code through a preferences window.
 
+![The application interface, showing the current price and a graph of future prices](/data/octopus-agile-screenshot.png?raw=true "Application screenshot")
+
 ## Installation
 
 This application can be easily built and run using Flatpak and Flatpak Builder or directly through GNOME Builder.
