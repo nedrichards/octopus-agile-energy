@@ -19,7 +19,7 @@
   <!-- Recommended: It is highly recommended for open-source projects to display the source code repository -->
   <url type="vcs-browser">https://github.com/nedrichards/octopus-agile-energy</url>
   <!-- Should point to the software's bug tracking system, for users to report new bugs -->
-  <url type="bugtracker">https://example.org/issues</url>
+  <url type="bugtracker">https://github.com/nedrichards/octopus-agile-energy/issues</url>
 
   <translation type="gettext">octopusagile</translation>
   <!-- All graphical applications having a desktop file must have this tag in the MetaInfo.
@@ -36,24 +36,15 @@
 
   <screenshots>
     <screenshot type="default">
-      <image>https://example.org/example1.png</image>
-      <caption>A caption</caption>
-    </screenshot>
-    <screenshot>
-      <image>https://example.org/example2.png</image>
-      <caption>A caption</caption>
+      <image>https://github.com/nedrichards/octopus-agile-energy/blob/main/data/octopus-agile-screenshot.png</image>
+      <caption>Current and next day prices</caption>
     </screenshot>
   </screenshots>
 
   <releases>
-    <release version="1.0.1" date="2024-01-18">
-      <url type="details">https://example.org/changelog.html#version_1.0.1</url>
+    <release version="1.0.1" date="2025-06-25">
       <description translate="no">
-        <p>Release description</p>
-        <ul>
-          <li>List of changes</li>
-          <li>List of changes</li>
-        </ul>
+        <p>Initial version</p>
       </description>
     </release>
   </releases>
