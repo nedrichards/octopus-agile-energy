@@ -1,18 +1,16 @@
 # Octopus Agile Energy
 
-This is a simple graphical user interface (GUI) application built with Python, GTK4, and LibAdwaita to track and visualize Octopus Energy's Agile electricity prices in real-time. It fetches current and forecasted half-hourly prices, allowing users to quickly see the best times to use electricity. This is only relevant if you are based in the UK.
+This is a simple application for GNOME built to track and visualise Octopus Energy's Agile electricity prices in real-time. It fetches current and forecasted half-hourly prices, allowing users to quickly see the best times to use electricity. This is only relevant if you are based in the UK.
 
 * Current Price Display: Shows the real-time Agile electricity price (pence/kWh).
 * Price Level Indicators: Visually indicates whether the current price is low, medium, high, or even negative.
 * 24-Hour Price Forecast Chart: Displays a bar chart of the next 24 hours of half-hourly price data, helping users plan their energy consumption.
-* Interactive Chart: Hover over the chart bars to see exact price and time details for each half-hour period.
 * Region and Tariff Selection: Allows users to select their specific Octopus Energy region and Agile tariff code through a preferences window.
-* Local Caching: Caches API responses to reduce network requests and improve performance.
-* Modern UI: Built with GTK4 and LibAdwaita for a clean, modern look and feel.
 
 ## Installation
 
 This application can be easily built and run using Flatpak and Flatpak Builder or directly through GNOME Builder.
+
 Prerequisites
 
 Ensure you have Flatpak and Flatpak Builder installed on your system. Refer to the official Flatpak documentation for installation instructions specific to your distribution.
