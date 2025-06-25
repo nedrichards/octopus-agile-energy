@@ -16,7 +16,8 @@ This application can be easily built and run using Flatpak and Flatpak Builder o
 Prerequisites
 
 Ensure you have Flatpak and Flatpak Builder installed on your system. Refer to the official Flatpak documentation for installation instructions specific to your distribution.
-Using GNOME Builder
+
+### Using GNOME Builder
 
 GNOME Builder is the recommended way to work with this project. It provides a convenient development environment that handles Flatpak integration automatically.
 
@@ -29,32 +30,28 @@ GNOME Builder is the recommended way to work with this project. It provides a co
         Once the project is loaded, GNOME Builder will detect the com.nedrichards.octopusagile.json manifest.
         Click the "Run" button (usually a play icon) in the top bar. Builder will automatically build the Flatpak application and run it.
 
-Building with Flatpak Builder (CLI)
+### Building with Flatpak Builder (CLI)
 
 If you prefer to build the Flatpak from the command line, follow these steps:
 
     Clone the repository (or download the project files):
-    Bash
 
-git clone https://github.com/nedrichards/octopus-agile-energy.git
-cd octopus-agile-energy
+    git clone https://github.com/nedrichards/octopus-agile-energy.git
+    cd octopus-agile-energy
 
 Build the Flatpak:
-Bash
 
-flatpak-builder --force-clean build-dir com.nedrichards.octopusagile.json
+    flatpak-builder --force-clean build-dir com.nedrichards.octopusagile.json
 
 This command will build the application and its dependencies into the build-dir directory.
 
 Install the Flatpak:
-Bash
 
-flatpak-builder --user --install build-dir com.nedrichards.octopusagile.json
+    flatpak-builder --user --install build-dir com.nedrichards.octopusagile.json
 
 This command installs the built Flatpak application for the current user.
 
 Run the application:
-Bash
 
     flatpak run com.nedrichards.octopusagile
 

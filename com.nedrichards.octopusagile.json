@@ -64,7 +64,7 @@
             "sources" : [
                 {
                     "type" : "git",
-                    "url" : "file:///var/home/nedr/Projects"
+                    "url" : "https://github.com/nedrichards/octopus-agile-energy.git"
                 }
             ]
         }
