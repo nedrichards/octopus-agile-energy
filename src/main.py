@@ -27,6 +27,7 @@ from .ui.styles import get_css
 class OctopusAgileApp(Adw.Application):
     def __init__(self):
         super().__init__(application_id='com.nedrichards.octopusagile')
+        self.connect("activate", self.on_activate)
 
     def on_activate(self, app):
         """
