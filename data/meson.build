@@ -4,14 +4,19 @@ desktop_conf = configuration_data()
 desktop_conf.set('APP_EXEC', application_id)
 desktop_conf.set('APP_ICON', application_id)
 
-desktop_file = i18n.merge_file(
-        input: 'com.nedrichards.octopusagile.desktop.in',
-       output: 'com.nedrichards.octopusagile.desktop',
-         type: 'desktop',
-       po_dir: '../po',
-      install: true,
-  install_dir: get_option('datadir') / 'applications',
+configured_desktop_in = configure_file(
+  input: 'com.nedrichards.octopusagile.desktop.in',
+  output: 'com.nedrichards.octopusagile.desktop.in@configured@',
   configuration: desktop_conf
+)
+
+desktop_file = i18n.merge_file(
+  input: configured_desktop_in,
+  output: 'com.nedrichards.octopusagile.desktop',
+  type: 'desktop',
+  po_dir: '../po',
+  install: true,
+  install_dir: get_option('datadir') / 'applications'
 )
 
 desktop_utils = find_program('desktop-file-validate', required: false)
