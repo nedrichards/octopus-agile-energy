@@ -23,34 +23,26 @@ class CacheManager:
         hashed_key = hashlib.md5(key.encode('utf-8')).hexdigest()
         return os.path.join(self.cache_dir, hashed_key + ".json")
 
-    def get(self, key, max_age_seconds=None):
+    def get(self, key):
         """
-        Retrieves data from cache if available and not expired.
-        Returns (data, True) if found in cache, (None, False) otherwise.
+        Retrieves data from cache if available.
+        Returns a tuple: (data, modification_time_as_timestamp).
+        Returns (None, None) if not found or on error.
         """
         filepath = self._get_cache_filepath(key)
         if not os.path.exists(filepath):
-            return None, False
+            return None, None
 
         try:
             file_mtime = os.path.getmtime(filepath)
-            current_time = time.time()
-            ttl = max_age_seconds if max_age_seconds is not None else self.default_ttl
-
-            if (current_time - file_mtime) > ttl:
-                # Cache expired, remove it
-                os.remove(filepath)
-                return None, False
-
             with open(filepath, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            return data, True
+            return data, file_mtime
         except (IOError, json.JSONDecodeError, OSError) as e:
             print(f"Cache read error for key '{key}': {e}")
-            # In case of corruption or error, delete the file
             if os.path.exists(filepath):
                 os.remove(filepath)
-            return None, False
+            return None, None
 
     def set(self, key, data):
         """Stores data in the cache, but only if it's not empty."""

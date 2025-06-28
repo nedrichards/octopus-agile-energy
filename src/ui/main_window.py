@@ -23,6 +23,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.set_size_request(600, 600)
 
         self.all_prices = []
+        self.chart_prices = []
         self.current_price_data = None
         self.cache_manager = CacheManager() # Initialize CacheManager
 
@@ -34,6 +35,37 @@ class MainWindow(Adw.ApplicationWindow):
         self.create_actions()
         self.setup_ui()
         self.refresh_price()
+        self.schedule_next_ui_update()
+        self.schedule_next_data_fetch()
+
+    def schedule_next_ui_update(self):
+        now = datetime.now()
+        if now.minute < 30:
+            next_update = now.replace(minute=30, second=0, microsecond=0)
+        else:
+            next_update = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+        
+        delay = (next_update - now).total_seconds()
+        GLib.timeout_add_seconds(int(delay), self._on_ui_update_timer)
+
+    def _on_ui_update_timer(self):
+        self.update_current_price()
+        self.schedule_next_ui_update()
+        return False
+
+    def schedule_next_data_fetch(self):
+        now = datetime.now()
+        next_fetch = now.replace(hour=16, minute=1, second=0, microsecond=0)
+        if now > next_fetch:
+            next_fetch += timedelta(days=1)
+        
+        delay = (next_fetch - now).total_seconds()
+        GLib.timeout_add_seconds(int(delay), self._on_data_fetch_timer)
+
+    def _on_data_fetch_timer(self):
+        self.refresh_price()
+        self.schedule_next_data_fetch()
+        return False
 
     def create_headerbar_widget(self): # Renamed to reflect it returns a widget
         """
@@ -222,12 +254,12 @@ class MainWindow(Adw.ApplicationWindow):
         """
         Updates the hover info label based on the hovered chart bar.
         """
-        if index == -1 or not self.all_prices:
+        if index == -1 or not self.chart_prices:
             self.hover_info_label.set_markup("<span size='small'>Hover over bars to see details</span>")
             return
 
-        if 0 <= index < len(self.all_prices):
-            price_data = self.all_prices[index]
+        if 0 <= index < len(self.chart_prices):
+            price_data = self.chart_prices[index]
             price = price_data['value_inc_vat'] / 100
             valid_from = datetime.fromisoformat(price_data['valid_from'].replace('Z', '+00:00')).astimezone()
             valid_to = datetime.fromisoformat(price_data['valid_to'].replace('Z', '+00:00')).astimezone()
@@ -247,15 +279,17 @@ class MainWindow(Adw.ApplicationWindow):
     def on_refresh_clicked(self, button):
         """
         Handles the refresh button click, initiating data fetch and disabling buttons.
+        This action forces a cache bypass.
         """
-        button.set_sensitive(False) # Disable clicked button
-        self.header_refresh_button.set_sensitive(False) # Disable header button
-        self.refresh_price()
+        button.set_sensitive(False)  # Disable clicked button
+        self.header_refresh_button.set_sensitive(False)  # Disable header button
+        self.refresh_price(force=True)
 
-    def refresh_price(self):
+    def refresh_price(self, force=False):
         """
         Initiates the price data fetching process in a separate thread.
         Sets the UI to a loading state.
+        Can be forced to bypass the cache.
         """
         # Set price card to a loading state with an appropriate.
         self.price_card.set_title("Loading...")
@@ -271,11 +305,11 @@ class MainWindow(Adw.ApplicationWindow):
         self.price_card.remove_css_class("price-negative")
 
         # Run API call in a separate thread to avoid blocking the UI.
-        thread = threading.Thread(target=self.fetch_price_data)
-        thread.daemon = True # Allow the thread to exit with the main program.
+        thread = threading.Thread(target=self.fetch_price_data, kwargs={'force': force})
+        thread.daemon = True  # Allow the thread to exit with the main program.
         thread.start()
 
-    def fetch_price_data(self):
+    def fetch_price_data(self, force=False):
         """
         Fetches electricity price data from the Octopus Energy API, using caching and settings.
         Runs in a separate thread and updates the UI via GLib.idle_add.
@@ -304,61 +338,72 @@ class MainWindow(Adw.ApplicationWindow):
             print(f"DEBUG: Using tariff code: {selected_tariff_code}")
             print(f"DEBUG: Extracted product code: {agile_product_code}")
 
-            # Step 2: Fetch standard unit rates for the next 24 hours.
-            rates_url = f"https://api.octopus.energy/v1/products/{agile_product_code}/electricity-tariffs/{selected_tariff_code}/standard-unit-rates/"
-
             now = datetime.now(timezone.utc)
-            # Align period_from to the nearest half-hour to match Octopus data granularity.
-            period_from = now.replace(minute=0 if now.minute < 30 else 30, second=0, microsecond=0)
-            period_to = period_from + timedelta(hours=24)
+            today_str = now.strftime('%Y-%m-%d')
+            rates_cache_key = f"octopus_rates_{selected_tariff_code}_{today_str}"
 
-            params = {
-                'period_from': period_from.strftime('%Y-%m-%dT%H:%M:%SZ'),
-                'period_to': period_to.strftime('%Y-%m-%dT%H:%M:%SZ'),
-                'page_size': 100 # Request enough results for 24 hours (48 half-hour periods).
-            }
+            all_rates = None
+            
+            if not force:
+                cached_data, cache_mtime_ts = self.cache_manager.get(rates_cache_key)
+                if cached_data and cache_mtime_ts:
+                    cache_mtime = datetime.fromtimestamp(cache_mtime_ts, tz=timezone.utc)
+                    release_time = now.replace(hour=16, minute=0, second=0, microsecond=0)
 
-            rates_cache_key_prefix = "octopus_rates_"
-            # Create a cache key specific to the tariff, region, and time range
-            rates_cache_key = f"{rates_cache_key_prefix}{selected_tariff_code}_{period_from.timestamp()}_{period_to.timestamp()}"
-
-            print(f"DEBUG: Requesting rates from {period_from} to {period_to}")
-
-            all_rates, from_cache = self.cache_manager.get(rates_cache_key, max_age_seconds=900) # Cache for 15 minutes
-            if all_rates and from_cache:
-                print("DEBUG: Rates data loaded from cache.")
+                    # Invalidate if it's after 4 PM but the cache is from before 4 PM today.
+                    if now >= release_time and cache_mtime < release_time:
+                        print("DEBUG: Stale cache. It is after 4 PM but cache is from before 4 PM.")
+                        all_rates = None  # Force refetch
+                    else:
+                        print("DEBUG: Rates data loaded from cache.")
+                        all_rates = cached_data
             else:
+                print("DEBUG: Manual refresh forced, bypassing cache.")
+
+            if not all_rates:
+                print("DEBUG: Fetching new data from API.")
+                rates_url = f"https://api.octopus.energy/v1/products/{agile_product_code}/electricity-tariffs/{selected_tariff_code}/standard-unit-rates/"
+                params = {'page_size': 1500}  # Fetch a generous amount of data
                 response = requests.get(rates_url, params=params, timeout=10)
                 response.raise_for_status()
                 data = response.json()
-                all_rates = sorted(data['results'], key=lambda x: x['valid_from'])
-                self.cache_manager.set(rates_cache_key, all_rates) # Store only the sorted results list
-                print("DEBUG: Rates data fetched from API and cached.")
+                raw_rates = data.get('results', [])
+
+                # --- START DEBUGGING --- 
+                print("--- RAW API DATA ---")
+                print(json.dumps(raw_rates, indent=2))
+                print("--- END RAW API DATA ---")
+                # --- END DEBUGGING --- 
+
+                # Filter for unique, standard 30-minute tariff slots only.
+                # Use a dict to ensure uniqueness per time slot.
+                filtered_rates_dict = {}
+                for rate in raw_rates:
+                    try:
+                        valid_from = datetime.fromisoformat(rate['valid_from'].replace('Z', '+00:00'))
+                        valid_to = datetime.fromisoformat(rate['valid_to'].replace('Z', '+00:00'))
+                        if (valid_to - valid_from) == timedelta(minutes=30):
+                            # Overwrite any existing entry for this slot to ensure uniqueness
+                            filtered_rates_dict[rate['valid_from']] = rate
+                    except (ValueError, KeyError):
+                        # Ignore rates with invalid date formats or missing keys
+                        continue
+                
+                # Sort the unique rates by time
+                all_rates = sorted(filtered_rates_dict.values(), key=lambda x: x['valid_from'])
+
+                # --- START DEBUGGING --- 
+                print("--- FILTERED & SORTED DATA ---")
+                print(json.dumps(all_rates, indent=2))
+                print("--- END FILTERED & SORTED DATA ---")
+                # --- END DEBUGGING --- 
+                
+                self.cache_manager.set(rates_cache_key, all_rates)
+                print(f"DEBUG: Rates data fetched from API, filtered to {len(all_rates)} unique 30-min slots, and cached.")
 
             if all_rates:
-                # Find the rate that is currently active.
-                current_rate = None
-                current_index = -1
-                now_utc = datetime.now(timezone.utc)
-
-                for i, rate in enumerate(all_rates):
-                    valid_from = datetime.fromisoformat(rate['valid_from'].replace('Z', '+00:00'))
-                    valid_to = datetime.fromisoformat(rate['valid_to'].replace('Z', '+00:00'))
-
-                    if valid_from <= now_utc < valid_to:
-                        current_rate = rate
-                        current_index = i
-                        break
-
-                if current_rate:
-                    price_inc_vat = current_rate['value_inc_vat']
-                    valid_from_utc = datetime.fromisoformat(current_rate['valid_from'].replace('Z', '+00:00'))
-                    valid_to_utc = datetime.fromisoformat(current_rate['valid_to'].replace('Z', '+00:00'))
-
-                    # Schedule UI update on the main thread using GLib.idle_add.
-                    GLib.idle_add(self.update_display, price_inc_vat, valid_from_utc, valid_to_utc, all_rates, current_index)
-                else:
-                    GLib.idle_add(self.show_error, "No current price data found for the next 24 hours from current time. This might be a temporary API issue or no rates are published yet.")
+                self.all_prices = all_rates
+                self.update_current_price()
             else:
                 GLib.idle_add(self.show_error, "No price data available from Octopus Energy API for the requested period.")
 
@@ -377,12 +422,49 @@ class MainWindow(Adw.ApplicationWindow):
             traceback.print_exc() # Print full traceback for debugging.
             GLib.idle_add(self.show_error, f"An unexpected error occurred: {str(e)}")
 
-    def update_display(self, price_inc_vat, valid_from, valid_to, all_rates, current_index):
+    def update_current_price(self):
+        if not self.all_prices:
+            return
+
+        now_utc = datetime.now(timezone.utc)
+        current_rate = None
+
+        for i, rate in enumerate(self.all_prices):
+            valid_from = datetime.fromisoformat(rate['valid_from'].replace('Z', '+00:00'))
+            valid_to = datetime.fromisoformat(rate['valid_to'].replace('Z', '+00:00'))
+
+            if valid_from <= now_utc < valid_to:
+                current_rate = rate
+                break
+        
+        if current_rate:
+            price_inc_vat = current_rate['value_inc_vat']
+            valid_from_utc = datetime.fromisoformat(current_rate['valid_from'].replace('Z', '+00:00'))
+            valid_to_utc = datetime.fromisoformat(current_rate['valid_to'].replace('Z', '+00:00'))
+
+            # Filter prices for the chart to show a limited window (e.g., 48 hours from now)
+            # Start the chart from the beginning of the current 30-minute slot.
+            display_from = valid_from_utc
+            display_to = display_from + timedelta(days=2)
+
+            self.chart_prices = [
+                p for p in self.all_prices
+                if display_from <= datetime.fromisoformat(p['valid_from'].replace('Z', '+00:00')) < display_to
+            ]
+
+            # The current price will always be the first bar in the filtered list.
+            current_index_in_chart = 0
+
+            GLib.idle_add(self.update_display, price_inc_vat, valid_from_utc, valid_to_utc, self.chart_prices, current_index_in_chart)
+        else:
+            GLib.idle_add(self.show_error, "No current price data found for the next 24 hours from current time. This might be a temporary API issue or no rates are published yet.")
+
+
+    def update_display(self, price_inc_vat, valid_from, valid_to, chart_prices, current_index):
         """
         Updates the UI with the fetched price data.
         This method is called on the main GTK thread.
         """
-        self.all_prices = all_rates
         self.current_price_data = {
             'price_inc_vat': price_inc_vat,
             'valid_from': valid_from,
@@ -419,7 +501,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.time_label.set_markup(f"<span size='small'>Last updated: {now.strftime('%H:%M:%S')}</span>")
 
         # Update the price chart with new data.
-        self.price_chart.set_prices(all_rates, current_index)
+        self.price_chart.set_prices(chart_prices, current_index)
 
         # Clear any error messages from the status label.
         self.status_label.set_text("")

@@ -14,6 +14,7 @@ class PriceChartWidget(Gtk.DrawingArea):
         self.prices = []
         self.current_price_index = -1
         self.hovered_index = -1
+        self.margin = 20
 
         # Set a reasonable default size, though the widget will expand/contract with its parent.
         self.set_size_request(600, 200)
@@ -44,15 +45,21 @@ class PriceChartWidget(Gtk.DrawingArea):
         Handles mouse motion events to detect hovering over price bars.
         Updates `hovered_index` and notifies the parent window for detailed display.
         """
-        if not self.prices:
+        if not self.prices or len(self.prices) == 0:
             return
 
         width = self.get_width()
-        if len(self.prices) == 0:
+        chart_width = width - 2 * self.margin
+
+        # Check if the motion is outside the chart's drawing area (within margins).
+        if x < self.margin or x > width - self.margin:
+            if self.hovered_index != -1:
+                self.on_leave(controller) # Use on_leave logic to clear hover state.
             return
 
-        bar_width = width / len(self.prices)
-        new_hovered_index = int(x / bar_width)
+        chart_x = x - self.margin
+        bar_width = chart_width / len(self.prices)
+        new_hovered_index = int(chart_x / bar_width)
 
         if 0 <= new_hovered_index < len(self.prices):
             if new_hovered_index != self.hovered_index:
@@ -85,15 +92,18 @@ class PriceChartWidget(Gtk.DrawingArea):
         """
         Handles click events on the chart. Currently mirrors hover logic but can be expanded.
         """
-        if not self.prices:
+        if not self.prices or len(self.prices) == 0:
             return
 
         width = self.get_width()
-        if len(self.prices) == 0:
-            return
+        chart_width = width - 2 * self.margin
 
-        bar_width = width / len(self.prices)
-        clicked_index = int(x / bar_width)
+        if x < self.margin or x > width - self.margin:
+            return # Click is within the margin, do nothing.
+
+        chart_x = x - self.margin
+        bar_width = chart_width / len(self.prices)
+        clicked_index = int(chart_x / bar_width)
 
         if 0 <= clicked_index < len(self.prices):
             # For this simple app, re-using on_chart_hover for click feedback.
@@ -111,11 +121,9 @@ class PriceChartWidget(Gtk.DrawingArea):
         if not self.prices or len(self.prices) == 0:
             return
 
-        # Calculate chart dimensions and bar width.
-        margin = 20
-        chart_width = width - 2 * margin
-        chart_height = height - 2 * margin
-        bar_width = chart_width / len(self.prices)
+        # Calculate chart dimensions.
+        chart_width = width - 2 * self.margin
+        chart_height = height - 2 * self.margin
 
         # Find min and max prices to scale the chart appropriately.
         prices_values = [p['value_inc_vat'] / 100 for p in self.prices] # Convert p/kWh to £/kWh
@@ -129,25 +137,29 @@ class PriceChartWidget(Gtk.DrawingArea):
         # Determine the Y position of the zero price line.
         if min_price < 0:
             # If negative prices exist, the zero line is proportional.
-            chart_zero_y = margin + chart_height * (max_price / price_range)
+            chart_zero_y = self.margin + chart_height * (max_price / price_range)
         else:
             # If all prices are positive, the zero line is at the bottom of the chart area.
-            chart_zero_y = margin + chart_height
+            chart_zero_y = self.margin + chart_height
 
         # Iterate through prices and draw each bar.
         for i, price_data in enumerate(self.prices):
             price = price_data['value_inc_vat'] / 100
 
-            # Calculate bar position and height based on price relative to min/max and zero line.
-            bar_x = margin + i * bar_width
+            # Calculate bar position and width, rounding to nearest pixel for sharp rendering.
+            bar_x_start = self.margin + (i * chart_width) / len(self.prices)
+            bar_x_end = self.margin + ((i + 1) * chart_width) / len(self.prices)
+            bar_x = round(bar_x_start)
+            bar_width = round(bar_x_end) - bar_x
 
+            # Calculate bar height based on price relative to min/max and zero line.
             if price >= 0:
                 if min_price < 0:
                     bar_height = (price / price_range) * chart_height
                     bar_y = chart_zero_y - bar_height
                 else:
                     bar_height = ((price - min_price) / price_range) * chart_height
-                    bar_y = margin + chart_height - bar_height
+                    bar_y = self.margin + chart_height - bar_height
             else: # Negative price
                 bar_height = abs(price / price_range) * chart_height
                 bar_y = chart_zero_y
@@ -181,15 +193,15 @@ class PriceChartWidget(Gtk.DrawingArea):
                     base_color[2] * 0.8
                 )
 
-            # Draw the filled bar.
-            cr.rectangle(bar_x + 1, bar_y, bar_width - 2, bar_height)
+            # Draw the filled bar with a 1px gap between bars.
+            cr.rectangle(bar_x, bar_y, bar_width - 1, bar_height)
             cr.fill()
 
             # Draw a black outline for the current price bar.
             if i == self.current_price_index:
                 cr.set_source_rgb(0, 0, 0)
                 cr.set_line_width(2)
-                cr.rectangle(bar_x + 1, bar_y, bar_width - 2, bar_height)
+                cr.rectangle(bar_x, bar_y, bar_width - 1, bar_height)
                 cr.stroke()
 
         # Draw time labels at intervals (e.g., every 4 hours).
@@ -203,7 +215,10 @@ class PriceChartWidget(Gtk.DrawingArea):
                     self.prices[i]['valid_from'].replace('Z', '+00:00')
                 ).astimezone().strftime('%H:%M')
 
-                text_x = margin + i * bar_width
+                # Calculate position for the label to be centered under the corresponding bar.
+                bar_x_start = self.margin + (i * chart_width) / len(self.prices)
+                bar_x_end = self.margin + ((i + 1) * chart_width) / len(self.prices)
+                text_x = round((bar_x_start + bar_x_end) / 2)
                 text_y = height - 5
 
                 # Center the text below the bar.
