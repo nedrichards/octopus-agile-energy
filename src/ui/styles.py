@@ -1,37 +1,45 @@
 def get_css():
+    """
+    Returns the application's custom CSS as a string.
+    This allows styles to be loaded dynamically at runtime.
+    """
     return """
-    /* Styling for Adw.StatusPage based on price level */
-    .price-high {
-        color: @error_color; /* Uses LibAdwaita's error color */
-    }
-    .price-medium {
-        color: @warning_color; /* Uses LibAdwaita's warning color */
-    }
-    .price-low {
-        color: @success_color; /* Uses LibAdwaita's success color */
-    }
-    .price-negative {
-        color: @accent_color; /* Uses LibAdwaita's accent color for negative prices */
+    /* Price level styles now target title and description labels for color */
+    .price-negative .title,
+    .price-negative .description {
+        color: #5294e2; /* A pleasant blue for negative prices */
     }
 
-    /* Styling for the persistent status label for errors */
-    .error {
-        color: @error_color;
-        font-weight: bold;
+    .price-low .title,
+    .price-low .description {
+        color: #87cf7d; /* A calm green for low prices */
     }
 
-    /* Style for Gtk.Frame to make it look like a card */
+    .price-medium .title,
+    .price-medium .description {
+        color: #f9a856; /* A warm orange for medium prices */
+    }
+
+    .price-high .title,
+    .price-high .description {
+        color: #e06a5c; /* A soft red for high prices */
+    }
+
     .card {
-        border-radius: 12px; /* Rounded corners */
-        background-color: @card_background_color; /* Use Adwaita card background color */
-        border-width: 1px;
-        border-style: solid;
-        border-color: @border_color; /* Use Adwaita border color */
+        background-color: @window_bg_color;
+        border: 1px solid @window_border_color;
+        border-radius: 12px;
+        padding: 12px;
     }
-    .card label.title {
-        font-weight: bold;
-        padding-top: 10px;
-        padding-bottom: 5px;
-        padding-left: 10px;
+
+    .error {
+        color: @error_fg_color; /* Use Adwaita's standard error color */
+    }
+
+    /* Style for the chart background, giving it a subtle off-white color and border */
+    .chart-background {
+        background-color: alpha(currentColor, 0.05);
+        border: 1px solid alpha(currentColor, 0.1);
+        border-radius: 6px; /* Slightly rounded corners for the chart area */
     }
     """
