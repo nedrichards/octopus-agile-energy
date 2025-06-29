@@ -8,9 +8,8 @@ class CacheManager:
     """
     Manages simple file-based caching for network requests.
     """
-    def __init__(self, cache_dir_name="octopus-agile-app", default_ttl_seconds=300): # Default TTL 5 minutes
+    def __init__(self, cache_dir_name="octopus-agile-app"):
         self.cache_dir = os.path.join(GLib.get_user_cache_dir(), cache_dir_name)
-        self.default_ttl = default_ttl_seconds
         self._ensure_cache_dir()
 
     def _ensure_cache_dir(self):

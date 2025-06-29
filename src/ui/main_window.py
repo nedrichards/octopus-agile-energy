@@ -3,7 +3,6 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GLib, Gio
 import requests
-import json
 from datetime import datetime, timezone, timedelta
 import threading
 from .price_chart import PriceChartWidget
@@ -24,7 +23,6 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.all_prices = []
         self.chart_prices = []
-        self.current_price_data = None
         self.cache_manager = CacheManager() # Initialize CacheManager
 
         # Initialize Gio.Settings
