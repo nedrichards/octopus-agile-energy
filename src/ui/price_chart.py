@@ -129,7 +129,11 @@ class PriceChartWidget(Gtk.DrawingArea):
         prices_values = [p['value_inc_vat'] / 100 for p in self.prices] # Convert p/kWh to £/kWh
         min_price = min(prices_values)
         max_price = max(prices_values)
-        price_range = max_price - min_price
+
+        # The bottom of our chart should be 0 if all prices are positive, else it's min_price.
+        # This ensures that even the lowest positive price has a visible bar.
+        display_min_price = 0 if min_price >= 0 else min_price
+        price_range = max_price - display_min_price
 
         if price_range == 0:
             price_range = 1 # Avoid division by zero if all prices are the same.
@@ -152,15 +156,13 @@ class PriceChartWidget(Gtk.DrawingArea):
             bar_x = round(bar_x_start)
             bar_width = round(bar_x_end) - bar_x
 
-            # Calculate bar height based on price relative to min/max and zero line.
+            # Calculate bar height based on price.
             if price >= 0:
-                if min_price < 0:
-                    bar_height = (price / price_range) * chart_height
-                    bar_y = chart_zero_y - bar_height
-                else:
-                    bar_height = ((price - min_price) / price_range) * chart_height
-                    bar_y = self.margin + chart_height - bar_height
+                # For positive prices, height is proportional to price, drawn from the zero line up.
+                bar_height = (price / price_range) * chart_height
+                bar_y = chart_zero_y - bar_height
             else: # Negative price
+                # For negative prices, bar starts at the zero line and goes down.
                 bar_height = abs(price / price_range) * chart_height
                 bar_y = chart_zero_y
 
