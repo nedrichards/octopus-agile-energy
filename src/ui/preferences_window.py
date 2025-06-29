@@ -4,6 +4,7 @@ gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GLib
 import requests
 import threading
+import time
 from ..utils import CacheManager
 
 class PreferencesWindow(Adw.PreferencesWindow):
@@ -96,9 +97,11 @@ class PreferencesWindow(Adw.PreferencesWindow):
         url = "https://api.octopus.energy/v1/products/"
 
         try:
-            data, from_cache = self.cache_manager.get(cache_key, max_age_seconds=3600 * 24) # Cache for 24 hours
-            if from_cache:
+            cached_data, cache_mtime = self.cache_manager.get(cache_key)
+            # Cache is valid for 24 hours (86400 seconds)
+            if cached_data and (time.time() - cache_mtime) < 86400:
                 print("DEBUG: All products data loaded from cache.")
+                data = cached_data
             else:
                 response = requests.get(url, timeout=10)
                 response.raise_for_status()
