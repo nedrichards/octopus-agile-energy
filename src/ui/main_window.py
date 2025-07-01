@@ -141,6 +141,7 @@ class MainWindow(Adw.ApplicationWindow):
         about_dialog = Adw.AboutWindow(
             transient_for=self,
             application_name="Octopus Agile Prices",
+            application_icon="com.nedrichards.octopusagile",
             developer_name="Nick Richards",
             version="1.0.0",
             website="https://nedrichards.com",
