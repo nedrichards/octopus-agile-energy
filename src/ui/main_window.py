@@ -30,6 +30,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.settings.connect("changed::selected-tariff-code", self.on_setting_changed)
         self.settings.connect("changed::selected-region-code", self.on_setting_changed)
 
+        self.connect("notify::visible", self.on_visibility_change)
+
         self.create_actions()
         self.setup_ui()
         self.refresh_price()
@@ -149,6 +151,10 @@ class MainWindow(Adw.ApplicationWindow):
             license_type=Gtk.License.GPL_3_0
         )
         about_dialog.present()
+
+    def on_visibility_change(self, *args):
+        if self.is_visible():
+            self.refresh_price()
 
     def on_quit_action(self, action, param):
         """
