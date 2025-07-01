@@ -18,8 +18,8 @@ class MainWindow(Adw.ApplicationWindow):
         super().__init__(**kwargs)
 
         self.set_title("Octopus Agile Price Tracker")
-        self.set_default_size(700, 700)
-        self.set_size_request(600, 600)
+        self.set_default_size(600, 600)
+        self.set_size_request(700, 700)
 
         self.all_prices = []
         self.chart_prices = []
@@ -233,6 +233,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.time_label = Gtk.Label.new()
         self.time_label.set_markup("<span size='small'>Last updated: Never</span>")
         self.time_label.set_halign(Gtk.Align.END)
+        self.time_label.set_margin_end(10)
         overall_content_box.append(self.time_label)
 
         # Status label for persistent error messages.

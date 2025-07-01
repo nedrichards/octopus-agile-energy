@@ -42,5 +42,5 @@ if __name__ == '__main__':
     resource = Gio.Resource.load(os.path.join(pkgdatadir, 'octopusagile.gresource'))
     resource._register()
 
-    from octopusagile import main
-    sys.exit(main.main(VERSION))
+    from octopusagile.main import main
+    sys.exit(main(VERSION))

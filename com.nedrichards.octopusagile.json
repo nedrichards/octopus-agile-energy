@@ -3,7 +3,7 @@
     "runtime" : "org.gnome.Platform",
     "runtime-version" : "47",
     "sdk" : "org.gnome.Sdk",
-    "command" : "/app/bin/octopusagile",
+    "command" : "octopusagile",
     "finish-args" : [
         "--share=network",
         "--share=ipc",
