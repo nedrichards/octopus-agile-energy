@@ -14,7 +14,7 @@ conf.set('localedir', localedir)
 
 configure_file(
   input: 'octopusagile.in',
-  output: 'octopusagile',
+  output: 'com.nedrichards.octopusagile',
   configuration: conf,
   install: true,
   install_dir: get_option('bindir')
