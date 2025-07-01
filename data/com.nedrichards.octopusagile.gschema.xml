@@ -11,5 +11,20 @@
       <summary>Selected Octopus Agile Region Code</summary>
       <description>The region code (e.g., '_A', '_B') for the selected tariff. If empty, the app will attempt to auto-detect a default.</description>
     </key>
+    <key name="window-width" type="i">
+      <default>700</default>
+      <summary>Window width</summary>
+      <description>The width of the application window.</description>
+    </key>
+    <key name="window-height" type="i">
+      <default>700</default>
+      <summary>Window height</summary>
+      <description>The height of the application window.</description>
+    </key>
+    <key name="window-maximized" type="b">
+      <default>false</default>
+      <summary>Window maximized</summary>
+      <description>Whether the application window is maximized.</description>
+    </key>
   </schema>
 </schemalist>

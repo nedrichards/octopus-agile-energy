@@ -30,6 +30,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.settings.connect("changed::selected-tariff-code", self.on_setting_changed)
         self.settings.connect("changed::selected-region-code", self.on_setting_changed)
 
+        self.settings.bind("window-width", self, "default-width", Gio.SettingsBindFlags.DEFAULT)
+        self.settings.bind("window-height", self, "default-height", Gio.SettingsBindFlags.DEFAULT)
+        self.settings.bind("window-maximized", self, "maximized", Gio.SettingsBindFlags.DEFAULT)
+
         self.connect("notify::visible", self.on_visibility_change)
 
         self.create_actions()
