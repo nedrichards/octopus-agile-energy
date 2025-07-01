@@ -4,13 +4,13 @@
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
 
-  <name>Octopus Agile</name>
-  <summary>Find current electricity prices</summary>
+  <name>Octopus Agile Prices</name>
+  <summary>Track live Octopus Energy Agile electricity prices</summary>
   <description>
     <p>Half hourly electricity prices for the next 24 hours for users of Octopus Energy's agile electricity tarriff.</p>
   </description>
 
-  <developer id="tld.vendor">
+  <developer id="com.nedrichards">
     <name>Nick Richards</name>
   </developer>
 
@@ -30,18 +30,29 @@
 
   <!-- Applications should set a brand color in both light and dark variants like so -->
   <branding>
-    <color type="primary" scheme_preference="light">#ff00ff</color>
-    <color type="primary" scheme_preference="dark">#993d3d</color>
+    <color type="primary" scheme_preference="light">#4e1a58</color>
+    <color type="primary" scheme_preference="dark">#dcd0de</color>
   </branding>
 
   <screenshots>
     <screenshot type="default">
-      <image>https://github.com/nedrichards/octopus-agile-energy/blob/main/data/octopus-agile-screenshot.png</image>
+      <image>https://raw.githubusercontent.com/nedrichards/octopus-agile-energy/main/data/octopus-agile-screenshot.png</image>
       <caption>Current and next day prices</caption>
     </screenshot>
   </screenshots>
 
   <releases>
+    <release version="1.0.2" date="2025-07-01">
+      <description translate="no">
+        <p>This release includes several bug fixes and improvements to the user experience.</p>
+        <ul>
+          <li>Fixed an issue where the application would not launch from the desktop.</li>
+          <li>The application now automatically refreshes when the window becomes visible.</li>
+          <li>The application icon is now displayed in the about dialog.</li>
+          <li>The last updated time is now correctly aligned.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.1" date="2025-06-25">
       <description translate="no">
         <p>Initial version</p>
