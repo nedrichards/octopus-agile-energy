@@ -1,9 +1,9 @@
 {
     "id" : "com.nedrichards.octopusagile",
     "runtime" : "org.gnome.Platform",
-    "runtime-version" : "47",
+    "runtime-version" : "48",
     "sdk" : "org.gnome.Sdk",
-    "command" : "octopusagile",
+    "command" : "com.nedrichards.octopusagile",
     "finish-args" : [
         "--share=network",
         "--share=ipc",

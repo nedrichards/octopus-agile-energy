@@ -282,12 +282,11 @@ class MainWindow(Adw.ApplicationWindow):
         """
         self.on_chart_hover(index)
 
-    def on_refresh_clicked(self, button):
+    def on_refresh_clicked(self, *args):
         """
         Handles the refresh button click, initiating data fetch and disabling buttons.
         This action forces a cache bypass.
         """
-        button.set_sensitive(False)
         self.header_refresh_button.set_sensitive(False)
         self.refresh_price(force=True)
 
