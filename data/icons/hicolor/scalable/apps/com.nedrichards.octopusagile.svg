@@ -1,48 +1,17 @@
-<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+<svg width="512" height="512" viewBox="0 0 135.467 135.467" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="bg-grad" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" style="stop-color:#4c68d7;"/>
-      <stop offset="100%" style="stop-color:#3a4f9d;"/>
+    <linearGradient id="bg-gradient-2" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#4CAF50"/>
+      <stop offset="100%" stop-color="#2196F3"/>
     </linearGradient>
-    <linearGradient id="octopus-grad" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" style="stop-color:#a29bfe;"/>
-      <stop offset="100%" style="stop-color:#6c5ce7;"/>
-    </linearGradient>
-    <filter id="drop-shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur in="SourceAlpha" stdDeviation="3"/>
-      <feOffset dx="2" dy="4"/>
-      <feComponentTransfer>
-        <feFuncA type="linear" slope="0.3"/>
-      </feComponentTransfer>
-      <feMerge>
-        <feMergeNode/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
   </defs>
 
   <!-- Background Squircle -->
-  <path d="M 128,20 C 83,20 45,28 45,70 C 45,110 20,128 20,128 C 20,128 45,146 45,186 C 45,228 83,236 128,236 C 173,236 211,228 211,186 C 211,146 236,128 236,128 C 236,128 211,110 211,70 C 211,28 173,20 128,20 Z" fill="url(#bg-grad)"/>
+  <path d="M 67.733 0 C 30.326 0 0 30.326 0 67.733 C 0 105.141 30.326 135.467 67.733 135.467 C 105.141 135.467 135.467 105.141 135.467 67.733 C 135.467 30.326 105.141 0 67.733 0 Z" fill="url(#bg-gradient-2)"/>
 
-  <!-- Octopus -->
-  <g transform="translate(40, 45) scale(0.75)" filter="url(#drop-shadow)">
-    <!-- Head -->
-    <path d="M128,60 C80,60 40,100 40,140 C40,160 50,180 70,190 L186,190 C206,180 216,160 216,140 C216,100 176,60 128,60 Z" fill="url(#octopus-grad)"/>
-    
-    <!-- Eyes -->
-    <circle cx="100" cy="130" r="14" fill="white"/>
-    <circle cx="102" cy="132" r="7" fill="#2c3e50"/>
-    <circle cx="156" cy="130" r="14" fill="white"/>
-    <circle cx="158" cy="132" r="7" fill="#2c3e50"/>
-
-    <!-- Smile -->
-    <path d="M115,160 Q128,175 141,160" stroke="white" stroke-width="4" fill="none" stroke-linecap="round"/>
-
-    <!-- Tentacles -->
-    <path d="M 70,190 Q 50,210 60,240" stroke="#8e44ad" stroke-width="12" fill="none" stroke-linecap="round"/>
-    <path d="M 95,190 Q 85,220 95,250" stroke="#9b59b6" stroke-width="12" fill="none" stroke-linecap="round"/>
-    <path d="M 128,190 Q 128,230 118,255" stroke="#8e44ad" stroke-width="12" fill="none" stroke-linecap="round"/>
-    <path d="M 161,190 Q 171,220 161,250" stroke="#9b59b6" stroke-width="12" fill="none" stroke-linecap="round"/>
-    <path d="M 186,190 Q 206,210 196,240" stroke="#8e44ad" stroke-width="12" fill="none" stroke-linecap="round"/>
-  </g>
+  <!-- Price Graph with Lightning Bolt -->
+  <g transform="translate(15, 15)">
+    <path d="M 10,70 L 25,50 L 40,80 L 55,30 L 70,60 L 85,40 L 100,70" fill="none" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+    <polygon points="50,45 55,30 60,45 55,40" fill="#FFFFFF"/>
+    </g>
 </svg>
