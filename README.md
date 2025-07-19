@@ -71,3 +71,7 @@ The application will automatically refresh the price data when settings are chan
 ## License
 
 This project is licensed under the GNU General Public License v3.0 or later (GPL-3.0-or-later).
+
+---
+
+Co-authored with [Gemini](https://github.com/google-gemini/gemini-cli).
