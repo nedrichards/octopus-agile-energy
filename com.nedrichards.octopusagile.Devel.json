@@ -1,9 +1,12 @@
 {
-    "id" : "com.nedrichards.octopusagile",
+    "id" : "com.nedrichards.octopusagile.Devel",
+    "desktop-file-name-suffix" : " (Dev)",
     "runtime" : "org.gnome.Platform",
     "runtime-version" : "48",
     "sdk" : "org.gnome.Sdk",
     "command" : "com.nedrichards.octopusagile",
+    "rename-desktop-file" : "com.nedrichards.octopusagile-dev.desktop",
+    "rename-icon" : "com.nedrichards.octopusagile-dev",
     "finish-args" : [
         "--share=network",
         "--share=ipc",
@@ -64,8 +67,7 @@
             "sources" : [
                 {
                     "type" : "git",
-                    "url" : "https://github.com/nedrichards/octopus-agile-energy.git",
-                    "commit" : "4a4d2be123b7885affcfdccd686fffba72033c86"
+                    "url" : "https://github.com/nedrichards/octopus-agile-energy.git"
                 }
             ]
         }
