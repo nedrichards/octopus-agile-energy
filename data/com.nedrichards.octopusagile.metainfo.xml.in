@@ -5,9 +5,9 @@
   <project_license>GPL-3.0-or-later</project_license>
 
   <name>Octopus Agile Prices</name>
-  <summary>Track live Octopus Energy Agile electricity prices</summary>
+  <summary>Track Octopus electricity prices</summary>
   <description>
-    <p>Half hourly electricity prices for the next 24 hours for users of Octopus Energy's agile electricity tarriff.</p>
+    <p>Half hourly electricity prices for the next 24 hours for users of Octopus Energy's agile tarriff.</p>
   </description>
 
   <developer id="com.nedrichards">
