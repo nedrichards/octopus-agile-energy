@@ -42,6 +42,11 @@
   </screenshots>
 
   <releases>
+    <release version="1.0.3" date="2025-07-27">
+      <description translate="no">
+        <p>Fixes contrast of text in dark mode.</p>
+      </description>
+    </release>
     <release version="1.0.2" date="2025-07-01">
       <description translate="no">
         <p>This release includes several bug fixes and improvements to the user experience.</p>

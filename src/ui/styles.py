@@ -7,23 +7,22 @@ def get_css():
     /* Price level styles now target title and description labels for color */
     .price-negative .title,
     .price-negative .description {
-        color: #5294e2; /* A pleasant blue for negative prices */
+        color: @blue_4;
     }
 
     .price-low .title,
     .price-low .description {
-        color: #87cf7d; /* A calm green for low prices */
+        color: @green_4;
     }
 
     .price-medium .title,
     .price-medium .description {
-        color: #f9a856; /* A warm orange for medium prices */
+        color: @orange_3;
     }
 
     .price-high .title,
     .price-high .description {
-        color: #e06a5c; /* A soft red for high prices */
-    }
+        color: @red_4;
 
     .card {
         background-color: @window_bg_color;

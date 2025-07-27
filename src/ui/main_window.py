@@ -444,6 +444,6 @@ class MainWindow(Adw.ApplicationWindow):
         """
         self.price_card.set_title("Error")
         self.price_card.set_description("Could not fetch price data.")
-        self.status_label.set_markup(f"<span foreground='red'>{error_message}</span>")
+        self.status_label.set_markup(f"<span foreground='{self.get_style_context().get_color().to_string()}'>{error_message}</span>")
         self.toast_overlay.add_toast(Adw.Toast.new(f"Error: {error_message}"))
         self.header_refresh_button.set_sensitive(True)

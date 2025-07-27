@@ -1,6 +1,6 @@
 import gi
 gi.require_version('Gtk', '4.0')
-from gi.repository import Gtk
+from gi.repository import Gtk, Gdk
 from datetime import datetime
 import cairo
 
@@ -146,12 +146,16 @@ class PriceChartWidget(Gtk.DrawingArea):
             cr.fill()
 
             if i == self.current_price_index:
-                cr.set_source_rgb(0, 0, 0)
+                style_context = self.get_style_context()
+                color = style_context.get_color()
+                cr.set_source_rgba(color.red, color.green, color.blue, color.alpha)
                 cr.set_line_width(2)
                 cr.rectangle(bar_x, bar_y, bar_width - 1, bar_height)
                 cr.stroke()
 
-        cr.set_source_rgb(0, 0, 0)
+        style_context = self.get_style_context()
+        color = style_context.get_color()
+        cr.set_source_rgba(color.red, color.green, color.blue, color.alpha)
         cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
         cr.set_font_size(10)
 
