@@ -23,6 +23,7 @@ def get_css():
     .price-high .title,
     .price-high .description {
         color: @red_4;
+    }
 
     .card {
         background-color: @window_bg_color;
