@@ -42,6 +42,17 @@
   </screenshots>
 
   <releases>
+    <release version="1.0.4" date="2025-08-02">
+      <description translate="no">
+        <p>This release includes several bug fixes and improvements to the user experience.</p>
+        <ul>
+          <li>The application will now open the preferences window on first run to allow the user to select a tariff.</li>
+          <li>The main window will now refresh when the preferences window is closed.</li>
+          <li>The error message is now cleared when a new refresh is initiated.</li>
+          <li>The cache is now cleaned up on startup.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.3" date="2025-07-27">
       <description translate="no">
         <p>Fixes contrast of text in dark mode.</p>
