@@ -71,3 +71,5 @@ The following files need to be updated for each new release:
     *   The `version` field should be updated to match the new version number.
 *   `com.nedrichards.octopusagile.json`:
     *   The `commit` field should be updated to the latest commit hash.
+*   `src/ui/main_window.py`:
+    *   The `version` field in the `AboutWindow` should be updated to match the new version number.
