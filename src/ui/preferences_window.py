@@ -44,6 +44,8 @@ class PreferencesWindow(Adw.PreferencesWindow):
         self.setup_ui()
         self.load_tariffs_and_regions() # Initiate loading of tariff data
 
+        self.connect("close-request", self.on_close_request)
+
     def setup_ui(self):
         page = Adw.PreferencesPage.new()
         self.add(page)
@@ -61,7 +63,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
         # Use new_from_strings directly with the list of full region names
         self.region_dropdown = Gtk.DropDown.new_from_strings(self.all_regions)
         self.region_dropdown.set_hexpand(True)
-        self.region_dropdown.connect("notify::selected-item", self.on_region_selected)
+        self.region_handler_id = self.region_dropdown.connect("notify::selected-item", self.on_region_selected)
         self.region_row.add_suffix(self.region_dropdown)
 
         # Tariff selection
@@ -71,7 +73,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
         self.tariff_dropdown = Gtk.DropDown.new_from_strings(["Loading..."]) # Placeholder
         self.tariff_dropdown.set_hexpand(True)
-        self.tariff_dropdown.connect("notify::selected-item", self.on_tariff_selected)
+        self.tariff_handler_id = self.tariff_dropdown.connect("notify::selected-item", self.on_tariff_selected)
         self.tariff_row.add_suffix(self.tariff_dropdown)
 
         self.present()
@@ -120,7 +122,20 @@ class PreferencesWindow(Adw.PreferencesWindow):
                 GLib.idle_add(self._show_load_error, "No active Agile tariff found.")
                 return
 
-            self._process_agile_tariffs(agile_product)
+            product_url = f"https://api.octopus.energy/v1/products/{agile_product['code']}/"
+            product_cache_key = f"octopus_product_{agile_product['code']}"
+            cached_product_data, product_cache_mtime = self.cache_manager.get(product_cache_key)
+            if cached_product_data and (time.time() - product_cache_mtime) < 86400:
+                print(f"DEBUG: Product {agile_product['code']} data loaded from cache.")
+                product_details = cached_product_data
+            else:
+                product_response = requests.get(product_url, timeout=10)
+                product_response.raise_for_status()
+                product_details = product_response.json()
+                self.cache_manager.set(product_cache_key, product_details)
+                print(f"DEBUG: Product {agile_product['code']} data fetched from API and cached.")
+
+            self._process_agile_tariffs(product_details)
 
         except requests.exceptions.RequestException as e:
             GLib.idle_add(self._show_load_error, f"Network error: {e}. Cannot load tariffs.")
@@ -134,20 +149,26 @@ class PreferencesWindow(Adw.PreferencesWindow):
         region_to_tariffs_map = {code: [] for code in self.REGION_CODE_TO_NAME.keys()}
         
         product_name = product_data.get('full_name', 'Agile Tariff')
-        product_code = product_data.get('code')
 
-        # Generate tariff codes for each region based on the product code
-        for region_code, region_name in self.REGION_CODE_TO_NAME.items():
-            tariff_code = f"E-1R-{product_code}-{region_code.lstrip('_')}"
-            full_name = f"{product_name} ({region_name})"
-            region_to_tariffs_map[region_code].append({
-                'code': tariff_code,
-                'full_name': full_name
-            })
-
-        # Sort tariffs within each region by their full name
-        for region_code in region_to_tariffs_map:
-            region_to_tariffs_map[region_code] = sorted(region_to_tariffs_map[region_code], key=lambda x: x['full_name'])
+        tariffs = product_data.get('single_register_electricity_tariffs', {})
+        for region_code, tariff_types in tariffs.items():
+            if region_code in self.REGION_CODE_TO_NAME:
+                region_name = self.REGION_CODE_TO_NAME[region_code]
+                tariff_code = None
+                if 'direct_debit_monthly' in tariff_types and 'code' in tariff_types['direct_debit_monthly']:
+                     tariff_code = tariff_types['direct_debit_monthly']['code']
+                else: 
+                    for payment_method in tariff_types.values():
+                        if isinstance(payment_method, dict) and 'code' in payment_method:
+                            tariff_code = payment_method['code']
+                            break
+                
+                if tariff_code:
+                    full_name = f"{product_name} ({region_name})"
+                    region_to_tariffs_map[region_code].append({
+                        'code': tariff_code,
+                        'full_name': full_name
+                    })
 
         self.region_to_tariffs = region_to_tariffs_map
         GLib.idle_add(self._update_dropdowns_ui)
@@ -157,51 +178,48 @@ class PreferencesWindow(Adw.PreferencesWindow):
         Updates the UI dropdowns with the fetched regions and tariffs.
         This must run on the main GTK thread.
         """
-        # Update Region DropDown (already populated from hardcoded list, just set selection)
+        self.region_dropdown.handler_block(self.region_handler_id)
+        self.tariff_dropdown.handler_block(self.tariff_handler_id)
+
         self.region_dropdown.set_sensitive(True)
         self.region_row.set_subtitle("Select your region.")
 
-        # Set initial selection for region
         selected_region_code = self.settings.get_string("selected-region-code")
         selected_display_name = None
 
         if selected_region_code and selected_region_code in self.REGION_CODE_TO_NAME:
             selected_display_name = self.REGION_CODE_TO_NAME[selected_region_code]
         else:
-            # Default to '_A' (Eastern England) if nothing saved or saved region code not found
             default_region_code = '_A'
             selected_display_name = self.REGION_CODE_TO_NAME.get(default_region_code, self.all_regions[0] if self.all_regions else None)
-            # If we defaulted, also update the setting
             if selected_display_name and selected_region_code != default_region_code:
                 self.settings.set_string("selected-region-code", default_region_code)
-
 
         if selected_display_name and selected_display_name in self.all_regions:
             index = self.all_regions.index(selected_display_name)
             self.region_dropdown.set_selected(index)
         elif self.all_regions:
-            # Fallback to the very first region if the default ('_A') is somehow not available
             self.region_dropdown.set_selected(0)
             self.settings.set_string("selected-region-code", self.REGION_NAME_TO_CODE[self.all_regions[0]])
         else:
-            self.region_row.set_subtitle("No regions found (this should not happen with hardcoded regions).")
+            self.region_row.set_subtitle("No regions found.")
             self.region_dropdown.set_sensitive(False)
 
-        # Update Tariff DropDown based on current region selection (handled by on_region_selected implicitly)
         self._update_tariff_dropdown_for_region()
         self.tariff_dropdown.set_sensitive(True)
         self.tariff_row.set_subtitle("Select your tariff.")
+
+        self.region_dropdown.handler_unblock(self.region_handler_id)
+        self.tariff_dropdown.handler_unblock(self.tariff_handler_id)
 
     def on_region_selected(self, dropdown, pspec):
         """
         Callback when a new region is selected. Updates the tariff dropdown and saves the setting.
         """
-        # Get the displayed region name from the dropdown
         selected_display_name = dropdown.get_selected_item().get_string() if dropdown.get_selected_item() else ""
-        # Convert it back to the region code to save in settings
         selected_region_code = self.REGION_NAME_TO_CODE.get(selected_display_name, "")
         self.settings.set_string("selected-region-code", selected_region_code)
-        self._update_tariff_dropdown_for_region() # Update tariffs for the newly selected region
+        self._update_tariff_dropdown_for_region()
 
     def on_tariff_selected(self, dropdown, pspec):
         """
@@ -221,7 +239,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
             selected_tariff_code = tariffs_for_region[selected_index]['code']
             self.settings.set_string("selected-tariff-code", selected_tariff_code)
         else:
-            self.settings.set_string("selected-tariff-code", "") # Clear if invalid selection
+            self.settings.set_string("selected-tariff-code", "")
 
     def _update_tariff_dropdown_for_region(self):
         """
@@ -240,7 +258,6 @@ class PreferencesWindow(Adw.PreferencesWindow):
             self.tariff_dropdown.set_sensitive(True)
             self.tariff_row.set_subtitle("Select your tariff.")
 
-            # Try to select previously saved tariff for this region, or default to first.
             saved_tariff_code = self.settings.get_string("selected-tariff-code")
             if saved_tariff_code:
                 for i, tariff_data in enumerate(tariffs):
@@ -272,3 +289,10 @@ class PreferencesWindow(Adw.PreferencesWindow):
         self.tariff_row.set_subtitle(message)
         self.region_dropdown.set_sensitive(False)
         self.tariff_dropdown.set_sensitive(False)
+
+    def on_close_request(self, window):
+        """
+        Handles the close request by hiding the window instead of destroying it.
+        """
+        self.hide()
+        return True

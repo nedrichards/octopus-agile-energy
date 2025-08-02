@@ -34,6 +34,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.settings.bind("window-height", self, "default-height", Gio.SettingsBindFlags.DEFAULT)
         self.settings.bind("window-maximized", self, "maximized", Gio.SettingsBindFlags.DEFAULT)
 
+        self.preferences_window = None
+
         self.connect("notify::visible", self.on_visibility_change)
 
         self.create_actions()
@@ -167,16 +169,36 @@ class MainWindow(Adw.ApplicationWindow):
         self.get_application().quit()
 
     def on_preferences_action(self, action, param):
-        """
+        """ 
         Opens the Preferences window.
         """
-        # Pass self.settings to the PreferencesWindow so it can read/write settings
-        PreferencesWindow(settings=self.settings, parent=self)
+        if not self.preferences_window:
+            self.preferences_window = PreferencesWindow(settings=self.settings, parent=self)
+            self.preferences_window.connect("hide", self.on_preferences_hidden)
+
+        self.preferences_window.present()
+
+    def on_preferences_hidden(self, window):
+        """
+        Handles the closing of the preferences window.
+        """
+        self.refresh_price(force=True)
+
+    def on_first_run(self):
+        """ 
+        Shows a welcome message and opens the preferences window.
+        """
+        self.price_card.set_title("Welcome to Octopus Agile Prices")
+        self.price_card.set_description("Please select your tariff in the preferences.")
+        self.on_preferences_action(None, None)
 
     def on_setting_changed(self, settings, key):
         """
         Callback for when a GSettings key changes. Triggers a price refresh.
         """
+        if self.preferences_window:
+            return
+
         print(f"DEBUG: Setting '{key}' changed. Refreshing price data.")
         self.refresh_price()
 
@@ -313,7 +335,7 @@ class MainWindow(Adw.ApplicationWindow):
         """
         selected_tariff_code = self.settings.get_string("selected-tariff-code")
         if not selected_tariff_code:
-            GLib.idle_add(self.show_error, "No tariff selected. Please go to Preferences.")
+            GLib.idle_add(self.on_first_run)
             return
 
         try:
