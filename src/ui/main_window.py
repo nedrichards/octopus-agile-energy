@@ -317,9 +317,9 @@ class MainWindow(Adw.ApplicationWindow):
         Initiates the price data fetching process in a separate thread.
         Sets the UI to a loading state.
         """
+        self.status_label.set_text("")
         self.price_card.set_title("Loading...")
         self.price_card.set_description("Fetching current electricity price")
-        self.status_label.set_text("")
         self.price_card.remove_css_class("price-high")
         self.price_card.remove_css_class("price-medium")
         self.price_card.remove_css_class("price-low")

@@ -8,9 +8,11 @@ class CacheManager:
     """
     Manages simple file-based caching for network requests.
     """
-    def __init__(self, cache_dir_name="octopus-agile-app"):
+    def __init__(self, cache_dir_name="octopus-agile-app", cache_expiry_days=7):
         self.cache_dir = os.path.join(GLib.get_user_cache_dir(), cache_dir_name)
+        self.cache_expiry_days = cache_expiry_days
         self._ensure_cache_dir()
+        self.cleanup()
 
     def _ensure_cache_dir(self):
         """Ensures the cache directory exists."""
@@ -55,3 +57,18 @@ class CacheManager:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except (IOError, OSError) as e:
             print(f"Cache write error for key '{key}': {e}")
+
+    def cleanup(self):
+        """Removes cache files older than the specified expiry days."""
+        if not os.path.exists(self.cache_dir):
+            return
+
+        cutoff = time.time() - (self.cache_expiry_days * 86400)
+        for filename in os.listdir(self.cache_dir):
+            filepath = os.path.join(self.cache_dir, filename)
+            try:
+                if os.path.isfile(filepath) and os.path.getmtime(filepath) < cutoff:
+                    os.remove(filepath)
+                    print(f"Removed expired cache file: {filename}")
+            except OSError as e:
+                print(f"Error removing cache file {filepath}: {e}")
