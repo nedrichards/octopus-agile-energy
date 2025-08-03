@@ -7,7 +7,7 @@
   <name>Octopus Agile Prices</name>
   <summary>Track Octopus electricity prices</summary>
   <description>
-    <p>Half hourly electricity prices for the next 24 hours for users of Octopus Energy's agile tarriff.</p>
+    <p>Half hourly electricity prices for the next 24 hours for users of Octopus Energy's agile tariff. This application is only relevant for people in the UK,</p>
   </description>
 
   <developer id="com.nedrichards">
