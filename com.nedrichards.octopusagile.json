@@ -1,7 +1,7 @@
 {
     "id" : "com.nedrichards.octopusagile",
     "runtime" : "org.gnome.Platform",
-    "runtime-version" : "48",
+    "runtime-version" : "49",
     "sdk" : "org.gnome.Sdk",
     "command" : "com.nedrichards.octopusagile",
     "finish-args" : [

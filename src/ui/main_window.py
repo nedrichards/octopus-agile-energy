@@ -7,6 +7,7 @@ from datetime import datetime, timezone, timedelta
 import threading
 from .price_chart import PriceChartWidget
 from .preferences_window import PreferencesWindow
+from .custom_spin_button import CustomSpinButton
 from ..utils import CacheManager
 
 class MainWindow(Adw.ApplicationWindow):
@@ -18,8 +19,7 @@ class MainWindow(Adw.ApplicationWindow):
         super().__init__(**kwargs)
 
         self.set_title("Octopus Agile Price Tracker")
-        self.set_default_size(600, 600)
-        self.set_size_request(700, 700)
+        self.set_size_request(700, 900)
 
         self.all_prices = []
         self.chart_prices = []
@@ -35,6 +35,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.settings.bind("window-maximized", self, "maximized", Gio.SettingsBindFlags.DEFAULT)
 
         self.preferences_window = None
+        self.timer_id = None
+        self.best_slot_start_time = None
+        self.is_first_expansion = True
 
         self.connect("notify::visible", self.on_visibility_change)
 
@@ -262,6 +265,50 @@ class MainWindow(Adw.ApplicationWindow):
 
         overall_content_box.append(chart_box)
 
+        # --- New section for finding the best slot ---
+        expander_group = Adw.PreferencesGroup()
+        overall_content_box.append(expander_group)
+
+        self.expander_row = Adw.ExpanderRow()
+        self.expander_row.set_title("Find Cheapest Usage Slot")
+        self.expander_row.set_subtitle("Find the cheapest time to use electricity")
+        self.expander_row.connect("notify::expanded", self.on_expander_row_activated)
+        expander_group.add(self.expander_row)
+
+        # --- Duration input ---
+        self.duration_row = Adw.ActionRow.new()
+        self.duration_row.set_title("Usage Duration")
+        self.duration_spin_button = CustomSpinButton(min_val=1, max_val=24, step=1)
+        self.duration_spin_button.set_value(1)
+        self.duration_row.add_suffix(self.duration_spin_button)
+        self.duration_spin_button.connect('value-changed', self.on_find_cheapest_slot_triggered)
+        self.expander_row.add_row(self.duration_row)
+
+        # --- Start within input ---
+        self.start_within_row = Adw.ActionRow.new()
+        self.start_within_row.set_title("Start Within")
+        self.start_within_spin_button = CustomSpinButton(min_val=1, max_val=24, step=1)
+        self.start_within_spin_button.set_value(8)
+        self.start_within_row.add_suffix(self.start_within_spin_button)
+        self.start_within_spin_button.connect('value-changed', self.on_find_cheapest_slot_triggered)
+        self.expander_row.add_row(self.start_within_row)
+
+        # --- Result rows ---
+        self.best_slot_result_row = Adw.ActionRow.new()
+        self.best_slot_result_row.set_title("Best time to start")
+        self.best_slot_result_label = Gtk.Label.new()
+        self.best_slot_result_row.add_suffix(self.best_slot_result_label)
+        self.best_slot_result_row.set_visible(False)
+        self.expander_row.add_row(self.best_slot_result_row)
+
+        self.timer_row = Adw.ActionRow.new()
+        self.timer_row.set_title("Countdown")
+        self.timer_label = Gtk.Label.new()
+        self.timer_row.add_suffix(self.timer_label)
+        self.timer_row.set_visible(False)
+        self.expander_row.add_row(self.timer_row)
+        # --- End of new section ---
+
         self.time_label = Gtk.Label.new()
         self.time_label.set_markup("<span size='small'>Last updated: Never</span>")
         self.time_label.set_halign(Gtk.Align.END)
@@ -311,6 +358,82 @@ class MainWindow(Adw.ApplicationWindow):
         """
         self.header_refresh_button.set_sensitive(False)
         self.refresh_price(force=True)
+
+    def on_find_cheapest_slot_triggered(self, spin_button):
+        duration_hours = self.duration_spin_button.get_value_as_int()
+        start_within_hours = self.start_within_spin_button.get_value_as_int()
+        self.find_cheapest_slot(duration_hours, start_within_hours)
+
+    def on_expander_row_activated(self, expander_row, param):
+        if expander_row.get_expanded() and self.is_first_expansion:
+            self.is_first_expansion = False
+            self.on_find_cheapest_slot_triggered(self.duration_spin_button)
+
+    def find_cheapest_slot(self, duration_hours, start_within_hours):
+        self.price_chart.set_highlight_range(None, None) # Clear previous highlight
+        num_slots = duration_hours * 2
+        now = datetime.now(timezone.utc)
+        
+        prices_to_search = [p for p in self.all_prices if now <= p['valid_from'] < now + timedelta(hours=start_within_hours)]
+
+        if len(prices_to_search) < num_slots:
+            self.best_slot_result_label.set_text("Not enough data for the selected duration.")
+            self.best_slot_result_row.set_visible(True)
+            self.timer_row.set_visible(False)
+            return
+
+        min_price = float('inf')
+        best_start_index = -1
+
+        for i in range(len(prices_to_search) - num_slots + 1):
+            window = prices_to_search[i:i+num_slots]
+            current_price = sum(p['price_gbp'] for p in window)
+            if current_price < min_price:
+                min_price = current_price
+                best_start_index = i
+
+        if self.timer_id:
+            GLib.source_remove(self.timer_id)
+            self.timer_id = None
+
+        if best_start_index != -1:
+            best_slot_start_time = prices_to_search[best_start_index]['valid_from']
+            best_slot_end_time = prices_to_search[best_start_index + num_slots - 1]['valid_to']
+            self.price_chart.set_highlight_range(best_slot_start_time, best_slot_end_time)
+            
+            self.best_slot_result_label.set_text(f"{best_slot_start_time.astimezone().strftime('%H:%M')}")
+            self.best_slot_result_row.set_visible(True)
+
+            delta = best_slot_start_time.astimezone() - datetime.now().astimezone()
+            if delta.total_seconds() > 0:
+                self.best_slot_start_time = best_slot_start_time.astimezone()
+                self.timer_id = GLib.timeout_add_seconds(1, self._update_countdown)
+                self._update_countdown() # Initial update
+                self.timer_row.set_visible(True)
+            else:
+                self.timer_label.set_text("The cheapest slot is now.")
+                self.timer_row.set_visible(True)
+
+        else:
+            self.best_slot_result_label.set_text("Could not find a cheapest slot.")
+            self.best_slot_result_row.set_visible(True)
+            self.timer_row.set_visible(False)
+
+    def _update_countdown(self):
+        if not self.best_slot_start_time:
+            return False
+
+        delta = self.best_slot_start_time - datetime.now().astimezone()
+        if delta.total_seconds() <= 0:
+            self.timer_label.set_text("The cheapest slot is now.")
+            self.timer_id = None
+            return False # Stop the timer
+
+        hours, remainder = divmod(delta.total_seconds(), 3600)
+        minutes, _ = divmod(remainder, 60)
+        self.timer_label.set_text(f"{int(hours):02}:{int(minutes):02}")
+        self.timer_row.set_visible(True)
+        return True # Continue the timer
 
     def refresh_price(self, force=False):
         """

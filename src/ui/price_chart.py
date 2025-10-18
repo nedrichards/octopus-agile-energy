@@ -15,6 +15,8 @@ class PriceChartWidget(Gtk.DrawingArea):
         self.current_price_index = -1
         self.hovered_index = -1
         self.margin = 20
+        self.highlight_start_time = None
+        self.highlight_end_time = None
 
         self.set_size_request(600, 200)
         self.set_draw_func(self.on_draw)
@@ -35,6 +37,14 @@ class PriceChartWidget(Gtk.DrawingArea):
         """
         self.prices = prices
         self.current_price_index = current_index
+        self.queue_draw()
+
+    def set_highlight_range(self, start_time, end_time):
+        """
+        Sets the time range to highlight on the chart.
+        """
+        self.highlight_start_time = start_time
+        self.highlight_end_time = end_time
         self.queue_draw()
 
     def on_motion(self, controller, x, y):
@@ -144,6 +154,13 @@ class PriceChartWidget(Gtk.DrawingArea):
 
             cr.rectangle(bar_x, bar_y, bar_width - 1, bar_height)
             cr.fill()
+
+            # Highlight the best slot
+            if self.highlight_start_time and self.highlight_end_time:
+                if self.highlight_start_time <= price_data['valid_from'] < self.highlight_end_time:
+                    cr.set_source_rgba(0.9, 0.9, 0.2, 0.3)  # Semi-transparent yellow
+                    cr.rectangle(bar_x, self.margin, bar_width - 1, chart_height)
+                    cr.fill()
 
             if i == self.current_price_index:
                 style_context = self.get_style_context()

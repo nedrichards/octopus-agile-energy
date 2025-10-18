@@ -43,6 +43,7 @@ install_data(
     'ui/preferences_window.py',
     'ui/price_chart.py',
     'ui/styles.py',
+    'ui/custom_spin_button.py',
   ],
   install_dir: moduledir / 'ui'
 )

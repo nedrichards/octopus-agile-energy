@@ -42,4 +42,12 @@ def get_css():
         border: 1px solid alpha(currentColor, 0.1);
         border-radius: 6px; /* Slightly rounded corners for the chart area */
     }
+
+    .circular {
+        border-radius: 9999px;
+        min-height: 32px;
+        min-width: 32px;
+        padding: 0;
+        border: none;
+    }
     """
