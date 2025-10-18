@@ -37,11 +37,21 @@
   <screenshots>
     <screenshot type="default">
       <image>https://raw.githubusercontent.com/nedrichards/octopus-agile-energy/main/data/octopus-agile-screenshot.png</image>
-      <caption>Current and next day prices</caption>
+      <caption>Current and next-day prices</caption>
     </screenshot>
   </screenshots>
 
   <releases>
+    <release version="1.0.5" date="2025-10-18">
+      <description translate="no">
+        <p>This release includes several bug fixes and improvements to the user experience.</p>
+        <ul>
+          <li>Added a feature to find the cheapest time to use electricity.</li>
+          <li>Improved the UI of the find cheapest time feature.</li>
+          <li>Updated the copy in the application for clarity and style.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.4" date="2025-08-02">
       <description translate="no">
         <p>This release includes several bug fixes and improvements to the user experience.</p>

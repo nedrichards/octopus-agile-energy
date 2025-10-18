@@ -86,7 +86,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         # Refresh button on the left.
         self.header_refresh_button = Gtk.Button.new_from_icon_name("view-refresh-symbolic")
-        self.header_refresh_button.set_tooltip_text("Refresh Price")
+        self.header_refresh_button.set_tooltip_text("Refresh")
         self.header_refresh_button.add_css_class("flat")
         self.header_refresh_button.connect('clicked', self.on_refresh_clicked)
         header_bar.pack_start(self.header_refresh_button)
@@ -154,7 +154,7 @@ class MainWindow(Adw.ApplicationWindow):
             application_name="Octopus Agile Prices",
             application_icon="com.nedrichards.octopusagile",
             developer_name="Nick Richards",
-            version="1.0.4",
+            version="1.0.5",
             website="https://www.nedrichards.com/2025/07/octopus-agile-prices-for-linux/",
             copyright="© 2025 Nick Richards",
             license_type=Gtk.License.GPL_3_0
@@ -270,14 +270,14 @@ class MainWindow(Adw.ApplicationWindow):
         overall_content_box.append(expander_group)
 
         self.expander_row = Adw.ExpanderRow()
-        self.expander_row.set_title("Find Cheapest Usage Slot")
+        self.expander_row.set_title("Find Cheapest Time")
         self.expander_row.set_subtitle("Find the cheapest time to use electricity")
         self.expander_row.connect("notify::expanded", self.on_expander_row_activated)
         expander_group.add(self.expander_row)
 
         # --- Duration input ---
         self.duration_row = Adw.ActionRow.new()
-        self.duration_row.set_title("Usage Duration")
+        self.duration_row.set_title("For how long?")
         self.duration_spin_button = CustomSpinButton(min_val=1, max_val=24, step=1)
         self.duration_spin_button.set_value(1)
         self.duration_row.add_suffix(self.duration_spin_button)
@@ -286,7 +286,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         # --- Start within input ---
         self.start_within_row = Adw.ActionRow.new()
-        self.start_within_row.set_title("Start Within")
+        self.start_within_row.set_title("In the next?")
         self.start_within_spin_button = CustomSpinButton(min_val=1, max_val=24, step=1)
         self.start_within_spin_button.set_value(8)
         self.start_within_row.add_suffix(self.start_within_spin_button)
@@ -295,14 +295,14 @@ class MainWindow(Adw.ApplicationWindow):
 
         # --- Result rows ---
         self.best_slot_result_row = Adw.ActionRow.new()
-        self.best_slot_result_row.set_title("Best time to start")
+        self.best_slot_result_row.set_title("Best time to start is")
         self.best_slot_result_label = Gtk.Label.new()
         self.best_slot_result_row.add_suffix(self.best_slot_result_label)
         self.best_slot_result_row.set_visible(False)
         self.expander_row.add_row(self.best_slot_result_row)
 
         self.timer_row = Adw.ActionRow.new()
-        self.timer_row.set_title("Countdown")
+        self.timer_row.set_title("Starts in")
         self.timer_label = Gtk.Label.new()
         self.timer_row.add_suffix(self.timer_label)
         self.timer_row.set_visible(False)
@@ -332,7 +332,7 @@ class MainWindow(Adw.ApplicationWindow):
         Now uses pre-processed data for efficiency.
         """
         if index == -1 or not self.chart_prices:
-            self.hover_info_label.set_markup("<span size='small'>Hover over bars to see details</span>")
+            self.hover_info_label.set_markup("<span size='small'>Hover over a bar to see details</span>")
             return
 
         if 0 <= index < len(self.chart_prices):
@@ -377,7 +377,7 @@ class MainWindow(Adw.ApplicationWindow):
         prices_to_search = [p for p in self.all_prices if now <= p['valid_from'] < now + timedelta(hours=start_within_hours)]
 
         if len(prices_to_search) < num_slots:
-            self.best_slot_result_label.set_text("Not enough data for the selected duration.")
+            self.best_slot_result_label.set_text("Not enough data to find the cheapest time.")
             self.best_slot_result_row.set_visible(True)
             self.timer_row.set_visible(False)
             return
@@ -411,11 +411,11 @@ class MainWindow(Adw.ApplicationWindow):
                 self._update_countdown() # Initial update
                 self.timer_row.set_visible(True)
             else:
-                self.timer_label.set_text("The cheapest slot is now.")
+                self.timer_label.set_text("The cheapest time is now.")
                 self.timer_row.set_visible(True)
 
         else:
-            self.best_slot_result_label.set_text("Could not find a cheapest slot.")
+            self.best_slot_result_label.set_text("Could not find a cheapest time.")
             self.best_slot_result_row.set_visible(True)
             self.timer_row.set_visible(False)
 
@@ -425,7 +425,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         delta = self.best_slot_start_time - datetime.now().astimezone()
         if delta.total_seconds() <= 0:
-            self.timer_label.set_text("The cheapest slot is now.")
+            self.timer_label.set_text("The cheapest time is now.")
             self.timer_id = None
             return False # Stop the timer
 
@@ -440,9 +440,7 @@ class MainWindow(Adw.ApplicationWindow):
         Initiates the price data fetching process in a separate thread.
         Sets the UI to a loading state.
         """
-        self.status_label.set_text("")
-        self.price_card.set_title("Loading...")
-        self.price_card.set_description("Fetching current electricity price")
+        self.price_card.set_description("Fetching the latest prices...")
         self.price_card.remove_css_class("price-high")
         self.price_card.remove_css_class("price-medium")
         self.price_card.remove_css_class("price-low")
@@ -564,7 +562,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.price_card.remove_css_class("price-negative")
 
         if price_pounds < 0:
-            status = "Negative (Get paid to use!)"
+            status = "Negative (you get paid to use electricity!)"
             self.price_card.add_css_class("price-negative")
         elif price_pounds < 0.15:
             status = "Low"
@@ -577,7 +575,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.price_card.add_css_class("price-high")
 
         self.price_card.set_title(f"£{price_pounds:.2f}/kWh")
-        self.price_card.set_description(f"Current price level: {status}")
+        self.price_card.set_description(f"The current price is {status}")
         self.time_label.set_markup(f"<span size='small'>Last updated: {datetime.now().strftime('%H:%M:%S')}</span>")
         self.price_chart.set_prices(chart_prices, current_index)
         self.status_label.set_text("")

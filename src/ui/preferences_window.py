@@ -51,7 +51,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
         self.add(page)
 
         group = Adw.PreferencesGroup.new()
-        group.set_title("Tariff Settings")
+        group.set_title("Your Tariff")
         group.set_description("Configure your Octopus Agile tariff and region.")
         page.add(group)
 
@@ -182,7 +182,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
         self.tariff_dropdown.handler_block(self.tariff_handler_id)
 
         self.region_dropdown.set_sensitive(True)
-        self.region_row.set_subtitle("Select your region.")
+        self.region_row.set_subtitle("Select your region to see available tariffs.")
 
         selected_region_code = self.settings.get_string("selected-region-code")
         selected_display_name = None
@@ -207,7 +207,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
         self._update_tariff_dropdown_for_region()
         self.tariff_dropdown.set_sensitive(True)
-        self.tariff_row.set_subtitle("Select your tariff.")
+        self.tariff_row.set_subtitle("Select your tariff from the list.")
 
         self.region_dropdown.handler_unblock(self.region_handler_id)
         self.tariff_dropdown.handler_unblock(self.tariff_handler_id)
@@ -256,7 +256,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
             tariff_model = Gtk.StringList.new(tariff_names)
             self.tariff_dropdown.set_model(tariff_model)
             self.tariff_dropdown.set_sensitive(True)
-            self.tariff_row.set_subtitle("Select your tariff.")
+            self.tariff_row.set_subtitle("Select your tariff from the list.")
 
             saved_tariff_code = self.settings.get_string("selected-tariff-code")
             if saved_tariff_code:
@@ -269,7 +269,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
                         self.tariff_dropdown.set_selected(0)
                         self.settings.set_string("selected-tariff-code", tariffs[0]['code'])
                     else:
-                        self.tariff_row.set_subtitle("No tariffs for this region.")
+                        self.tariff_row.set_subtitle("There are no tariffs for this region.")
                         self.tariff_dropdown.set_sensitive(False)
             elif tariffs:
                 self.tariff_dropdown.set_selected(0)
