@@ -1,7 +1,7 @@
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Gtk, Adw, GLib, Gio
+from gi.repository import Gtk, Adw, GLib, Gio, Gdk
 import requests
 from datetime import datetime, timezone, timedelta
 import threading
@@ -40,6 +40,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.is_first_expansion = True
 
         self.connect("notify::visible", self.on_visibility_change)
+
+        key_controller = Gtk.EventControllerKey.new()
+        key_controller.connect("key-pressed", self.on_key_pressed)
+        self.add_controller(key_controller)
 
         self.create_actions()
         self.setup_ui()
@@ -131,6 +135,34 @@ class MainWindow(Adw.ApplicationWindow):
         refresh_action.connect("activate", self.on_refresh_clicked)
         self.get_application().add_action(refresh_action)
         self.get_application().set_accels_for_action("app.refresh", ["<primary>r"])
+
+        # Find cheapest time action
+        find_cheapest_action = Gio.SimpleAction.new("find_cheapest", None)
+        find_cheapest_action.connect("activate", self.on_find_cheapest_action)
+        self.get_application().add_action(find_cheapest_action)
+        self.get_application().set_accels_for_action("app.find_cheapest", ["<primary>f"])
+
+    def on_find_cheapest_action(self, action, param):
+        """
+        Handles the find cheapest action by expanding the expander row and focusing the duration spin button.
+        """
+        self.expander_row.set_expanded(True)
+        self.duration_spin_button.grab_focus()
+
+    def on_key_pressed(self, controller, keyval, keycode, modifier):
+        """
+        Handles key press events for the main window.
+        """
+        if keyval == Gdk.KEY_question:
+            self.on_show_help_overlay(None, None)
+
+
+
+        # Find cheapest time action
+        find_cheapest_action = Gio.SimpleAction.new("find_cheapest", None)
+        find_cheapest_action.connect("activate", self.on_find_cheapest_action)
+        self.get_application().add_action(find_cheapest_action)
+        self.get_application().set_accels_for_action("app.find_cheapest", ["<primary>f"])
 
     def on_show_help_overlay(self, action, param):
         builder = Gtk.Builder.new_from_resource(
