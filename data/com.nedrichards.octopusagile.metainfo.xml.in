@@ -42,6 +42,15 @@
   </screenshots>
 
   <releases>
+    <release version="1.0.6" date="2026-02-28">
+      <description translate="no">
+        <p>This release introduces new tariff types and other small improvements. Thanks to Andy Piper.</p>
+        <ul>
+          <li>Added support for multiple tariffs: Octopus Agile, Octopus Go, and Intelligent Octopus Go.</li>
+          <li>Bug fixes and other UI improvements.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.5" date="2025-10-18">
       <description translate="no">
         <p>This release includes several bug fixes and improvements to the user experience.</p>
