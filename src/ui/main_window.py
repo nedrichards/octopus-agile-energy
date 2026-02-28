@@ -10,6 +10,7 @@ from .price_chart import PriceChartWidget
 from .preferences_window import PreferencesWindow
 from .custom_spin_button import CustomSpinButton
 from ..utils import CacheManager
+from ..secrets_manager import get_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,9 @@ class MainWindow(Adw.ApplicationWindow):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-        self.set_title("Octopus Agile Price Tracker")
+        self.settings = Gio.Settings.new("com.nedrichards.octopusagile")
+        self._update_window_title()
+        
         self.set_size_request(700, 900)
 
         self.all_prices = []
@@ -29,7 +32,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.cache_manager = CacheManager() # Initialize CacheManager
 
         # Initialize Gio.Settings
-        self.settings = Gio.Settings.new("com.nedrichards.octopusagile")
+        self.settings.connect("changed::selected-tariff-type", self.on_setting_changed)
         self.settings.connect("changed::selected-tariff-code", self.on_setting_changed)
         self.settings.connect("changed::selected-region-code", self.on_setting_changed)
 
@@ -237,8 +240,24 @@ class MainWindow(Adw.ApplicationWindow):
         if self.preferences_window:
             return
 
+        if key == "selected-tariff-type":
+            self._update_window_title()
+
         logger.debug("Setting '%s' changed. Refreshing price data.", key)
         self.refresh_price()
+
+    def _update_window_title(self):
+        tariff_type = self.settings.get_string("selected-tariff-type")
+        if tariff_type == 'GO':
+            title = "Octopus Go Prices"
+        elif tariff_type == 'INTELLIGENT':
+            title = "Intelligent Octopus Go Prices"
+        else:
+            title = "Octopus Agile Prices"
+            
+        self.set_title(title)
+        if hasattr(self, 'header_title_widget'):
+            self.header_title_widget.set_title(title)
 
     def setup_ui(self):
         """
@@ -471,8 +490,19 @@ class MainWindow(Adw.ApplicationWindow):
             return
 
         try:
-            parts = selected_tariff_code.split('-')
-            agile_product_code = '-'.join(parts[2:-1])
+            tariff_type = self.settings.get_string("selected-tariff-type")
+            product_code = None
+            
+            # Intelligent Octopus Go uses a different product code format
+            if tariff_type == 'INTELLIGENT':
+                # Example: INTELLIGENT-OCTOPUS-GO-24-10-01
+                parts = selected_tariff_code.split('-')
+                product_code = '-'.join(parts[2:-1])
+            else:
+                # Agile and Go format
+                parts = selected_tariff_code.split('-')
+                product_code = '-'.join(parts[2:-1])
+                
             now = datetime.now(timezone.utc)
             rates_cache_key = f"octopus_rates_{selected_tariff_code}_{now.strftime('%Y-%m-%d')}"
 
@@ -490,8 +520,16 @@ class MainWindow(Adw.ApplicationWindow):
             
             if not raw_rates:
                 logger.debug("Fetching new data from API.")
-                rates_url = f"https://api.octopus.energy/v1/products/{agile_product_code}/electricity-tariffs/{selected_tariff_code}/standard-unit-rates/"
-                response = requests.get(rates_url, params={'page_size': 1500}, timeout=10)
+                rates_url = f"https://api.octopus.energy/v1/products/{product_code}/electricity-tariffs/{selected_tariff_code}/standard-unit-rates/"
+                
+                # Use basic auth for intelligent go if API key is provided
+                auth = None
+                api_key = get_api_key()
+                if api_key and tariff_type == 'INTELLIGENT':
+                    from requests.auth import HTTPBasicAuth
+                    auth = HTTPBasicAuth(api_key, '')
+                    
+                response = requests.get(rates_url, params={'page_size': 1500}, timeout=10, auth=auth)
                 response.raise_for_status()
                 data = response.json()
                 

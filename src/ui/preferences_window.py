@@ -7,10 +7,14 @@ import threading
 import time
 import logging
 from ..utils import CacheManager
+from ..secrets_manager import get_api_key, store_api_key, clear_api_key
 
 logger = logging.getLogger(__name__)
 
 class PreferencesWindow(Adw.PreferencesWindow):
+    TARIFF_TYPES = ["Agile", "Go", "Intelligent Go"]
+    TARIFF_TYPE_CODES = {"Agile": "AGILE", "Go": "GO", "Intelligent Go": "INTELLIGENT"}
+    TARIFF_CODE_TO_NAME = {v: k for k, v in TARIFF_TYPE_CODES.items()}
     # Hardcoded common UK electricity region suffixes and their full names
     REGION_CODE_TO_NAME = {
         "_A": "Eastern England",
@@ -58,6 +62,23 @@ class PreferencesWindow(Adw.PreferencesWindow):
         group.set_description("Configure your Octopus Agile tariff and region.")
         page.add(group)
 
+        # Tariff Type selection
+        self.tariff_type_row = Adw.ActionRow.new()
+        self.tariff_type_row.set_title("Tariff Type")
+        group.add(self.tariff_type_row)
+
+        self.tariff_type_dropdown = Gtk.DropDown.new_from_strings(self.TARIFF_TYPES)
+        self.tariff_type_dropdown.set_hexpand(True)
+        
+        # Set initial selected type
+        current_type = self.settings.get_string("selected-tariff-type")
+        current_type_name = self.TARIFF_CODE_TO_NAME.get(current_type, "Agile")
+        if current_type_name in self.TARIFF_TYPES:
+            self.tariff_type_dropdown.set_selected(self.TARIFF_TYPES.index(current_type_name))
+            
+        self.tariff_type_handler_id = self.tariff_type_dropdown.connect("notify::selected-item", self.on_tariff_type_selected)
+        self.tariff_type_row.add_suffix(self.tariff_type_dropdown)
+
         # Region selection
         self.region_row = Adw.ActionRow.new()
         self.region_row.set_title("Region")
@@ -79,7 +100,39 @@ class PreferencesWindow(Adw.PreferencesWindow):
         self.tariff_handler_id = self.tariff_dropdown.connect("notify::selected-item", self.on_tariff_selected)
         self.tariff_row.add_suffix(self.tariff_dropdown)
 
+        # API Key Section
+        api_group = Adw.PreferencesGroup.new()
+        api_group.set_title("API Authentication (Optional)")
+        api_group.set_description("Required for Intelligent Octopus Go rates and account features.")
+        page.add(api_group)
+
+        self.api_key_entry = Adw.PasswordEntryRow.new()
+        self.api_key_entry.set_title("Octopus API Key")
+        
+        # Load existing key securely
+        existing_key = get_api_key()
+        if existing_key:
+            self.api_key_entry.set_text(existing_key)
+            
+        self.api_key_entry.connect("changed", self.on_api_key_changed)
+        api_group.add(self.api_key_entry)
+
         self.present()
+
+    def on_api_key_changed(self, entry):
+        text = entry.get_text()
+        if text:
+            store_api_key(text)
+        else:
+            clear_api_key()
+
+    def on_tariff_type_selected(self, dropdown, pspec):
+        selected_display_name = dropdown.get_selected_item().get_string() if dropdown.get_selected_item() else ""
+        selected_type_code = self.TARIFF_TYPE_CODES.get(selected_display_name, "AGILE")
+        self.settings.set_string("selected-tariff-type", selected_type_code)
+        
+        # Trigger reload of tariffs
+        self.load_tariffs_and_regions()
 
     def load_tariffs_and_regions(self):
         """
@@ -96,10 +149,11 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
     def _fetch_agile_tariffs(self):
         """
-        Fetches the latest Agile tariff data from the Octopus API.
+        Fetches the latest tariff data from the Octopus API based on the selected type.
         """
         cache_key = "octopus_products_all"
         url = "https://api.octopus.energy/v1/products/"
+        tariff_type = self.settings.get_string("selected-tariff-type")
 
         try:
             cached_data, cache_mtime = self.cache_manager.get(cache_key)
@@ -114,29 +168,48 @@ class PreferencesWindow(Adw.PreferencesWindow):
                 self.cache_manager.set(cache_key, data)
                 logger.debug("All products data fetched from API and cached.")
             
-            agile_product = None
+            target_product = None
             for product in data.get('results', []):
-                if 'AGILE' in product['code'] and product.get('available_from') and not product.get('available_to'):
-                    agile_product = product
-                    logger.debug("Found active Agile product: %s", product['code'])
+                # Filter by tariff type
+                is_match = False
+                code = product['code'].upper()
+                name = product.get('full_name', '').upper()
+                
+                if tariff_type == 'AGILE' and 'AGILE' in code:
+                    is_match = True
+                elif tariff_type == 'GO' and ('GO' in code or 'GO' in name) and 'INTELLIGENT' not in code and 'INTELLIGENT' not in name:
+                    is_match = True
+                elif tariff_type == 'INTELLIGENT' and ('INTELLIGENT' in code or 'INTELLIGENT' in name):
+                    is_match = True
+                    
+                if is_match and product.get('available_from') and not product.get('available_to'):
+                    target_product = product
+                    logger.debug("Found active %s product: %s", tariff_type, product['code'])
                     break
             
-            if not agile_product:
-                GLib.idle_add(self._show_load_error, "No active Agile tariff found.")
+            if not target_product:
+                GLib.idle_add(self._show_load_error, f"No active {tariff_type} tariff found.")
                 return
 
-            product_url = f"https://api.octopus.energy/v1/products/{agile_product['code']}/"
-            product_cache_key = f"octopus_product_{agile_product['code']}"
+            product_url = f"https://api.octopus.energy/v1/products/{target_product['code']}/"
+            product_cache_key = f"octopus_product_{target_product['code']}"
             cached_product_data, product_cache_mtime = self.cache_manager.get(product_cache_key)
             if cached_product_data and (time.time() - product_cache_mtime) < 86400:
-                logger.debug("Product %s data loaded from cache.", agile_product['code'])
+                logger.debug("Product %s data loaded from cache.", target_product['code'])
                 product_details = cached_product_data
             else:
-                product_response = requests.get(product_url, timeout=10)
+                # Use basic auth for intelligent go if API key is provided
+                auth = None
+                api_key = get_api_key()
+                if api_key and tariff_type == 'INTELLIGENT':
+                    from requests.auth import HTTPBasicAuth
+                    auth = HTTPBasicAuth(api_key, '')
+                    
+                product_response = requests.get(product_url, timeout=10, auth=auth)
                 product_response.raise_for_status()
                 product_details = product_response.json()
                 self.cache_manager.set(product_cache_key, product_details)
-                logger.debug("Product %s data fetched from API and cached.", agile_product['code'])
+                logger.debug("Product %s data fetched from API and cached.", target_product['code'])
 
             self._process_agile_tariffs(product_details)
 

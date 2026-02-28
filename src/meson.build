@@ -32,6 +32,7 @@ install_data(
     '__init__.py',
     'main.py',
     'utils.py',
+    'secrets_manager.py',
   ],
   install_dir: moduledir
 )

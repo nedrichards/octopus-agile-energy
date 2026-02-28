@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist>
   <schema id="com.nedrichards.octopusagile" path="/com/nedrichards/octopusagile/">
+    <key name="selected-tariff-type" type="s">
+      <default>'AGILE'</default>
+      <summary>Selected Tariff Type</summary>
+      <description>The type of tariff selected (AGILE, GO, or INTELLIGENT). Defaults to AGILE.</description>
+    </key>
     <key name="selected-tariff-code" type="s">
       <default>''</default>
       <summary>Selected Octopus Agile Tariff Code</summary>
