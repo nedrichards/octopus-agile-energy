@@ -1,0 +1,24 @@
+name: Flatpak Build
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  flatpak:
+    name: "Build Flatpak"
+    runs-on: ubuntu-latest
+    container:
+      image: bilelmoussaoui/flatpak-github-actions:freedesktop-43
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Build Flatpak
+        uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: octopusagile.flatpak
+          manifest-path: com.nedrichards.octopusagile.json
+          cache-key: flatpak-builder-${{ github.sha }}
