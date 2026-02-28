@@ -20,6 +20,8 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 
+import sys
+import logging
 from gi.repository import Gtk, Adw, Gdk
 from .ui.main_window import MainWindow
 from .ui.styles import get_css
@@ -41,6 +43,14 @@ def main(*args):
     Main function to initialize and run the Octopus Agile Price Tracker application.
     Loads custom CSS for styling.
     """
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        stream=sys.stdout
+    )
+    logger = logging.getLogger(__name__)
+    logger.info("Starting Octopus Agile Price Tracker")
+
     app = OctopusAgileApp()
 
     # Load custom CSS for application-specific styling.

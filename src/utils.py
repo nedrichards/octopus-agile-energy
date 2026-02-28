@@ -2,7 +2,10 @@ import os
 import json
 import hashlib
 import time
+import logging
 from gi.repository import GLib
+
+logger = logging.getLogger(__name__)
 
 class CacheManager:
     """
@@ -24,7 +27,7 @@ class CacheManager:
         hashed_key = hashlib.md5(key.encode('utf-8')).hexdigest()
         return os.path.join(self.cache_dir, hashed_key + ".json")
 
-    def get(self, key):
+    def get(self, key: str) -> tuple[dict | None, float | None]:
         """
         Retrieves data from cache if available.
         Returns a tuple: (data, modification_time_as_timestamp).
@@ -40,25 +43,43 @@ class CacheManager:
                 data = json.load(f)
             return data, file_mtime
         except (IOError, json.JSONDecodeError, OSError) as e:
-            print(f"Cache read error for key '{key}': {e}")
+            logger.error("Cache read error for key '%s': %s", key, e)
             if os.path.exists(filepath):
-                os.remove(filepath)
+                try:
+                    os.remove(filepath)
+                except OSError as rm_e:
+                    logger.error("Failed to remove corrupted cache file '%s': %s", filepath, rm_e)
             return None, None
 
-    def set(self, key, data):
-        """Stores data in the cache, but only if it's not empty."""
+    def set(self, key: str, data: dict | list) -> None:
+        """Stores data in the cache atomically, but only if it's not empty."""
         if not data:
-            print(f"Cache warning: Refusing to cache empty data for key '{key}'.")
+            logger.warning("Cache warning: Refusing to cache empty data for key '%s'.", key)
             return
 
         filepath = self._get_cache_filepath(key)
+        # Create a temporary file in the same directory
+        temp_filepath = filepath + ".tmp"
+        
         try:
-            with open(filepath, 'w', encoding='utf-8') as f:
+            with open(temp_filepath, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())  # Ensure data is flushed to disk
+                
+            # Atomically replace the old file with the new one
+            os.replace(temp_filepath, filepath)
+            logger.debug("Successfully updated cache for key: %s", key)
         except (IOError, OSError) as e:
-            print(f"Cache write error for key '{key}': {e}")
+            logger.error("Cache write error for key '%s': %s", key, e)
+            # Cleanup temp file if it exists
+            if os.path.exists(temp_filepath):
+                try:
+                    os.remove(temp_filepath)
+                except OSError:
+                    pass
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         """Removes cache files older than the specified expiry days."""
         if not os.path.exists(self.cache_dir):
             return

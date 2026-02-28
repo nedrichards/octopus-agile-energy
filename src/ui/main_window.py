@@ -5,10 +5,13 @@ from gi.repository import Gtk, Adw, GLib, Gio, Gdk
 import requests
 from datetime import datetime, timezone, timedelta
 import threading
+import logging
 from .price_chart import PriceChartWidget
 from .preferences_window import PreferencesWindow
 from .custom_spin_button import CustomSpinButton
 from ..utils import CacheManager
+
+logger = logging.getLogger(__name__)
 
 class MainWindow(Adw.ApplicationWindow):
     """
@@ -234,7 +237,7 @@ class MainWindow(Adw.ApplicationWindow):
         if self.preferences_window:
             return
 
-        print(f"DEBUG: Setting '{key}' changed. Refreshing price data.")
+        logger.debug("Setting '%s' changed. Refreshing price data.", key)
         self.refresh_price()
 
     def setup_ui(self):
@@ -287,13 +290,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.price_chart = PriceChartWidget()
         self.price_chart.set_vexpand(True)
         chart_box.append(self.price_chart)
-
-        # Label to display hover/click information for the chart.
-        self.hover_info_label = Gtk.Label.new()
-        self.hover_info_label.set_markup("<span size='small'>Hover over bars to see details</span>")
-        self.hover_info_label.set_halign(Gtk.Align.CENTER)
-        self.hover_info_label.set_margin_bottom(5) # Add padding to the bottom
-        chart_box.append(self.hover_info_label)
 
         overall_content_box.append(chart_box)
 
@@ -358,30 +354,13 @@ class MainWindow(Adw.ApplicationWindow):
         self.toast_overlay.set_child(root_vbox) # The root_vbox (containing header and scrolled content) is the child.
         self.set_content(self.toast_overlay) # Set the toast overlay as the main window content.
 
-    def on_chart_hover(self, index):
-        """
-        Updates the hover info label based on the hovered chart bar.
-        Now uses pre-processed data for efficiency.
-        """
-        if index == -1 or not self.chart_prices:
-            self.hover_info_label.set_markup("<span size='small'>Hover over a bar to see details</span>")
-            return
 
-        if 0 <= index < len(self.chart_prices):
-            price_data = self.chart_prices[index]
-            price_gbp = price_data['price_gbp']
-            valid_from = price_data['valid_from'].astimezone()
-            valid_to = price_data['valid_to'].astimezone()
-
-            self.hover_info_label.set_markup(
-                f"<span size='small'><b>{valid_from.strftime('%H:%M')} - {valid_to.strftime('%H:%M')}</b>: £{price_gbp:.2f}/kWh</span>"
-            )
 
     def on_chart_click(self, index):
         """
         Handles chart bar clicks. Currently mirrors hover logic but can be expanded.
         """
-        self.on_chart_hover(index)
+        pass
 
     def on_refresh_clicked(self, *args):
         """
@@ -504,13 +483,13 @@ class MainWindow(Adw.ApplicationWindow):
                     cache_mtime = datetime.fromtimestamp(cache_mtime_ts, tz=timezone.utc)
                     release_time = now.replace(hour=16, minute=0, second=0, microsecond=0)
                     if not (now >= release_time and cache_mtime < release_time):
-                        print("DEBUG: Rates data loaded from cache.")
+                        logger.debug("Rates data loaded from cache.")
                         raw_rates = cached_data
                     else:
-                        print("DEBUG: Stale cache, will refetch.")
+                        logger.debug("Stale cache, will refetch.")
             
             if not raw_rates:
-                print("DEBUG: Fetching new data from API.")
+                logger.debug("Fetching new data from API.")
                 rates_url = f"https://api.octopus.energy/v1/products/{agile_product_code}/electricity-tariffs/{selected_tariff_code}/standard-unit-rates/"
                 response = requests.get(rates_url, params={'page_size': 1500}, timeout=10)
                 response.raise_for_status()
@@ -551,7 +530,7 @@ class MainWindow(Adw.ApplicationWindow):
                     'price_gbp': rate['value_inc_vat'] / 100.0,
                 })
             except (ValueError, KeyError) as e:
-                print(f"Skipping rate due to processing error: {e}")
+                logger.warning("Skipping rate due to processing error: %s", e)
                 continue
         
         self.all_prices = processed_prices

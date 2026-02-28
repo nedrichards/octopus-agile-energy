@@ -29,6 +29,9 @@ class PriceChartWidget(Gtk.DrawingArea):
         click_controller = Gtk.GestureClick.new()
         click_controller.connect('pressed', self.on_click)
         self.add_controller(click_controller)
+        
+        self.set_has_tooltip(True)
+        self.connect("query-tooltip", self.on_query_tooltip)
 
     def set_prices(self, prices, current_index):
         """
@@ -68,9 +71,6 @@ class PriceChartWidget(Gtk.DrawingArea):
         if 0 <= new_hovered_index < len(self.prices) and new_hovered_index != self.hovered_index:
             self.hovered_index = new_hovered_index
             self.queue_draw()
-            parent_window = self.get_ancestor(Gtk.Window)
-            if parent_window and hasattr(parent_window, 'on_chart_hover'):
-                parent_window.on_chart_hover(self.hovered_index)
 
     def on_leave(self, controller):
         """
@@ -79,9 +79,6 @@ class PriceChartWidget(Gtk.DrawingArea):
         if self.hovered_index != -1:
             self.hovered_index = -1
             self.queue_draw()
-            parent_window = self.get_ancestor(Gtk.Window)
-            if parent_window and hasattr(parent_window, 'on_chart_hover'):
-                parent_window.on_chart_hover(-1)
 
     def on_click(self, gesture, n_press, x, y):
         """
@@ -104,6 +101,31 @@ class PriceChartWidget(Gtk.DrawingArea):
             if parent_window and hasattr(parent_window, 'on_chart_click'):
                 parent_window.on_chart_click(clicked_index)
 
+    def on_query_tooltip(self, widget, x, y, keyboard_mode, tooltip):
+        if not self.prices:
+            return False
+            
+        width = self.get_width()
+        chart_width = width - 2 * self.margin
+        
+        if not (self.margin <= x <= width - self.margin):
+            return False
+            
+        chart_x = x - self.margin
+        bar_width = chart_width / len(self.prices)
+        hover_index = int(chart_x / bar_width)
+        
+        if 0 <= hover_index < len(self.prices):
+            price_data = self.prices[hover_index]
+            price_gbp = price_data['price_gbp']
+            valid_from = price_data['valid_from'].astimezone().strftime('%H:%M')
+            valid_to = price_data['valid_to'].astimezone().strftime('%H:%M')
+            
+            tooltip.set_markup(f"<b>{valid_from} - {valid_to}</b>\n£{price_gbp:.2f}/kWh")
+            return True
+            
+        return False
+
     def on_draw(self, area, cr, width, height):
         """
         The main drawing function for the chart. Optimized for pre-processed data.
@@ -124,6 +146,9 @@ class PriceChartWidget(Gtk.DrawingArea):
 
         chart_zero_y = self.margin + chart_height * (max_price / price_range) if min_price < 0 else self.margin + chart_height
 
+        # Fetch style context once for the loop
+        style_context = self.get_style_context()
+
         for i, price_data in enumerate(self.prices):
             price = price_data['price_gbp']
             bar_x_start = self.margin + (i * chart_width) / len(self.prices)
@@ -139,13 +164,31 @@ class PriceChartWidget(Gtk.DrawingArea):
                 bar_y = chart_zero_y
 
             if price < 0:
-                base_color = (0.2, 0.4, 0.8)
+                # Use theme accent colors for varied states
+                # Fetching standard error color for negative prices
+                success, color = style_context.lookup_color("blue_4")
+                if success:
+                    base_color = (color.red, color.green, color.blue)
+                else:
+                    base_color = (0.2, 0.4, 0.8)
             elif price < 0.15:
-                base_color = (0.2, 0.8, 0.2)
+                success, color = style_context.lookup_color("green_4")
+                if success:
+                    base_color = (color.red, color.green, color.blue)
+                else:
+                    base_color = (0.2, 0.8, 0.2)
             elif price < 0.25:
-                base_color = (1.0, 0.6, 0.0)
+                success, color = style_context.lookup_color("orange_3")
+                if success:
+                    base_color = (color.red, color.green, color.blue)
+                else:
+                    base_color = (1.0, 0.6, 0.0)
             else:
-                base_color = (0.8, 0.2, 0.2)
+                success, color = style_context.lookup_color("red_4")
+                if success:
+                    base_color = (color.red, color.green, color.blue)
+                else:
+                    base_color = (0.8, 0.2, 0.2)
 
             if i == self.hovered_index:
                 cr.set_source_rgb(min(1.0, base_color[0] + 0.3), min(1.0, base_color[1] + 0.3), min(1.0, base_color[2] + 0.3))

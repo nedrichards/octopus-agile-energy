@@ -1,20 +1,20 @@
 {
-    "id" : "com.nedrichards.octopusagile.Devel",
-    "desktop-file-name-suffix" : " (Dev)",
-    "runtime" : "org.gnome.Platform",
-    "runtime-version" : "49",
-    "sdk" : "org.gnome.Sdk",
-    "command" : "com.nedrichards.octopusagile",
-    "rename-desktop-file" : "com.nedrichards.octopusagile-dev.desktop",
-    "rename-icon" : "com.nedrichards.octopusagile-dev",
-    "finish-args" : [
+    "id": "com.nedrichards.octopusagile.Devel",
+    "desktop-file-name-suffix": " (Dev)",
+    "runtime": "org.gnome.Platform",
+    "runtime-version": "49",
+    "sdk": "org.gnome.Sdk",
+    "command": "com.nedrichards.octopusagile",
+    "rename-desktop-file": "com.nedrichards.octopusagile-dev.desktop",
+    "rename-icon": "com.nedrichards.octopusagile-dev",
+    "finish-args": [
         "--share=network",
         "--share=ipc",
         "--socket=fallback-x11",
         "--device=dri",
         "--socket=wayland"
     ],
-    "cleanup" : [
+    "cleanup": [
         "/include",
         "/lib/pkgconfig",
         "/man",
@@ -25,8 +25,8 @@
         "*.la",
         "*.a"
     ],
-    "modules" : [
-    	{
+    "modules": [
+        {
             "name": "python3-requests",
             "buildsystem": "simple",
             "build-commands": [
@@ -61,13 +61,13 @@
             ]
         },
         {
-            "name" : "octopusagile",
-            "builddir" : true,
-            "buildsystem" : "meson",
-            "sources" : [
+            "name": "octopusagile",
+            "builddir": true,
+            "buildsystem": "meson",
+            "sources": [
                 {
-                    "type" : "git",
-                    "url" : "https://github.com/nedrichards/octopus-agile-energy.git"
+                    "type": "dir",
+                    "path": "."
                 }
             ]
         }

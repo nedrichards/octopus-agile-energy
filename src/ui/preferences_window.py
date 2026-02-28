@@ -5,7 +5,10 @@ from gi.repository import Gtk, Adw, GLib
 import requests
 import threading
 import time
+import logging
 from ..utils import CacheManager
+
+logger = logging.getLogger(__name__)
 
 class PreferencesWindow(Adw.PreferencesWindow):
     # Hardcoded common UK electricity region suffixes and their full names
@@ -102,20 +105,20 @@ class PreferencesWindow(Adw.PreferencesWindow):
             cached_data, cache_mtime = self.cache_manager.get(cache_key)
             # Cache is valid for 24 hours (86400 seconds)
             if cached_data and (time.time() - cache_mtime) < 86400:
-                print("DEBUG: All products data loaded from cache.")
+                logger.debug("All products data loaded from cache.")
                 data = cached_data
             else:
                 response = requests.get(url, timeout=10)
                 response.raise_for_status()
                 data = response.json()
                 self.cache_manager.set(cache_key, data)
-                print("DEBUG: All products data fetched from API and cached.")
+                logger.debug("All products data fetched from API and cached.")
             
             agile_product = None
             for product in data.get('results', []):
                 if 'AGILE' in product['code'] and product.get('available_from') and not product.get('available_to'):
                     agile_product = product
-                    print(f"DEBUG: Found active Agile product: {product['code']}")
+                    logger.debug("Found active Agile product: %s", product['code'])
                     break
             
             if not agile_product:
@@ -126,14 +129,14 @@ class PreferencesWindow(Adw.PreferencesWindow):
             product_cache_key = f"octopus_product_{agile_product['code']}"
             cached_product_data, product_cache_mtime = self.cache_manager.get(product_cache_key)
             if cached_product_data and (time.time() - product_cache_mtime) < 86400:
-                print(f"DEBUG: Product {agile_product['code']} data loaded from cache.")
+                logger.debug("Product %s data loaded from cache.", agile_product['code'])
                 product_details = cached_product_data
             else:
                 product_response = requests.get(product_url, timeout=10)
                 product_response.raise_for_status()
                 product_details = product_response.json()
                 self.cache_manager.set(product_cache_key, product_details)
-                print(f"DEBUG: Product {agile_product['code']} data fetched from API and cached.")
+                logger.debug("Product %s data fetched from API and cached.", agile_product['code'])
 
             self._process_agile_tariffs(product_details)
 
