@@ -1,17 +1,17 @@
 {
-    "id" : "com.nedrichards.octopusagile",
-    "runtime" : "org.gnome.Platform",
-    "runtime-version" : "49",
-    "sdk" : "org.gnome.Sdk",
-    "command" : "com.nedrichards.octopusagile",
-    "finish-args" : [
+    "id": "com.nedrichards.octopusagile",
+    "runtime": "org.gnome.Platform",
+    "runtime-version": "49",
+    "sdk": "org.gnome.Sdk",
+    "command": "com.nedrichards.octopusagile",
+    "finish-args": [
         "--share=network",
         "--share=ipc",
         "--socket=fallback-x11",
         "--device=dri",
         "--socket=wayland"
     ],
-    "cleanup" : [
+    "cleanup": [
         "/include",
         "/lib/pkgconfig",
         "/man",
@@ -22,8 +22,8 @@
         "*.la",
         "*.a"
     ],
-    "modules" : [
-    	{
+    "modules": [
+        {
             "name": "python3-requests",
             "buildsystem": "simple",
             "build-commands": [
@@ -58,14 +58,14 @@
             ]
         },
         {
-            "name" : "octopusagile",
-            "builddir" : true,
-            "buildsystem" : "meson",
-            "sources" : [
+            "name": "octopusagile",
+            "builddir": true,
+            "buildsystem": "meson",
+            "sources": [
                 {
-                    "type" : "git",
-                    "url" : "https://github.com/nedrichards/octopus-agile-energy.git",
-                    "commit" : "01562018daa0d728cb8d34e3d56596927b017ba9"
+                    "type": "git",
+                    "url": "https://github.com/nedrichards/octopus-agile-energy.git",
+                    "commit": "b1753c17c732e3e6f2323ff6177e90cf8eeff45f"
                 }
             ]
         }
