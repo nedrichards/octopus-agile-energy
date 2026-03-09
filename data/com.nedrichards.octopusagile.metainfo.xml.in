@@ -42,6 +42,14 @@
   </screenshots>
 
   <releases>
+    <release version="1.0.7" date="2026-03-09">
+      <description translate="no">
+        <p>This release includes the highly-requested average price calculation alongside finding the cheapest time to use electricity.</p>
+        <ul>
+          <li>Added an average price calculation metric in the Find Cheapest Time feature to help save money efficiently.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.6" date="2026-02-28">
       <description translate="no">
         <p>This release introduces new tariff types and other small improvements. Thanks to Andy Piper.</p>

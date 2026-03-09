@@ -192,7 +192,7 @@ class MainWindow(Adw.ApplicationWindow):
             application_name="Octopus Agile Prices",
             application_icon="com.nedrichards.octopusagile",
             developer_name="Nick Richards",
-            version="1.0.6",
+            version="1.0.7",
             website="https://www.nedrichards.com/2025/07/octopus-agile-prices-for-linux/",
             copyright="© 2025 Nick Richards",
             license_type=Gtk.License.GPL_3_0
@@ -348,6 +348,14 @@ class MainWindow(Adw.ApplicationWindow):
         self.best_slot_result_row.set_visible(False)
         self.expander_row.add_row(self.best_slot_result_row)
 
+        self.average_price_row = Adw.ActionRow.new()
+        self.average_price_row.set_title("Average Price")
+        self.average_price_label = Gtk.Label.new()
+        self.average_price_row.add_suffix(self.average_price_label)
+        self.average_price_row.set_visible(False)
+        self.expander_row.add_row(self.average_price_row)
+
+
         self.timer_row = Adw.ActionRow.new()
         self.timer_row.set_title("Starts in")
         self.timer_label = Gtk.Label.new()
@@ -409,6 +417,7 @@ class MainWindow(Adw.ApplicationWindow):
         if len(prices_to_search) < num_slots:
             self.best_slot_result_label.set_text("Not enough data to find the cheapest time.")
             self.best_slot_result_row.set_visible(True)
+            self.average_price_row.set_visible(False)
             self.timer_row.set_visible(False)
             return
 
@@ -434,6 +443,10 @@ class MainWindow(Adw.ApplicationWindow):
             self.best_slot_result_label.set_text(f"{best_slot_start_time.astimezone().strftime('%H:%M')}")
             self.best_slot_result_row.set_visible(True)
 
+            average_price = min_price / num_slots
+            self.average_price_label.set_text(f"£{average_price:.2f}/kWh")
+            self.average_price_row.set_visible(True)
+
             delta = best_slot_start_time.astimezone() - datetime.now().astimezone()
             if delta.total_seconds() > 0:
                 self.best_slot_start_time = best_slot_start_time.astimezone()
@@ -447,6 +460,7 @@ class MainWindow(Adw.ApplicationWindow):
         else:
             self.best_slot_result_label.set_text("Could not find a cheapest time.")
             self.best_slot_result_row.set_visible(True)
+            self.average_price_row.set_visible(False)
             self.timer_row.set_visible(False)
 
     def _update_countdown(self):
