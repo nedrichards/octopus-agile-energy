@@ -50,6 +50,10 @@
           <li>Refine current price highlight for better visual clarity</li>
           <li>Improve chart layout and margins</li>
           <li>Update documentation and forecast range information</li>
+          <li>Fix duplicate shortcut action registration and ensure tariff title updates correctly</li>
+          <li>Prevent stale background refreshes from overwriting newer data</li>
+          <li>Harden error display and cache cleanup logging</li>
+          <li>Add unit tests for pricing and tariff selection logic</li>
         </ul>
       </description>
     </release>
