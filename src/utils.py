@@ -90,6 +90,6 @@ class CacheManager:
             try:
                 if os.path.isfile(filepath) and os.path.getmtime(filepath) < cutoff:
                     os.remove(filepath)
-                    print(f"Removed expired cache file: {filename}")
+                    logger.debug("Removed expired cache file: %s", filename)
             except OSError as e:
-                print(f"Error removing cache file {filepath}: {e}")
+                logger.warning("Error removing cache file %s: %s", filepath, e)
