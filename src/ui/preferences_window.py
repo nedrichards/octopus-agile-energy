@@ -8,6 +8,7 @@ import time
 import logging
 from ..utils import CacheManager
 from ..secrets_manager import get_api_key, store_api_key, clear_api_key
+from ..price_logic import build_region_to_tariffs_map
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
         # self.all_regions now stores full names for display in dropdown
         self.all_regions = sorted(list(self.REGION_CODE_TO_NAME.values()))
         self.region_to_tariffs = {} # To be populated by API data for these regions
+        self._load_generation = 0
 
         self.setup_ui()
         self.load_tariffs_and_regions() # Initiate loading of tariff data
@@ -138,16 +140,36 @@ class PreferencesWindow(Adw.PreferencesWindow):
         """
         Fetches available Octopus Agile tariffs in a separate thread.
         """
+        self._load_generation += 1
+        request_id = self._load_generation
         self.region_dropdown.set_sensitive(True)
         self.tariff_dropdown.set_sensitive(False)
         self.region_row.set_subtitle("Select your region.")
         self.tariff_row.set_subtitle("Fetching tariffs...")
 
-        thread = threading.Thread(target=self._fetch_agile_tariffs)
+        thread = threading.Thread(target=self._fetch_agile_tariffs, kwargs={'request_id': request_id})
         thread.daemon = True
         thread.start()
 
-    def _fetch_agile_tariffs(self):
+    def _is_current_load(self, request_id):
+        return request_id == self._load_generation
+
+    def _apply_tariff_data(self, region_to_tariffs_map, request_id):
+        if not self._is_current_load(request_id):
+            return False
+
+        self.region_to_tariffs = region_to_tariffs_map
+        self._update_dropdowns_ui()
+        return False
+
+    def _show_load_error_if_current(self, message, request_id):
+        if not self._is_current_load(request_id):
+            return False
+
+        self._show_load_error(message)
+        return False
+
+    def _fetch_agile_tariffs(self, request_id=None):
         """
         Fetches the latest tariff data from the Octopus API based on the selected type.
         """
@@ -188,7 +210,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
                     break
             
             if not target_product:
-                GLib.idle_add(self._show_load_error, f"No active {tariff_type} tariff found.")
+                GLib.idle_add(self._show_load_error_if_current, f"No active {tariff_type} tariff found.", request_id)
                 return
 
             product_url = f"https://api.octopus.energy/v1/products/{target_product['code']}/"
@@ -211,43 +233,22 @@ class PreferencesWindow(Adw.PreferencesWindow):
                 self.cache_manager.set(product_cache_key, product_details)
                 logger.debug("Product %s data fetched from API and cached.", target_product['code'])
 
-            self._process_agile_tariffs(product_details)
+            if not self._is_current_load(request_id):
+                return
+
+            self._process_agile_tariffs(product_details, request_id)
 
         except requests.exceptions.RequestException as e:
-            GLib.idle_add(self._show_load_error, f"Network error: {e}. Cannot load tariffs.")
+            GLib.idle_add(self._show_load_error_if_current, f"Network error: {e}. Cannot load tariffs.", request_id)
         except Exception as e:
-            GLib.idle_add(self._show_load_error, f"Error processing data: {e}.")
+            GLib.idle_add(self._show_load_error_if_current, f"Error processing data: {e}.", request_id)
 
-    def _process_agile_tariffs(self, product_data):
+    def _process_agile_tariffs(self, product_data, request_id):
         """
         Processes the fetched Agile tariff data to populate the dropdowns.
         """
-        region_to_tariffs_map = {code: [] for code in self.REGION_CODE_TO_NAME.keys()}
-        
-        product_name = product_data.get('full_name', 'Agile Tariff')
-
-        tariffs = product_data.get('single_register_electricity_tariffs', {})
-        for region_code, tariff_types in tariffs.items():
-            if region_code in self.REGION_CODE_TO_NAME:
-                region_name = self.REGION_CODE_TO_NAME[region_code]
-                tariff_code = None
-                if 'direct_debit_monthly' in tariff_types and 'code' in tariff_types['direct_debit_monthly']:
-                     tariff_code = tariff_types['direct_debit_monthly']['code']
-                else: 
-                    for payment_method in tariff_types.values():
-                        if isinstance(payment_method, dict) and 'code' in payment_method:
-                            tariff_code = payment_method['code']
-                            break
-                
-                if tariff_code:
-                    full_name = f"{product_name} ({region_name})"
-                    region_to_tariffs_map[region_code].append({
-                        'code': tariff_code,
-                        'full_name': full_name
-                    })
-
-        self.region_to_tariffs = region_to_tariffs_map
-        GLib.idle_add(self._update_dropdowns_ui)
+        region_to_tariffs_map = build_region_to_tariffs_map(product_data, self.REGION_CODE_TO_NAME)
+        GLib.idle_add(self._apply_tariff_data, region_to_tariffs_map, request_id)
 
     def _update_dropdowns_ui(self):
         """
@@ -282,8 +283,6 @@ class PreferencesWindow(Adw.PreferencesWindow):
             self.region_dropdown.set_sensitive(False)
 
         self._update_tariff_dropdown_for_region()
-        self.tariff_dropdown.set_sensitive(True)
-        self.tariff_row.set_subtitle("Select your tariff from the list.")
 
         self.region_dropdown.handler_unblock(self.region_handler_id)
         self.tariff_dropdown.handler_unblock(self.tariff_handler_id)

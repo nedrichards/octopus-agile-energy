@@ -11,6 +11,7 @@ from .preferences_window import PreferencesWindow
 from .custom_spin_button import CustomSpinButton
 from ..utils import CacheManager
 from ..secrets_manager import get_api_key
+from ..price_logic import extract_product_code, find_cheapest_slot as calculate_cheapest_slot
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.timer_id = None
         self.best_slot_start_time = None
         self.is_first_expansion = True
+        self._fetch_generation = 0
 
         self.connect("notify::visible", self.on_visibility_change)
 
@@ -92,7 +94,8 @@ class MainWindow(Adw.ApplicationWindow):
         This method is now called from setup_ui to create a widget to be appended.
         """
         header_bar = Adw.HeaderBar.new()
-        header_bar.set_title_widget(Adw.WindowTitle.new("Octopus Agile Prices", ""))
+        self.header_title_widget = Adw.WindowTitle.new("Octopus Agile Prices", "")
+        header_bar.set_title_widget(self.header_title_widget)
 
         # Refresh button on the left.
         self.header_refresh_button = Gtk.Button.new_from_icon_name("view-refresh-symbolic")
@@ -148,6 +151,11 @@ class MainWindow(Adw.ApplicationWindow):
         self.get_application().add_action(find_cheapest_action)
         self.get_application().set_accels_for_action("app.find_cheapest", ["<primary>f"])
 
+        help_action = Gio.SimpleAction.new("show-help-overlay", None)
+        help_action.connect("activate", self.on_show_help_overlay)
+        self.get_application().add_action(help_action)
+        self.get_application().set_accels_for_action("app.show-help-overlay", ["question"])
+
     def on_find_cheapest_action(self, action, param):
         """
         Handles the find cheapest action by expanding the expander row and focusing the duration spin button.
@@ -161,14 +169,9 @@ class MainWindow(Adw.ApplicationWindow):
         """
         if keyval == Gdk.KEY_question:
             self.on_show_help_overlay(None, None)
+            return True
 
-
-
-        # Find cheapest time action
-        find_cheapest_action = Gio.SimpleAction.new("find_cheapest", None)
-        find_cheapest_action.connect("activate", self.on_find_cheapest_action)
-        self.get_application().add_action(find_cheapest_action)
-        self.get_application().set_accels_for_action("app.find_cheapest", ["<primary>f"])
+        return False
 
     def on_show_help_overlay(self, action, param):
         builder = Gtk.Builder.new_from_resource(
@@ -177,11 +180,6 @@ class MainWindow(Adw.ApplicationWindow):
         help_window = builder.get_object("help_overlay")
         help_window.set_transient_for(self)
         help_window.present()
-
-        # Show help overlay action
-        help_action = Gio.SimpleAction.new("show-help-overlay", None)
-        help_action.connect("activate", self.on_show_help_overlay)
-        self.add_action(help_action)
 
     def on_about_action(self, action, param):
         """
@@ -192,9 +190,9 @@ class MainWindow(Adw.ApplicationWindow):
             application_name="Octopus Agile Prices",
             application_icon="com.nedrichards.octopusagile",
             developer_name="Nick Richards",
-            version="1.0.7",
+            version="1.0.8",
             website="https://www.nedrichards.com/2025/07/octopus-agile-prices-for-linux/",
-            copyright="© 2025 Nick Richards",
+            copyright="© 2026 Nick Richards",
             license_type=Gtk.License.GPL_3_0
         )
         about_dialog.present()
@@ -237,11 +235,11 @@ class MainWindow(Adw.ApplicationWindow):
         """
         Callback for when a GSettings key changes. Triggers a price refresh.
         """
-        if self.preferences_window:
-            return
-
         if key == "selected-tariff-type":
             self._update_window_title()
+
+        if self.preferences_window and self.preferences_window.is_visible():
+            return
 
         logger.debug("Setting '%s' changed. Refreshing price data.", key)
         self.refresh_price()
@@ -409,59 +407,45 @@ class MainWindow(Adw.ApplicationWindow):
 
     def find_cheapest_slot(self, duration_hours, start_within_hours):
         self.price_chart.set_highlight_range(None, None) # Clear previous highlight
-        num_slots = duration_hours * 2
         now = datetime.now(timezone.utc)
-        
-        prices_to_search = [p for p in self.all_prices if now <= p['valid_from'] < now + timedelta(hours=start_within_hours)]
+        cheapest_slot = calculate_cheapest_slot(
+            self.all_prices,
+            now,
+            duration_hours,
+            start_within_hours,
+        )
 
-        if len(prices_to_search) < num_slots:
+        if not cheapest_slot:
             self.best_slot_result_label.set_text("Not enough data to find the cheapest time.")
             self.best_slot_result_row.set_visible(True)
             self.average_price_row.set_visible(False)
             self.timer_row.set_visible(False)
             return
 
-        min_price = float('inf')
-        best_start_index = -1
-
-        for i in range(len(prices_to_search) - num_slots + 1):
-            window = prices_to_search[i:i+num_slots]
-            current_price = sum(p['price_gbp'] for p in window)
-            if current_price < min_price:
-                min_price = current_price
-                best_start_index = i
-
         if self.timer_id:
             GLib.source_remove(self.timer_id)
             self.timer_id = None
 
-        if best_start_index != -1:
-            best_slot_start_time = prices_to_search[best_start_index]['valid_from']
-            best_slot_end_time = prices_to_search[best_start_index + num_slots - 1]['valid_to']
-            self.price_chart.set_highlight_range(best_slot_start_time, best_slot_end_time)
-            
-            self.best_slot_result_label.set_text(f"{best_slot_start_time.astimezone().strftime('%H:%M')}")
-            self.best_slot_result_row.set_visible(True)
+        best_slot_start_time = cheapest_slot['start']
+        best_slot_end_time = cheapest_slot['end']
+        self.price_chart.set_highlight_range(best_slot_start_time, best_slot_end_time)
 
-            average_price = min_price / num_slots
-            self.average_price_label.set_text(f"£{average_price:.2f}/kWh")
-            self.average_price_row.set_visible(True)
+        self.best_slot_result_label.set_text(f"{best_slot_start_time.astimezone().strftime('%H:%M')}")
+        self.best_slot_result_row.set_visible(True)
 
-            delta = best_slot_start_time.astimezone() - datetime.now().astimezone()
-            if delta.total_seconds() > 0:
-                self.best_slot_start_time = best_slot_start_time.astimezone()
-                self.timer_id = GLib.timeout_add_seconds(1, self._update_countdown)
-                self._update_countdown() # Initial update
-                self.timer_row.set_visible(True)
-            else:
-                self.timer_label.set_text("The cheapest time is now.")
-                self.timer_row.set_visible(True)
+        average_price = cheapest_slot['average_price_gbp']
+        self.average_price_label.set_text(f"£{average_price:.2f}/kWh")
+        self.average_price_row.set_visible(True)
 
+        delta = best_slot_start_time.astimezone() - datetime.now().astimezone()
+        if delta.total_seconds() > 0:
+            self.best_slot_start_time = best_slot_start_time.astimezone()
+            self.timer_id = GLib.timeout_add_seconds(1, self._update_countdown)
+            self._update_countdown() # Initial update
+            self.timer_row.set_visible(True)
         else:
-            self.best_slot_result_label.set_text("Could not find a cheapest time.")
-            self.best_slot_result_row.set_visible(True)
-            self.average_price_row.set_visible(False)
-            self.timer_row.set_visible(False)
+            self.timer_label.set_text("The cheapest time is now.")
+            self.timer_row.set_visible(True)
 
     def _update_countdown(self):
         if not self.best_slot_start_time:
@@ -484,17 +468,40 @@ class MainWindow(Adw.ApplicationWindow):
         Initiates the price data fetching process in a separate thread.
         Sets the UI to a loading state.
         """
+        self._fetch_generation += 1
+        request_id = self._fetch_generation
         self.price_card.set_description("Fetching the latest prices...")
         self.price_card.remove_css_class("price-high")
         self.price_card.remove_css_class("price-medium")
         self.price_card.remove_css_class("price-low")
         self.price_card.remove_css_class("price-negative")
 
-        thread = threading.Thread(target=self.fetch_price_data, kwargs={'force': force})
+        thread = threading.Thread(
+            target=self.fetch_price_data,
+            kwargs={'force': force, 'request_id': request_id}
+        )
         thread.daemon = True
         thread.start()
 
-    def fetch_price_data(self, force=False):
+    def _is_current_fetch(self, request_id):
+        return request_id == self._fetch_generation
+
+    def _apply_processed_prices(self, processed_prices, request_id):
+        if not self._is_current_fetch(request_id):
+            return False
+
+        self.all_prices = processed_prices
+        self.update_current_price()
+        return False
+
+    def _show_error_if_current(self, error_message, request_id):
+        if not self._is_current_fetch(request_id):
+            return False
+
+        self.show_error(error_message)
+        return False
+
+    def fetch_price_data(self, force=False, request_id=None):
         """
         Fetches and processes electricity price data from the Octopus Energy API.
         """
@@ -505,17 +512,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         try:
             tariff_type = self.settings.get_string("selected-tariff-type")
-            product_code = None
-            
-            # Intelligent Octopus Go uses a different product code format
-            if tariff_type == 'INTELLIGENT':
-                # Example: INTELLIGENT-OCTOPUS-GO-24-10-01
-                parts = selected_tariff_code.split('-')
-                product_code = '-'.join(parts[2:-1])
-            else:
-                # Agile and Go format
-                parts = selected_tariff_code.split('-')
-                product_code = '-'.join(parts[2:-1])
+            product_code = extract_product_code(selected_tariff_code)
                 
             now = datetime.now(timezone.utc)
             rates_cache_key = f"octopus_rates_{selected_tariff_code}_{now.strftime('%Y-%m-%d')}"
@@ -556,19 +553,22 @@ class MainWindow(Adw.ApplicationWindow):
                 raw_rates = sorted(filtered_rates_dict.values(), key=lambda x: x['valid_from'])
                 self.cache_manager.set(rates_cache_key, raw_rates)
 
+            if not self._is_current_fetch(request_id):
+                return
+
             if raw_rates:
-                self._process_and_set_prices(raw_rates)
+                self._process_and_set_prices(raw_rates, request_id)
             else:
-                GLib.idle_add(self.show_error, "No price data available from API.")
+                GLib.idle_add(self._show_error_if_current, "No price data available from API.", request_id)
 
         except requests.exceptions.RequestException as e:
-            GLib.idle_add(self.show_error, f"Network error: {type(e).__name__}")
+            GLib.idle_add(self._show_error_if_current, f"Network error: {type(e).__name__}", request_id)
         except Exception as e:
             import traceback
             traceback.print_exc()
-            GLib.idle_add(self.show_error, f"An unexpected error occurred: {e}")
+            GLib.idle_add(self._show_error_if_current, f"An unexpected error occurred: {e}", request_id)
 
-    def _process_and_set_prices(self, raw_rates):
+    def _process_and_set_prices(self, raw_rates, request_id):
         """
         Processes raw price data by converting dates and prices, then updates the main price list.
         This centralized processing improves performance by avoiding redundant conversions.
@@ -584,9 +584,8 @@ class MainWindow(Adw.ApplicationWindow):
             except (ValueError, KeyError) as e:
                 logger.warning("Skipping rate due to processing error: %s", e)
                 continue
-        
-        self.all_prices = processed_prices
-        GLib.idle_add(self.update_current_price)
+
+        GLib.idle_add(self._apply_processed_prices, processed_prices, request_id)
 
     def update_current_price(self):
         """
@@ -650,6 +649,6 @@ class MainWindow(Adw.ApplicationWindow):
         """
         self.price_card.set_title("Error")
         self.price_card.set_description("Could not fetch price data.")
-        self.status_label.set_markup(f"<span foreground='{self.get_style_context().get_color().to_string()}'>{error_message}</span>")
+        self.status_label.set_text(error_message)
         self.toast_overlay.add_toast(Adw.Toast.new(f"Error: {error_message}"))
         self.header_refresh_button.set_sensitive(True)

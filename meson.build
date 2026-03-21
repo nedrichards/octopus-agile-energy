@@ -1,5 +1,5 @@
 project('octopusagile',
-          version: '1.0.7',
+          version: '1.0.8',
     meson_version: '>= 1.0.0',
   default_options: [ 'warning_level=2', 'werror=false', ],
 )
@@ -12,6 +12,7 @@ gnome = import('gnome')
 
 subdir('data')
 subdir('src')
+subdir('tests')
 subdir('po')
 
 gnome.post_install(
@@ -19,4 +20,3 @@ gnome.post_install(
     gtk_update_icon_cache: true,
   update_desktop_database: true,
 )
-

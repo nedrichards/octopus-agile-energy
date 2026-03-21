@@ -42,6 +42,21 @@
   </screenshots>
 
   <releases>
+    <release version="1.0.8" date="2026-03-21">
+      <description>
+        <ul>
+          <li>Add adaptive horizontal grid lines and price labels to the chart</li>
+          <li>Add a day transition indicator to the forecast chart</li>
+          <li>Refine current price highlight for better visual clarity</li>
+          <li>Improve chart layout and margins</li>
+          <li>Update documentation and forecast range information</li>
+          <li>Fix duplicate shortcut action registration and ensure tariff title updates correctly</li>
+          <li>Prevent stale background refreshes from overwriting newer data</li>
+          <li>Harden error display and cache cleanup logging</li>
+          <li>Add unit tests for pricing and tariff selection logic</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.7" date="2026-03-09">
       <description translate="no">
         <p>This release includes the highly-requested average price calculation alongside finding the cheapest time to use electricity.</p>
