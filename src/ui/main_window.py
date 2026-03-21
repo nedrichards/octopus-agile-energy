@@ -44,6 +44,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.timer_id = None
         self.best_slot_start_time = None
         self.is_first_expansion = True
+        self._fetch_generation = 0
 
         self.connect("notify::visible", self.on_visibility_change)
 
@@ -480,17 +481,40 @@ class MainWindow(Adw.ApplicationWindow):
         Initiates the price data fetching process in a separate thread.
         Sets the UI to a loading state.
         """
+        self._fetch_generation += 1
+        request_id = self._fetch_generation
         self.price_card.set_description("Fetching the latest prices...")
         self.price_card.remove_css_class("price-high")
         self.price_card.remove_css_class("price-medium")
         self.price_card.remove_css_class("price-low")
         self.price_card.remove_css_class("price-negative")
 
-        thread = threading.Thread(target=self.fetch_price_data, kwargs={'force': force})
+        thread = threading.Thread(
+            target=self.fetch_price_data,
+            kwargs={'force': force, 'request_id': request_id}
+        )
         thread.daemon = True
         thread.start()
 
-    def fetch_price_data(self, force=False):
+    def _is_current_fetch(self, request_id):
+        return request_id == self._fetch_generation
+
+    def _apply_processed_prices(self, processed_prices, request_id):
+        if not self._is_current_fetch(request_id):
+            return False
+
+        self.all_prices = processed_prices
+        self.update_current_price()
+        return False
+
+    def _show_error_if_current(self, error_message, request_id):
+        if not self._is_current_fetch(request_id):
+            return False
+
+        self.show_error(error_message)
+        return False
+
+    def fetch_price_data(self, force=False, request_id=None):
         """
         Fetches and processes electricity price data from the Octopus Energy API.
         """
@@ -552,19 +576,22 @@ class MainWindow(Adw.ApplicationWindow):
                 raw_rates = sorted(filtered_rates_dict.values(), key=lambda x: x['valid_from'])
                 self.cache_manager.set(rates_cache_key, raw_rates)
 
+            if not self._is_current_fetch(request_id):
+                return
+
             if raw_rates:
-                self._process_and_set_prices(raw_rates)
+                self._process_and_set_prices(raw_rates, request_id)
             else:
-                GLib.idle_add(self.show_error, "No price data available from API.")
+                GLib.idle_add(self._show_error_if_current, "No price data available from API.", request_id)
 
         except requests.exceptions.RequestException as e:
-            GLib.idle_add(self.show_error, f"Network error: {type(e).__name__}")
+            GLib.idle_add(self._show_error_if_current, f"Network error: {type(e).__name__}", request_id)
         except Exception as e:
             import traceback
             traceback.print_exc()
-            GLib.idle_add(self.show_error, f"An unexpected error occurred: {e}")
+            GLib.idle_add(self._show_error_if_current, f"An unexpected error occurred: {e}", request_id)
 
-    def _process_and_set_prices(self, raw_rates):
+    def _process_and_set_prices(self, raw_rates, request_id):
         """
         Processes raw price data by converting dates and prices, then updates the main price list.
         This centralized processing improves performance by avoiding redundant conversions.
@@ -580,9 +607,8 @@ class MainWindow(Adw.ApplicationWindow):
             except (ValueError, KeyError) as e:
                 logger.warning("Skipping rate due to processing error: %s", e)
                 continue
-        
-        self.all_prices = processed_prices
-        GLib.idle_add(self.update_current_price)
+
+        GLib.idle_add(self._apply_processed_prices, processed_prices, request_id)
 
     def update_current_price(self):
         """
