@@ -11,6 +11,7 @@ from .preferences_window import PreferencesWindow
 from .custom_spin_button import CustomSpinButton
 from ..utils import CacheManager
 from ..secrets_manager import get_api_key
+from ..price_logic import extract_product_code, find_cheapest_slot as calculate_cheapest_slot
 
 logger = logging.getLogger(__name__)
 
@@ -406,59 +407,45 @@ class MainWindow(Adw.ApplicationWindow):
 
     def find_cheapest_slot(self, duration_hours, start_within_hours):
         self.price_chart.set_highlight_range(None, None) # Clear previous highlight
-        num_slots = duration_hours * 2
         now = datetime.now(timezone.utc)
-        
-        prices_to_search = [p for p in self.all_prices if now <= p['valid_from'] < now + timedelta(hours=start_within_hours)]
+        cheapest_slot = calculate_cheapest_slot(
+            self.all_prices,
+            now,
+            duration_hours,
+            start_within_hours,
+        )
 
-        if len(prices_to_search) < num_slots:
+        if not cheapest_slot:
             self.best_slot_result_label.set_text("Not enough data to find the cheapest time.")
             self.best_slot_result_row.set_visible(True)
             self.average_price_row.set_visible(False)
             self.timer_row.set_visible(False)
             return
 
-        min_price = float('inf')
-        best_start_index = -1
-
-        for i in range(len(prices_to_search) - num_slots + 1):
-            window = prices_to_search[i:i+num_slots]
-            current_price = sum(p['price_gbp'] for p in window)
-            if current_price < min_price:
-                min_price = current_price
-                best_start_index = i
-
         if self.timer_id:
             GLib.source_remove(self.timer_id)
             self.timer_id = None
 
-        if best_start_index != -1:
-            best_slot_start_time = prices_to_search[best_start_index]['valid_from']
-            best_slot_end_time = prices_to_search[best_start_index + num_slots - 1]['valid_to']
-            self.price_chart.set_highlight_range(best_slot_start_time, best_slot_end_time)
-            
-            self.best_slot_result_label.set_text(f"{best_slot_start_time.astimezone().strftime('%H:%M')}")
-            self.best_slot_result_row.set_visible(True)
+        best_slot_start_time = cheapest_slot['start']
+        best_slot_end_time = cheapest_slot['end']
+        self.price_chart.set_highlight_range(best_slot_start_time, best_slot_end_time)
 
-            average_price = min_price / num_slots
-            self.average_price_label.set_text(f"£{average_price:.2f}/kWh")
-            self.average_price_row.set_visible(True)
+        self.best_slot_result_label.set_text(f"{best_slot_start_time.astimezone().strftime('%H:%M')}")
+        self.best_slot_result_row.set_visible(True)
 
-            delta = best_slot_start_time.astimezone() - datetime.now().astimezone()
-            if delta.total_seconds() > 0:
-                self.best_slot_start_time = best_slot_start_time.astimezone()
-                self.timer_id = GLib.timeout_add_seconds(1, self._update_countdown)
-                self._update_countdown() # Initial update
-                self.timer_row.set_visible(True)
-            else:
-                self.timer_label.set_text("The cheapest time is now.")
-                self.timer_row.set_visible(True)
+        average_price = cheapest_slot['average_price_gbp']
+        self.average_price_label.set_text(f"£{average_price:.2f}/kWh")
+        self.average_price_row.set_visible(True)
 
+        delta = best_slot_start_time.astimezone() - datetime.now().astimezone()
+        if delta.total_seconds() > 0:
+            self.best_slot_start_time = best_slot_start_time.astimezone()
+            self.timer_id = GLib.timeout_add_seconds(1, self._update_countdown)
+            self._update_countdown() # Initial update
+            self.timer_row.set_visible(True)
         else:
-            self.best_slot_result_label.set_text("Could not find a cheapest time.")
-            self.best_slot_result_row.set_visible(True)
-            self.average_price_row.set_visible(False)
-            self.timer_row.set_visible(False)
+            self.timer_label.set_text("The cheapest time is now.")
+            self.timer_row.set_visible(True)
 
     def _update_countdown(self):
         if not self.best_slot_start_time:
@@ -525,17 +512,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         try:
             tariff_type = self.settings.get_string("selected-tariff-type")
-            product_code = None
-            
-            # Intelligent Octopus Go uses a different product code format
-            if tariff_type == 'INTELLIGENT':
-                # Example: INTELLIGENT-OCTOPUS-GO-24-10-01
-                parts = selected_tariff_code.split('-')
-                product_code = '-'.join(parts[2:-1])
-            else:
-                # Agile and Go format
-                parts = selected_tariff_code.split('-')
-                product_code = '-'.join(parts[2:-1])
+            product_code = extract_product_code(selected_tariff_code)
                 
             now = datetime.now(timezone.utc)
             rates_cache_key = f"octopus_rates_{selected_tariff_code}_{now.strftime('%Y-%m-%d')}"

@@ -33,6 +33,7 @@ install_data(
     'main.py',
     'utils.py',
     'secrets_manager.py',
+    'price_logic.py',
   ],
   install_dir: moduledir
 )

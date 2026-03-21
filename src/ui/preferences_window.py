@@ -8,6 +8,7 @@ import time
 import logging
 from ..utils import CacheManager
 from ..secrets_manager import get_api_key, store_api_key, clear_api_key
+from ..price_logic import build_region_to_tariffs_map
 
 logger = logging.getLogger(__name__)
 
@@ -246,30 +247,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
         """
         Processes the fetched Agile tariff data to populate the dropdowns.
         """
-        region_to_tariffs_map = {code: [] for code in self.REGION_CODE_TO_NAME.keys()}
-        
-        product_name = product_data.get('full_name', 'Agile Tariff')
-
-        tariffs = product_data.get('single_register_electricity_tariffs', {})
-        for region_code, tariff_types in tariffs.items():
-            if region_code in self.REGION_CODE_TO_NAME:
-                region_name = self.REGION_CODE_TO_NAME[region_code]
-                tariff_code = None
-                if 'direct_debit_monthly' in tariff_types and 'code' in tariff_types['direct_debit_monthly']:
-                     tariff_code = tariff_types['direct_debit_monthly']['code']
-                else: 
-                    for payment_method in tariff_types.values():
-                        if isinstance(payment_method, dict) and 'code' in payment_method:
-                            tariff_code = payment_method['code']
-                            break
-                
-                if tariff_code:
-                    full_name = f"{product_name} ({region_name})"
-                    region_to_tariffs_map[region_code].append({
-                        'code': tariff_code,
-                        'full_name': full_name
-                    })
-
+        region_to_tariffs_map = build_region_to_tariffs_map(product_data, self.REGION_CODE_TO_NAME)
         GLib.idle_add(self._apply_tariff_data, region_to_tariffs_map, request_id)
 
     def _update_dropdowns_ui(self):
