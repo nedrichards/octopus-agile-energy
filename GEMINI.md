@@ -8,9 +8,11 @@ This is a GTK desktop application that displays Octopus Agile electricity prices
 
 ## Key Features
 
-*   **Price Chart:** Displays Octopus Agile electricity prices for the next 48 hours.
-*   **Current Price Highlight:** The current price is highlighted in the chart.
+*   **48-Hour Price Chart:** Displays Octopus Agile electricity prices for the next 48 hours with adaptive horizontal grid lines and price labels.
+*   **Visual Enhancements:** Features a day transition indicator for "Tomorrow" and a three-sided highlight for the current price slot to maintain a clean baseline.
 *   **Find Cheapest Time:** A feature to find the cheapest time to use electricity based on a given duration and time window.
+*   **Tariff Support:** Supports Agile, Go, and Intelligent Octopus Go tariffs.
+*   **Average Price Calculation:** Displays average prices for selected periods.
 
 ## Accessibility
 
@@ -24,7 +26,7 @@ We are committed to providing good accessibility for all users. The application 
 ## Technologies Used
 
 *   **Language:** Python
-*   **UI Framework:** GTK4 with LibAdwaita
+*   **UI Framework:** GTK4 with LibAdwaita (Targeting GNOME 50)
 *   **Build System:** Meson
 *   **Packaging:** Flatpak
 
