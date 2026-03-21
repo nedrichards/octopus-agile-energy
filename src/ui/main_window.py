@@ -92,7 +92,8 @@ class MainWindow(Adw.ApplicationWindow):
         This method is now called from setup_ui to create a widget to be appended.
         """
         header_bar = Adw.HeaderBar.new()
-        header_bar.set_title_widget(Adw.WindowTitle.new("Octopus Agile Prices", ""))
+        self.header_title_widget = Adw.WindowTitle.new("Octopus Agile Prices", "")
+        header_bar.set_title_widget(self.header_title_widget)
 
         # Refresh button on the left.
         self.header_refresh_button = Gtk.Button.new_from_icon_name("view-refresh-symbolic")
@@ -148,6 +149,11 @@ class MainWindow(Adw.ApplicationWindow):
         self.get_application().add_action(find_cheapest_action)
         self.get_application().set_accels_for_action("app.find_cheapest", ["<primary>f"])
 
+        help_action = Gio.SimpleAction.new("show-help-overlay", None)
+        help_action.connect("activate", self.on_show_help_overlay)
+        self.get_application().add_action(help_action)
+        self.get_application().set_accels_for_action("app.show-help-overlay", ["question"])
+
     def on_find_cheapest_action(self, action, param):
         """
         Handles the find cheapest action by expanding the expander row and focusing the duration spin button.
@@ -161,14 +167,9 @@ class MainWindow(Adw.ApplicationWindow):
         """
         if keyval == Gdk.KEY_question:
             self.on_show_help_overlay(None, None)
+            return True
 
-
-
-        # Find cheapest time action
-        find_cheapest_action = Gio.SimpleAction.new("find_cheapest", None)
-        find_cheapest_action.connect("activate", self.on_find_cheapest_action)
-        self.get_application().add_action(find_cheapest_action)
-        self.get_application().set_accels_for_action("app.find_cheapest", ["<primary>f"])
+        return False
 
     def on_show_help_overlay(self, action, param):
         builder = Gtk.Builder.new_from_resource(
@@ -177,11 +178,6 @@ class MainWindow(Adw.ApplicationWindow):
         help_window = builder.get_object("help_overlay")
         help_window.set_transient_for(self)
         help_window.present()
-
-        # Show help overlay action
-        help_action = Gio.SimpleAction.new("show-help-overlay", None)
-        help_action.connect("activate", self.on_show_help_overlay)
-        self.add_action(help_action)
 
     def on_about_action(self, action, param):
         """
@@ -237,11 +233,11 @@ class MainWindow(Adw.ApplicationWindow):
         """
         Callback for when a GSettings key changes. Triggers a price refresh.
         """
-        if self.preferences_window:
-            return
-
         if key == "selected-tariff-type":
             self._update_window_title()
+
+        if self.preferences_window and self.preferences_window.is_visible():
+            return
 
         logger.debug("Setting '%s' changed. Refreshing price data.", key)
         self.refresh_price()
