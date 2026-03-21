@@ -1,8 +1,9 @@
-import os
-import json
 import hashlib
-import time
+import json
 import logging
+import os
+import time
+
 from gi.repository import GLib
 
 logger = logging.getLogger(__name__)
@@ -60,13 +61,13 @@ class CacheManager:
         filepath = self._get_cache_filepath(key)
         # Create a temporary file in the same directory
         temp_filepath = filepath + ".tmp"
-        
+
         try:
             with open(temp_filepath, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
                 f.flush()
                 os.fsync(f.fileno())  # Ensure data is flushed to disk
-                
+
             # Atomically replace the old file with the new one
             os.replace(temp_filepath, filepath)
             logger.debug("Successfully updated cache for key: %s", key)

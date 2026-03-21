@@ -1,9 +1,11 @@
 import gi
+
 gi.require_version('Gtk', '4.0')
-from gi.repository import Gtk, Gdk
-from datetime import datetime
-import cairo
 import math
+
+import cairo
+from gi.repository import Gtk
+
 
 class PriceChartWidget(Gtk.DrawingArea):
     """
@@ -34,7 +36,7 @@ class PriceChartWidget(Gtk.DrawingArea):
         click_controller = Gtk.GestureClick.new()
         click_controller.connect('pressed', self.on_click)
         self.add_controller(click_controller)
-        
+
         self.set_has_tooltip(True)
         self.connect("query-tooltip", self.on_query_tooltip)
 
@@ -109,26 +111,26 @@ class PriceChartWidget(Gtk.DrawingArea):
     def on_query_tooltip(self, widget, x, y, keyboard_mode, tooltip):
         if not self.prices:
             return False
-            
+
         width = self.get_width()
         chart_width = width - self.margin_left - self.margin_right
-        
+
         if not (self.margin_left <= x <= width - self.margin_right):
             return False
-            
+
         chart_x = x - self.margin_left
         bar_width = chart_width / len(self.prices)
         hover_index = int(chart_x / bar_width)
-        
+
         if 0 <= hover_index < len(self.prices):
             price_data = self.prices[hover_index]
             price_gbp = price_data['price_gbp']
             valid_from = price_data['valid_from'].astimezone().strftime('%H:%M')
             valid_to = price_data['valid_to'].astimezone().strftime('%H:%M')
-            
+
             tooltip.set_markup(f"<b>{valid_from} - {valid_to}</b>\n£{price_gbp:.2f}/kWh")
             return True
-            
+
         return False
 
     def on_draw(self, area, cr, width, height):

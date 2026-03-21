@@ -1,7 +1,9 @@
 import gi
+
 gi.require_version('Secret', '1')
-from gi.repository import Secret, GLib
 import logging
+
+from gi.repository import GLib, Secret
 
 logger = logging.getLogger(__name__)
 

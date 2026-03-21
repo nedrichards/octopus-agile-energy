@@ -17,14 +17,18 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 import gi
+
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 
-import sys
 import logging
-from gi.repository import Gtk, Adw, Gdk
+import sys
+
+from gi.repository import Adw, Gdk, Gtk
+
 from .ui.main_window import MainWindow
 from .ui.styles import get_css
+
 
 class OctopusAgileApp(Adw.Application):
     def __init__(self):

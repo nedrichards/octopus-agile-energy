@@ -3,7 +3,6 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from price_logic import build_region_to_tariffs_map, extract_product_code, find_cheapest_slot

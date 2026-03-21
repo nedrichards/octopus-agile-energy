@@ -1,2 +1,9 @@
 .gemini/
 gha-creds-*.json
+__pycache__/
+*.py[cod]
+.ruff_cache/
+.venv/
+.flatpak-builder/
+build-dir/
+repo/

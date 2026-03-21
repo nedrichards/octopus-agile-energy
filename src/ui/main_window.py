@@ -1,17 +1,21 @@
 import gi
+
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Gtk, Adw, GLib, Gio, Gdk
-import requests
-from datetime import datetime, timezone, timedelta
-import threading
 import logging
-from .price_chart import PriceChartWidget
-from .preferences_window import PreferencesWindow
-from .custom_spin_button import CustomSpinButton
-from ..utils import CacheManager
+import threading
+from datetime import datetime, timedelta, timezone
+
+import requests
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk
+
+from ..price_logic import extract_product_code
+from ..price_logic import find_cheapest_slot as calculate_cheapest_slot
 from ..secrets_manager import get_api_key
-from ..price_logic import extract_product_code, find_cheapest_slot as calculate_cheapest_slot
+from ..utils import CacheManager
+from .custom_spin_button import CustomSpinButton
+from .preferences_window import PreferencesWindow
+from .price_chart import PriceChartWidget
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +29,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.settings = Gio.Settings.new("com.nedrichards.octopusagile")
         self._update_window_title()
-        
+
         self.set_size_request(700, 900)
 
         self.all_prices = []
@@ -65,7 +69,7 @@ class MainWindow(Adw.ApplicationWindow):
             next_update = now.replace(minute=30, second=0, microsecond=0)
         else:
             next_update = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
-        
+
         delay = (next_update - now).total_seconds()
         GLib.timeout_add_seconds(int(delay), self._on_ui_update_timer)
 
@@ -79,7 +83,7 @@ class MainWindow(Adw.ApplicationWindow):
         next_fetch = now.replace(hour=16, minute=1, second=0, microsecond=0)
         if now > next_fetch:
             next_fetch += timedelta(days=1)
-        
+
         delay = (next_fetch - now).total_seconds()
         GLib.timeout_add_seconds(int(delay), self._on_data_fetch_timer)
 
@@ -208,7 +212,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.get_application().quit()
 
     def on_preferences_action(self, action, param):
-        """ 
+        """
         Opens the Preferences window.
         """
         if not self.preferences_window:
@@ -224,7 +228,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.refresh_price(force=True)
 
     def on_first_run(self):
-        """ 
+        """
         Shows a welcome message and opens the preferences window.
         """
         self.price_card.set_title("Welcome to Octopus Agile Prices")
@@ -252,7 +256,7 @@ class MainWindow(Adw.ApplicationWindow):
             title = "Intelligent Octopus Go Prices"
         else:
             title = "Octopus Agile Prices"
-            
+
         self.set_title(title)
         if hasattr(self, 'header_title_widget'):
             self.header_title_widget.set_title(title)
@@ -513,7 +517,7 @@ class MainWindow(Adw.ApplicationWindow):
         try:
             tariff_type = self.settings.get_string("selected-tariff-type")
             product_code = extract_product_code(selected_tariff_code)
-                
+
             now = datetime.now(timezone.utc)
             rates_cache_key = f"octopus_rates_{selected_tariff_code}_{now.strftime('%Y-%m-%d')}"
 
@@ -528,26 +532,26 @@ class MainWindow(Adw.ApplicationWindow):
                         raw_rates = cached_data
                     else:
                         logger.debug("Stale cache, will refetch.")
-            
+
             if not raw_rates:
                 logger.debug("Fetching new data from API.")
                 rates_url = f"https://api.octopus.energy/v1/products/{product_code}/electricity-tariffs/{selected_tariff_code}/standard-unit-rates/"
-                
+
                 # Use basic auth for intelligent go if API key is provided
                 auth = None
                 api_key = get_api_key()
                 if api_key and tariff_type == 'INTELLIGENT':
                     from requests.auth import HTTPBasicAuth
                     auth = HTTPBasicAuth(api_key, '')
-                    
+
                 response = requests.get(rates_url, params={'page_size': 1500}, timeout=10, auth=auth)
                 response.raise_for_status()
                 data = response.json()
-                
+
                 filtered_rates_dict = {
                     rate['valid_from']: rate
                     for rate in data.get('results', [])
-                    if (datetime.fromisoformat(rate['valid_to'].replace('Z', '+00:00')) - 
+                    if (datetime.fromisoformat(rate['valid_to'].replace('Z', '+00:00')) -
                         datetime.fromisoformat(rate['valid_from'].replace('Z', '+00:00'))) == timedelta(minutes=30)
                 }
                 raw_rates = sorted(filtered_rates_dict.values(), key=lambda x: x['valid_from'])
@@ -600,12 +604,12 @@ class MainWindow(Adw.ApplicationWindow):
             if rate['valid_from'] <= now_utc < rate['valid_to']:
                 current_rate = rate
                 break
-        
+
         if current_rate:
             display_from = current_rate['valid_from']
             display_to = display_from + timedelta(days=2)
             self.chart_prices = [p for p in self.all_prices if display_from <= p['valid_from'] < display_to]
-            
+
             current_index_in_chart = 0 # Current price is always the first in the chart view
             GLib.idle_add(self.update_display, current_rate, self.chart_prices, current_index_in_chart)
         else:

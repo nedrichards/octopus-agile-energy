@@ -1,14 +1,17 @@
 import gi
+
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Gtk, Adw, GLib
-import requests
+import logging
 import threading
 import time
-import logging
-from ..utils import CacheManager
-from ..secrets_manager import get_api_key, store_api_key, clear_api_key
+
+import requests
+from gi.repository import Adw, GLib, Gtk
+
 from ..price_logic import build_region_to_tariffs_map
+from ..secrets_manager import clear_api_key, get_api_key, store_api_key
+from ..utils import CacheManager
 
 logger = logging.getLogger(__name__)
 
@@ -71,13 +74,13 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
         self.tariff_type_dropdown = Gtk.DropDown.new_from_strings(self.TARIFF_TYPES)
         self.tariff_type_dropdown.set_hexpand(True)
-        
+
         # Set initial selected type
         current_type = self.settings.get_string("selected-tariff-type")
         current_type_name = self.TARIFF_CODE_TO_NAME.get(current_type, "Agile")
         if current_type_name in self.TARIFF_TYPES:
             self.tariff_type_dropdown.set_selected(self.TARIFF_TYPES.index(current_type_name))
-            
+
         self.tariff_type_handler_id = self.tariff_type_dropdown.connect("notify::selected-item", self.on_tariff_type_selected)
         self.tariff_type_row.add_suffix(self.tariff_type_dropdown)
 
@@ -110,12 +113,12 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
         self.api_key_entry = Adw.PasswordEntryRow.new()
         self.api_key_entry.set_title("Octopus API Key")
-        
+
         # Load existing key securely
         existing_key = get_api_key()
         if existing_key:
             self.api_key_entry.set_text(existing_key)
-            
+
         self.api_key_entry.connect("changed", self.on_api_key_changed)
         api_group.add(self.api_key_entry)
 
@@ -132,7 +135,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
         selected_display_name = dropdown.get_selected_item().get_string() if dropdown.get_selected_item() else ""
         selected_type_code = self.TARIFF_TYPE_CODES.get(selected_display_name, "AGILE")
         self.settings.set_string("selected-tariff-type", selected_type_code)
-        
+
         # Trigger reload of tariffs
         self.load_tariffs_and_regions()
 
@@ -189,26 +192,26 @@ class PreferencesWindow(Adw.PreferencesWindow):
                 data = response.json()
                 self.cache_manager.set(cache_key, data)
                 logger.debug("All products data fetched from API and cached.")
-            
+
             target_product = None
             for product in data.get('results', []):
                 # Filter by tariff type
                 is_match = False
                 code = product['code'].upper()
                 name = product.get('full_name', '').upper()
-                
+
                 if tariff_type == 'AGILE' and 'AGILE' in code:
                     is_match = True
                 elif tariff_type == 'GO' and ('GO' in code or 'GO' in name) and 'INTELLIGENT' not in code and 'INTELLIGENT' not in name:
                     is_match = True
                 elif tariff_type == 'INTELLIGENT' and ('INTELLIGENT' in code or 'INTELLIGENT' in name):
                     is_match = True
-                    
+
                 if is_match and product.get('available_from') and not product.get('available_to'):
                     target_product = product
                     logger.debug("Found active %s product: %s", tariff_type, product['code'])
                     break
-            
+
             if not target_product:
                 GLib.idle_add(self._show_load_error_if_current, f"No active {tariff_type} tariff found.", request_id)
                 return
@@ -226,7 +229,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
                 if api_key and tariff_type == 'INTELLIGENT':
                     from requests.auth import HTTPBasicAuth
                     auth = HTTPBasicAuth(api_key, '')
-                    
+
                 product_response = requests.get(product_url, timeout=10, auth=auth)
                 product_response.raise_for_status()
                 product_details = product_response.json()

@@ -69,6 +69,17 @@ To change your region or tariff:
 
 The application will automatically refresh the price data when settings are changed.
 
+## Development
+
+### Linting
+
+This project uses Ruff for Python linting. Ruff supports `pyproject.toml` configuration and is a good fit here because it covers the Flake8-style checks we want with a simpler toolchain.
+
+```bash
+python3 -m pip install -r requirements-dev.txt
+python3 -m ruff check src tests
+```
+
 ## License
 
 This project is licensed under the GNU General Public License v3.0 or later (GPL-3.0-or-later).

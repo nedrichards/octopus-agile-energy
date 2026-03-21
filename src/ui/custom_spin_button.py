@@ -1,6 +1,8 @@
 import gi
+
 gi.require_version('Gtk', '4.0')
-from gi.repository import Gtk, GObject
+from gi.repository import GObject, Gtk
+
 
 class CustomSpinButton(Gtk.Box):
     __gsignals__ = {
@@ -9,7 +11,7 @@ class CustomSpinButton(Gtk.Box):
 
     def __init__(self, min_val=1, max_val=24, step=1):
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        
+
         self.min_val = min_val
         self.max_val = max_val
         self.step = step
