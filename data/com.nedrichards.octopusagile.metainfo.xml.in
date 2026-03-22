@@ -51,13 +51,30 @@
   </screenshots>
 
   <releases>
-    <release version="1.0.8" date="2026-03-21">
+    <release version="1.0.9" date="2026-03-22">
       <description>
-        <p>This release makes the app easier to use across more screen sizes while improving price planning.</p>
+        <p>This release improves planning tools and makes the interface adapt more cleanly across screen sizes.</p>
         <ul>
           <li>Improve the chart with clearer labels, day boundaries, and adaptive sizing</li>
           <li>Improve adaptive window layouts across screen sizes</li>
+          <li>Auto-scroll the chart to the selected cheapest time window</li>
+          <li>Make the preferences window work better on narrow screens</li>
           <li>Harden refresh and error handling so displayed prices stay in sync</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.0.8" date="2026-03-21">
+      <description>
+        <ul>
+          <li>Add adaptive horizontal grid lines and price labels to the chart</li>
+          <li>Add a day transition indicator to the forecast chart</li>
+          <li>Refine current price highlight for better visual clarity</li>
+          <li>Improve chart layout and margins</li>
+          <li>Update documentation and forecast range information</li>
+          <li>Fix duplicate shortcut action registration and ensure tariff title updates correctly</li>
+          <li>Prevent stale background refreshes from overwriting newer data</li>
+          <li>Harden error display and cache cleanup logging</li>
+          <li>Add unit tests for pricing and tariff selection logic</li>
         </ul>
       </description>
     </release>
