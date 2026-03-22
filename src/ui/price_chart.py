@@ -6,6 +6,13 @@ import math
 import cairo
 from gi.repository import Gtk
 
+from .adaptive_layout import (
+    get_chart_content_width,
+    get_chart_height,
+    get_time_label_interval,
+    is_compact_width,
+)
+
 
 class PriceChartWidget(Gtk.DrawingArea):
     """
@@ -17,6 +24,7 @@ class PriceChartWidget(Gtk.DrawingArea):
         self.prices = []
         self.current_price_index = -1
         self.hovered_index = -1
+        self.compact = False
         # Margins for labels and chart area
         self.margin_left = 45
         self.margin_right = 15
@@ -24,8 +32,9 @@ class PriceChartWidget(Gtk.DrawingArea):
         self.margin_bottom = 30
         self.highlight_start_time = None
         self.highlight_end_time = None
+        self.slot_count = 0
 
-        self.set_size_request(600, 200)
+        self.set_size_request(-1, get_chart_height(0))
         self.set_draw_func(self.on_draw)
 
         motion_controller = Gtk.EventControllerMotion.new()
@@ -39,6 +48,17 @@ class PriceChartWidget(Gtk.DrawingArea):
 
         self.set_has_tooltip(True)
         self.connect("query-tooltip", self.on_query_tooltip)
+
+    def set_compact_mode(self, compact, width, slot_count=0):
+        self.compact = compact
+        self.slot_count = slot_count
+        self.margin_left = 38 if compact else 45
+        self.margin_right = 10 if compact else 15
+        self.margin_top = 16 if compact else 20
+        self.margin_bottom = 26 if compact else 30
+        content_width = get_chart_content_width(width, slot_count)
+        self.set_size_request(content_width, get_chart_height(width))
+        self.queue_draw()
 
     def set_prices(self, prices, current_index):
         """
@@ -56,6 +76,22 @@ class PriceChartWidget(Gtk.DrawingArea):
         self.highlight_start_time = start_time
         self.highlight_end_time = end_time
         self.queue_draw()
+
+    def get_bar_start_x(self, index):
+        if not self.prices or index < 0 or index >= len(self.prices):
+            return None
+
+        width = self.get_width()
+        if width <= 0:
+            width = self.get_allocated_width()
+        if width <= 0:
+            return None
+
+        chart_width = width - self.margin_left - self.margin_right
+        if chart_width <= 0:
+            return None
+
+        return self.margin_left + (index * chart_width) / len(self.prices)
 
     def on_motion(self, controller, x, y):
         """
@@ -289,8 +325,9 @@ class PriceChartWidget(Gtk.DrawingArea):
 
         # --- Draw Time Labels ---
         cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, 0.5)
-        cr.set_font_size(10)
-        for i in range(0, len(self.prices), 8):
+        cr.set_font_size(9 if is_compact_width(width) else 10)
+        label_interval = get_time_label_interval(width, len(self.prices))
+        for i in range(0, len(self.prices), label_interval):
             if i < len(self.prices):
                 time_str = self.prices[i]['valid_from'].astimezone().strftime('%H:%M')
                 text_extents = cr.text_extents(time_str)

@@ -13,6 +13,14 @@ from ..price_logic import extract_product_code
 from ..price_logic import find_cheapest_slot as calculate_cheapest_slot
 from ..secrets_manager import get_api_key
 from ..utils import CacheManager
+from .adaptive_layout import (
+    DEFAULT_CHART_SLOTS,
+    get_chart_slot_count,
+    get_chart_scroll_value,
+    get_content_margin,
+    get_price_summary_mode,
+    is_compact_width,
+)
 from .custom_spin_button import CustomSpinButton
 from .preferences_window import PreferencesWindow
 from .price_chart import PriceChartWidget
@@ -30,10 +38,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.settings = Gio.Settings.new("com.nedrichards.octopusagile")
         self._update_window_title()
 
-        self.set_size_request(700, 900)
-
         self.all_prices = []
         self.chart_prices = []
+        self.current_price_data = None
         self.cache_manager = CacheManager() # Initialize CacheManager
 
         # Initialize Gio.Settings
@@ -50,8 +57,15 @@ class MainWindow(Adw.ApplicationWindow):
         self.best_slot_start_time = None
         self.is_first_expansion = True
         self._fetch_generation = 0
+        self.price_summary_mode = "regular"
+        self.price_summary_title = "Loading..."
+        self.price_summary_description = "Fetching current electricity price"
+        self.price_summary_compact_description = "Fetching current electricity price"
+        self.price_summary_css_class = None
 
         self.connect("notify::visible", self.on_visibility_change)
+        self.connect("notify::width", self.on_window_width_changed)
+        self.connect("notify::height", self.on_window_width_changed)
 
         key_controller = Gtk.EventControllerKey.new()
         key_controller.connect("key-pressed", self.on_key_pressed)
@@ -120,6 +134,7 @@ class MainWindow(Adw.ApplicationWindow):
         menu_button.set_menu_model(menu_model)
         header_bar.pack_end(menu_button)
 
+        self.menu_button = menu_button
         return header_bar # Return the configured header bar widget
 
     def create_actions(self):
@@ -203,6 +218,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def on_visibility_change(self, *args):
         if self.is_visible():
+            self._refresh_adaptive_layout()
             self.refresh_price()
 
     def on_quit_action(self, action, param):
@@ -231,8 +247,11 @@ class MainWindow(Adw.ApplicationWindow):
         """
         Shows a welcome message and opens the preferences window.
         """
-        self.price_card.set_title("Welcome to Octopus Agile Prices")
-        self.price_card.set_description("Please select your tariff in the preferences.")
+        self._set_price_summary(
+            "Welcome to Octopus Agile Prices",
+            "Please select your tariff in the preferences.",
+            compact_description="Select your tariff in preferences.",
+        )
         self.on_preferences_action(None, None)
 
     def on_setting_changed(self, settings, key):
@@ -273,50 +292,97 @@ class MainWindow(Adw.ApplicationWindow):
         root_vbox = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         root_vbox.append(header_bar) # Header bar is the first child of the root box.
 
-        # Main content area (price card, info, chart, status label).
-        # This box will be clamped and then placed inside a scrolled window.
+        # Main content area. Individual sections decide whether they should clamp.
         overall_content_box = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=20)
-        overall_content_box.set_margin_top(20)
-        overall_content_box.set_margin_bottom(20)
-        overall_content_box.set_margin_start(20)
-        overall_content_box.set_margin_end(20)
+        self.overall_content_box = overall_content_box
 
-        # Clamp ensures content doesn't get too wide.
-        clamp = Adw.Clamp.new()
-        clamp.set_child(overall_content_box)
+        top_content_box = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.top_content_box = top_content_box
+        top_clamp = Adw.Clamp.new()
+        top_clamp.set_child(top_content_box)
+
+        bottom_content_box = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.bottom_content_box = bottom_content_box
+        bottom_clamp = Adw.Clamp.new()
+        bottom_clamp.set_child(bottom_content_box)
+
+        overall_content_box.append(top_clamp)
+        overall_content_box.append(bottom_clamp)
 
         # Create a scrolled window for the entire main content.
         # Adw.ApplicationWindow handles scrolling of its main content, so this Gtk.ScrolledWindow
         # should now contain the clamp, and be placed inside the root_vbox.
         scrolled_content = Gtk.ScrolledWindow.new()
         scrolled_content.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scrolled_content.set_child(clamp) # The clamp is the child of the scrolled window.
+        scrolled_content.set_vexpand(True)
+        scrolled_content.set_child(overall_content_box)
 
         root_vbox.append(scrolled_content) # The scrolled content is the second child of the root box.
 
         # Current price display card.
-        self.price_card = Adw.StatusPage.new()
-        self.price_card.set_title("Loading...")
-        self.price_card.set_description("Fetching current electricity price")
-        overall_content_box.append(self.price_card)
+        self.price_card_stack = Gtk.Stack.new()
+        self.price_card_stack.set_hhomogeneous(False)
+        self.price_card_stack.set_vhomogeneous(False)
+
+        self.price_card = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self.price_card.set_halign(Gtk.Align.CENTER)
+        self.price_card.set_valign(Gtk.Align.START)
+        self.price_card.set_vexpand(False)
+        self.price_card.add_css_class("regular-price-card")
+
+        self.price_card_title = Gtk.Label.new()
+        self.price_card_title.add_css_class("regular-price-title")
+        self.price_card_title.set_halign(Gtk.Align.CENTER)
+        self.price_card_title.set_justify(Gtk.Justification.CENTER)
+        self.price_card.append(self.price_card_title)
+
+        self.price_card_description = Gtk.Label.new()
+        self.price_card_description.add_css_class("regular-price-description")
+        self.price_card_description.set_halign(Gtk.Align.CENTER)
+        self.price_card_description.set_wrap(True)
+        self.price_card_description.set_justify(Gtk.Justification.CENTER)
+        self.price_card.append(self.price_card_description)
+
+        self.price_card_stack.add_named(self.price_card, "regular")
+
+        self.compact_price_box = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self.compact_price_box.set_halign(Gtk.Align.CENTER)
+        self.compact_price_box.add_css_class("compact-price-card")
+
+        self.compact_price_title = Gtk.Label.new()
+        self.compact_price_title.add_css_class("compact-price-title")
+        self.compact_price_box.append(self.compact_price_title)
+
+        self.compact_price_description = Gtk.Label.new()
+        self.compact_price_description.add_css_class("compact-price-description")
+        self.compact_price_description.set_wrap(True)
+        self.compact_price_description.set_justify(Gtk.Justification.CENTER)
+        self.compact_price_box.append(self.compact_price_description)
+
+        self.price_card_stack.add_named(self.compact_price_box, "compact")
+        top_content_box.append(self.price_card_stack)
+        self._render_price_summary()
 
         # Chart section with a styled background
         chart_box = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         chart_box.add_css_class("chart-background") # Apply new background style
-        chart_box.set_margin_top(10)
-        chart_box.set_margin_bottom(10)
-        chart_box.set_margin_start(10)
-        chart_box.set_margin_end(10)
+        self.chart_box = chart_box
+
+        self.chart_scroller = Gtk.ScrolledWindow.new()
+        self.chart_scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        self.chart_scroller.set_hexpand(True)
+        self.chart_scroller.set_propagate_natural_height(True)
 
         self.price_chart = PriceChartWidget()
         self.price_chart.set_vexpand(True)
-        chart_box.append(self.price_chart)
+        self.chart_scroller.set_child(self.price_chart)
+        chart_box.append(self.chart_scroller)
 
-        overall_content_box.append(chart_box)
+        overall_content_box.insert_child_after(chart_box, top_clamp)
 
         # --- New section for finding the best slot ---
         expander_group = Adw.PreferencesGroup()
-        overall_content_box.append(expander_group)
+        bottom_content_box.append(expander_group)
 
         self.expander_row = Adw.ExpanderRow()
         self.expander_row.set_title("Find Cheapest Time")
@@ -369,19 +435,64 @@ class MainWindow(Adw.ApplicationWindow):
         self.time_label = Gtk.Label.new()
         self.time_label.set_markup("<span size='small'>Last updated: Never</span>")
         self.time_label.set_halign(Gtk.Align.END)
+        self.time_label.set_margin_top(12)
         self.time_label.set_margin_end(10)
-        overall_content_box.append(self.time_label)
+        bottom_content_box.append(self.time_label)
 
         # Status label for persistent error messages.
         self.status_label = Gtk.Label.new()
         self.status_label.set_halign(Gtk.Align.CENTER)
         self.status_label.add_css_class("error") # Style with red text for errors.
-        overall_content_box.append(self.status_label)
+        bottom_content_box.append(self.status_label)
 
         # Use Adw.ToastOverlay to display temporary messages, wrapping the entire content.
         self.toast_overlay = Adw.ToastOverlay.new()
         self.toast_overlay.set_child(root_vbox) # The root_vbox (containing header and scrolled content) is the child.
         self.set_content(self.toast_overlay) # Set the toast overlay as the main window content.
+        GLib.idle_add(self._refresh_adaptive_layout)
+
+    def on_window_width_changed(self, widget, _pspec):
+        self._refresh_adaptive_layout()
+
+    def _refresh_adaptive_layout(self):
+        width = self.get_width() or self.settings.get_int("window-width")
+        if width <= 0:
+            return False
+
+        self._apply_adaptive_layout(width)
+        return False
+
+    def _apply_adaptive_layout(self, width):
+        compact = is_compact_width(width)
+        height = self.get_height() or self.settings.get_int("window-height")
+        price_summary_mode = get_price_summary_mode(width, height)
+        self.is_compact_layout = compact
+        margin = get_content_margin(width)
+
+        self.overall_content_box.set_margin_top(margin)
+        self.overall_content_box.set_margin_bottom(margin)
+        self.overall_content_box.set_margin_start(margin)
+        self.overall_content_box.set_margin_end(margin)
+
+        chart_margin = max(8, margin - 2)
+        self.chart_box.set_margin_top(chart_margin)
+        self.chart_box.set_margin_bottom(chart_margin)
+        self.chart_box.set_margin_start(chart_margin)
+        self.chart_box.set_margin_end(chart_margin)
+
+        self.time_label.set_halign(Gtk.Align.CENTER if compact else Gtk.Align.END)
+        self.time_label.set_margin_top(10 if compact else 14)
+        self.time_label.set_margin_end(0 if compact else 10)
+        self.status_label.set_wrap(compact)
+
+        chart_slot_count = len(self.chart_prices) if self.chart_prices else DEFAULT_CHART_SLOTS
+        self.price_chart.set_compact_mode(compact, width, chart_slot_count)
+        self._set_price_summary_mode(price_summary_mode)
+        self.header_title_widget.set_visible(not compact)
+        self.menu_button.set_tooltip_text("Menu" if compact else "Main Menu")
+
+        if self.current_price_data:
+            self.update_current_price()
 
 
 
@@ -433,6 +544,7 @@ class MainWindow(Adw.ApplicationWindow):
         best_slot_start_time = cheapest_slot['start']
         best_slot_end_time = cheapest_slot['end']
         self.price_chart.set_highlight_range(best_slot_start_time, best_slot_end_time)
+        self._scroll_chart_to_time(best_slot_start_time)
 
         self.best_slot_result_label.set_text(f"{best_slot_start_time.astimezone().strftime('%H:%M')}")
         self.best_slot_result_row.set_visible(True)
@@ -450,6 +562,42 @@ class MainWindow(Adw.ApplicationWindow):
         else:
             self.timer_label.set_text("The cheapest time is now.")
             self.timer_row.set_visible(True)
+
+    def _scroll_chart_to_time(self, target_time):
+        target_index = self._find_chart_index_for_time(target_time)
+        if target_index is None:
+            return
+
+        GLib.idle_add(self._scroll_chart_to_index, target_index)
+
+    def _find_chart_index_for_time(self, target_time):
+        for index, price in enumerate(self.chart_prices):
+            if price['valid_from'] == target_time:
+                return index
+
+        for index, price in enumerate(self.chart_prices):
+            if price['valid_from'] >= target_time:
+                return index
+
+        return None
+
+    def _scroll_chart_to_index(self, target_index):
+        target_x = self.price_chart.get_bar_start_x(target_index)
+        if target_x is None:
+            return False
+
+        adjustment = self.chart_scroller.get_hadjustment()
+        if adjustment is None:
+            return False
+
+        scroll_value = get_chart_scroll_value(
+            adjustment.get_value(),
+            adjustment.get_page_size(),
+            adjustment.get_upper(),
+            target_x,
+        )
+        adjustment.set_value(scroll_value)
+        return False
 
     def _update_countdown(self):
         if not self.best_slot_start_time:
@@ -474,11 +622,17 @@ class MainWindow(Adw.ApplicationWindow):
         """
         self._fetch_generation += 1
         request_id = self._fetch_generation
-        self.price_card.set_description("Fetching the latest prices...")
-        self.price_card.remove_css_class("price-high")
-        self.price_card.remove_css_class("price-medium")
-        self.price_card.remove_css_class("price-low")
-        self.price_card.remove_css_class("price-negative")
+        current_title = (
+            f"£{self.current_price_data['price_gbp']:.2f}/kWh"
+            if self.current_price_data
+            else "Loading..."
+        )
+        self._set_price_summary(
+            current_title,
+            "Fetching the latest prices...",
+            compact_description="Refreshing prices...",
+            css_class=None,
+        )
 
         thread = threading.Thread(
             target=self.fetch_price_data,
@@ -607,7 +761,10 @@ class MainWindow(Adw.ApplicationWindow):
 
         if current_rate:
             display_from = current_rate['valid_from']
-            display_to = display_from + timedelta(days=2)
+            chart_slot_count = get_chart_slot_count(
+                self.get_width() or self.settings.get_int("window-width")
+            )
+            display_to = display_from + timedelta(minutes=30 * chart_slot_count)
             self.chart_prices = [p for p in self.all_prices if display_from <= p['valid_from'] < display_to]
 
             current_index_in_chart = 0 # Current price is always the first in the chart view
@@ -622,27 +779,31 @@ class MainWindow(Adw.ApplicationWindow):
         self.current_price_data = current_rate
         price_pounds = current_rate['price_gbp']
 
-        self.price_card.remove_css_class("price-high")
-        self.price_card.remove_css_class("price-medium")
-        self.price_card.remove_css_class("price-low")
-        self.price_card.remove_css_class("price-negative")
-
         if price_pounds < 0:
             status = "Negative (you get paid to use electricity!)"
-            self.price_card.add_css_class("price-negative")
+            css_class = "price-negative"
         elif price_pounds < 0.15:
             status = "Low"
-            self.price_card.add_css_class("price-low")
+            css_class = "price-low"
         elif price_pounds < 0.25:
             status = "Medium"
-            self.price_card.add_css_class("price-medium")
+            css_class = "price-medium"
         else:
             status = "High"
-            self.price_card.add_css_class("price-high")
+            css_class = "price-high"
 
-        self.price_card.set_title(f"£{price_pounds:.2f}/kWh")
-        self.price_card.set_description(f"The current price is {status}")
+        self._set_price_summary(
+            f"£{price_pounds:.2f}/kWh",
+            f"The current price is {status}",
+            compact_description="",
+            css_class=css_class,
+        )
         self.time_label.set_markup(f"<span size='small'>Last updated: {datetime.now().strftime('%H:%M:%S')}</span>")
+        self.price_chart.set_compact_mode(
+            is_compact_width(self.get_width()),
+            self.get_width() or self.settings.get_int("window-width"),
+            len(chart_prices),
+        )
         self.price_chart.set_prices(chart_prices, current_index)
         self.status_label.set_text("")
         self.header_refresh_button.set_sensitive(True)
@@ -651,8 +812,61 @@ class MainWindow(Adw.ApplicationWindow):
         """
         Displays an error state in the UI.
         """
-        self.price_card.set_title("Error")
-        self.price_card.set_description("Could not fetch price data.")
+        self._set_price_summary(
+            "Error",
+            "Could not fetch price data.",
+            compact_description="Could not fetch price data.",
+            css_class=None,
+        )
         self.status_label.set_text(error_message)
         self.toast_overlay.add_toast(Adw.Toast.new(f"Error: {error_message}"))
         self.header_refresh_button.set_sensitive(True)
+
+    def _set_price_summary(self, title, description, compact_description=None, css_class=None):
+        self.price_summary_title = title
+        self.price_summary_description = description
+        self.price_summary_compact_description = (
+            compact_description if compact_description is not None else description
+        )
+        self.price_summary_css_class = css_class
+        self._render_price_summary()
+
+    def _set_price_summary_mode(self, mode):
+        self.price_summary_mode = mode
+        self._render_price_summary()
+
+    def _render_price_summary(self):
+        self.price_card_title.set_text(self.price_summary_title)
+        self.price_card_description.set_text(self.price_summary_description)
+        self.price_card_description.set_visible(bool(self.price_summary_description))
+
+        escaped_title = GLib.markup_escape_text(self.price_summary_title)
+        self.compact_price_title.set_markup(
+            f"<span size='xx-large' weight='bold'>{escaped_title}</span>"
+        )
+        self.compact_price_description.set_text(self.price_summary_compact_description)
+        self.compact_price_description.set_visible(bool(self.price_summary_compact_description))
+
+        self._apply_price_summary_classes()
+        self.price_card_stack.set_visible_child_name(self.price_summary_mode)
+        self._queue_price_summary_refresh()
+
+    def _apply_price_summary_classes(self):
+        for widget in (self.price_card, self.compact_price_box):
+            widget.remove_css_class("price-high")
+            widget.remove_css_class("price-medium")
+            widget.remove_css_class("price-low")
+            widget.remove_css_class("price-negative")
+            if self.price_summary_css_class:
+                widget.add_css_class(self.price_summary_css_class)
+
+    def _queue_price_summary_refresh(self):
+        for widget in (
+            self.price_card_stack,
+            self.price_card,
+            self.compact_price_box,
+            self.compact_price_title,
+            self.compact_price_description,
+        ):
+            widget.queue_allocate()
+            widget.queue_draw()

@@ -41,6 +41,7 @@ install_data(
 install_data(
   [
     'ui/__init__.py',
+    'ui/adaptive_layout.py',
     'ui/main_window.py',
     'ui/preferences_window.py',
     'ui/price_chart.py',
