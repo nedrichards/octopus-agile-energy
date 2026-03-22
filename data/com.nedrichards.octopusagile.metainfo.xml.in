@@ -5,9 +5,10 @@
   <project_license>GPL-3.0-or-later</project_license>
 
   <name>Octopus Agile Prices</name>
-  <summary>Track Octopus electricity prices</summary>
+  <summary>Plan electricity use around prices</summary>
   <description>
-    <p>Half hourly electricity prices for the next 24 hours for users of Octopus Energy's agile tariff. This application is only relevant for people in the UK,</p>
+    <p>Follow current and upcoming half-hour electricity prices for Octopus Energy tariffs in the UK.</p>
+    <p>Octopus Agile Prices helps you check the current rate at a glance, compare the next available slots in the chart, and find the cheapest time to run appliances or charge devices.</p>
   </description>
 
   <developer id="com.nedrichards">
@@ -27,6 +28,14 @@
   <launchable type="desktop-id">com.nedrichards.octopusagile.desktop</launchable>
   <!-- Use the OARS website (https://hughsie.github.io/oars/generate.html) to generate these and make sure to use oars-1.1 -->
   <content_rating type="oars-1.1" />
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+    <control>touch</control>
+  </supports>
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
 
   <!-- Applications should set a brand color in both light and dark variants like so -->
   <branding>
@@ -36,24 +45,19 @@
 
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/nedrichards/octopus-agile-energy/main/data/octopus-agile-screenshot.png</image>
-      <caption>Current and next-day prices</caption>
+      <image>https://raw.githubusercontent.com/nedrichards/octopus-agile-energy/4c18071d2ca791558f592d87b3bcc93d5f6d3b24/data/octopus-agile-screenshot.png</image>
+      <caption>View current prices and upcoming cheaper slots</caption>
     </screenshot>
   </screenshots>
 
   <releases>
     <release version="1.0.8" date="2026-03-21">
       <description>
+        <p>This release makes the app easier to use across more screen sizes while improving price planning.</p>
         <ul>
-          <li>Add adaptive horizontal grid lines and price labels to the chart</li>
-          <li>Add a day transition indicator to the forecast chart</li>
-          <li>Refine current price highlight for better visual clarity</li>
-          <li>Improve chart layout and margins</li>
-          <li>Update documentation and forecast range information</li>
-          <li>Fix duplicate shortcut action registration and ensure tariff title updates correctly</li>
-          <li>Prevent stale background refreshes from overwriting newer data</li>
-          <li>Harden error display and cache cleanup logging</li>
-          <li>Add unit tests for pricing and tariff selection logic</li>
+          <li>Improve the chart with clearer labels, day boundaries, and adaptive sizing</li>
+          <li>Improve adaptive window layouts across screen sizes</li>
+          <li>Harden refresh and error handling so displayed prices stay in sync</li>
         </ul>
       </description>
     </release>
