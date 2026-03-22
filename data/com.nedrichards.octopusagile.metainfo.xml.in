@@ -4,11 +4,11 @@
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
 
-  <name>Octopus Agile Prices</name>
-  <summary>Plan electricity use around prices</summary>
+  <name>Octopus Electricity Prices</name>
+  <summary>Plan and understand electricity use</summary>
   <description>
     <p>Follow current and upcoming half-hour electricity prices for Octopus Energy tariffs in the UK.</p>
-    <p>Octopus Agile Prices helps you check the current rate at a glance, compare the next available slots in the chart, and find the cheapest time to run appliances or charge devices.</p>
+    <p>Check the current rate at a glance, and find the cheapest time to run appliances or charge devices.</p>
   </description>
 
   <developer id="com.nedrichards">
@@ -39,18 +39,28 @@
 
   <!-- Applications should set a brand color in both light and dark variants like so -->
   <branding>
-    <color type="primary" scheme_preference="light">#4e1a58</color>
-    <color type="primary" scheme_preference="dark">#dcd0de</color>
+    <color type="primary" scheme_preference="light">#e7c67a</color>
+    <color type="primary" scheme_preference="dark">#7a551e</color>
   </branding>
 
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/nedrichards/octopus-agile-energy/3627c1299df87d45eb38575573a6651e1d8eb0f2/data/octopus-agile-screenshot.png</image>
+      <image>https://raw.githubusercontent.com/nedrichards/octopus-agile-energy/1cd8122726a5fffa83cbbf06cea9a5c9ee92b0e2/data/octopus-agile-screenshot.png</image>
       <caption>View current prices and upcoming cheaper slots</caption>
     </screenshot>
   </screenshots>
 
   <releases>
+    <release version="1.0.10" date="2026-03-22">
+      <description>
+        <p>This release refreshes the app's public branding and iconography.</p>
+        <ul>
+          <li>Redesign the app icon with a more balanced footprint and clearer small-size readability</li>
+          <li>Update Flathub brand colors to better match the icon and improve listing presentation</li>
+          <li>Rename the app to Octopus Electricity Prices to reflect support for multiple tariffs</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.9" date="2026-03-22">
       <description>
         <p>This release improves planning tools and makes the interface adapt more cleanly across screen sizes.</p>

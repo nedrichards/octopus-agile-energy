@@ -1,8 +1,8 @@
-# Octopus Agile Energy
+# Octopus Electricity Prices
 
-This is a modern GNOME application built to track and visualise Octopus Energy electricity prices in real time. It fetches current and forecast half-hourly prices, helping users quickly see the best times to use electricity. This is only relevant if you are based in the UK.
+This is a modern GNOME application built to track and visualise Octopus Energy electricity prices in real time. It fetches current and forecast half-hourly prices across supported tariffs, helping users quickly see the best times to use electricity. This is only relevant if you are based in the UK.
 
-* **Current Price Display:** Shows the real-time Agile electricity price (pence/kWh).
+* **Current Price Display:** Shows the real-time electricity price (pence/kWh).
 * **Price Level Indicators:** Visually indicates whether the current price is low, medium, high, or even negative.
 * **Adaptive Price Forecast Chart:** Displays a bar chart of upcoming half-hourly price data, adapting the visible horizon to the available space while keeping small-screen layouts usable.
 * **Find Cheapest Time:** A built-in calculator to find the cheapest time window for a specific duration (e.g., "find the cheapest 3 hours in the next 24 hours").

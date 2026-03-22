@@ -112,7 +112,7 @@ class MainWindow(Adw.ApplicationWindow):
         This method is now called from setup_ui to create a widget to be appended.
         """
         header_bar = Adw.HeaderBar.new()
-        self.header_title_widget = Adw.WindowTitle.new("Octopus Agile Prices", "")
+        self.header_title_widget = Adw.WindowTitle.new("Octopus Electricity Prices", "")
         header_bar.set_title_widget(self.header_title_widget)
 
         # Refresh button on the left.
@@ -206,10 +206,10 @@ class MainWindow(Adw.ApplicationWindow):
         """
         about_dialog = Adw.AboutWindow(
             transient_for=self,
-            application_name="Octopus Agile Prices",
+            application_name="Octopus Electricity Prices",
             application_icon="com.nedrichards.octopusagile",
             developer_name="Nick Richards",
-            version="1.0.9",
+            version="1.0.10",
             website="https://www.nedrichards.com/2025/07/octopus-agile-prices-for-linux/",
             copyright="© 2026 Nick Richards",
             license_type=Gtk.License.GPL_3_0
@@ -248,7 +248,7 @@ class MainWindow(Adw.ApplicationWindow):
         Shows a welcome message and opens the preferences window.
         """
         self._set_price_summary(
-            "Welcome to Octopus Agile Prices",
+            "Welcome to Octopus Electricity Prices",
             "Please select your tariff in the preferences.",
             compact_description="Select your tariff in preferences.",
         )
@@ -269,16 +269,17 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _update_window_title(self):
         tariff_type = self.settings.get_string("selected-tariff-type")
-        if tariff_type == 'GO':
-            title = "Octopus Go Prices"
-        elif tariff_type == 'INTELLIGENT':
-            title = "Intelligent Octopus Go Prices"
-        else:
-            title = "Octopus Agile Prices"
+        title = "Octopus Electricity Prices"
+        subtitle = {
+            'AGILE': "Agile tariff",
+            'GO': "Go tariff",
+            'INTELLIGENT': "Intelligent Go tariff",
+        }.get(tariff_type, "")
 
         self.set_title(title)
         if hasattr(self, 'header_title_widget'):
             self.header_title_widget.set_title(title)
+            self.header_title_widget.set_subtitle(subtitle)
 
     def setup_ui(self):
         """

@@ -1,17 +1,112 @@
-<svg width="512" height="512" viewBox="0 0 135.467 135.467" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <linearGradient id="bg-gradient-2" x1="50%" y1="0%" x2="50%" y2="100%">
-      <stop offset="0%" stop-color="#4CAF50"/>
-      <stop offset="100%" stop-color="#2196F3"/>
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="512"
+   height="512"
+   viewBox="0 0 135.467 135.467"
+   version="1.1"
+   id="svg9"
+   sodipodi:docname="com.nedrichards.octopusagile.svg"
+   inkscape:version="1.4.3 (0d15f75042, 2025-12-25)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview9"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="1.328125"
+     inkscape:cx="256"
+     inkscape:cy="256"
+     inkscape:window-width="1503"
+     inkscape:window-height="933"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg9" />
+  <defs
+     id="defs6">
+    <linearGradient
+       id="tile-gradient"
+       x1="20%"
+       y1="12%"
+       x2="80%"
+       y2="88%">
+      <stop
+         offset="0%"
+         stop-color="#25b99a"
+         id="stop1" />
+      <stop
+         offset="100%"
+         stop-color="#2465ea"
+         id="stop2" />
+    </linearGradient>
+    <linearGradient
+       id="disc-gradient"
+       x1="30%"
+       y1="18%"
+       x2="70%"
+       y2="82%">
+      <stop
+         offset="0%"
+         stop-color="#fff7e9"
+         id="stop3" />
+      <stop
+         offset="100%"
+         stop-color="#f7e6c6"
+         id="stop4" />
+    </linearGradient>
+    <linearGradient
+       id="accent-gradient"
+       x1="25%"
+       y1="20%"
+       x2="75%"
+       y2="85%">
+      <stop
+         offset="0%"
+         stop-color="#ffcf5a"
+         id="stop5" />
+      <stop
+         offset="100%"
+         stop-color="#eb7f1a"
+         id="stop6" />
     </linearGradient>
   </defs>
-
-  <!-- Background Squircle -->
-  <path d="M 67.733 0 C 30.326 0 0 30.326 0 67.733 C 0 105.141 30.326 135.467 67.733 135.467 C 105.141 135.467 135.467 105.141 135.467 67.733 C 135.467 30.326 105.141 0 67.733 0 Z" fill="url(#bg-gradient-2)"/>
-
-  <!-- Price Graph with Lightning Bolt -->
-  <g transform="translate(15, 15)">
-    <path d="M 10,70 L 25,50 L 40,80 L 55,30 L 70,60 L 85,40 L 100,70" fill="none" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
-    <polygon points="50,45 55,30 60,45 55,40" fill="#FFFFFF"/>
-    </g>
+  <!-- Contained rounded square avoids touching the canvas edges. -->
+  <rect
+     x="14"
+     y="14"
+     width="107.467"
+     height="107.467"
+     rx="26"
+     fill="url(#tile-gradient)"
+     id="rect6" />
+  <!-- Lower color field gives the tile some structure without relying on shadows. -->
+  <path
+     d="M 14 86 C 32 74 48 76 67.733 84 C 88 92 104 92 121.467 78 V 95.467 C 121.467 109.826 109.826 121.467 95.467 121.467 H 40 C 25.641 121.467 14 109.826 14 95.467 Z"
+     fill="#1873d7"
+     id="path6" />
+  <!-- Inner disc keeps the mark compact and readable at small sizes. -->
+  <circle
+     cx="67.733"
+     cy="67.733"
+     r="31"
+     fill="url(#disc-gradient)"
+     id="circle6" />
+  <!-- Warm energy accent adds distinctiveness and balances the cool background. -->
+  <!-- Price line remains bold and simple enough to scale down cleanly. -->
+  <path
+     d="M 44 74 L 54 63 L 65 79 L 79 52 L 91 64"
+     fill="none"
+     stroke="#0f4c81"
+     stroke-width="6"
+     stroke-linecap="round"
+     stroke-linejoin="round"
+     id="path8" />
+  <!-- Minimal tentacle curl hints at the Octopus identity without adding tiny details. -->
 </svg>
