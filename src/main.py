@@ -44,7 +44,7 @@ class OctopusAgileApp(Adw.Application):
 
 def main(*args):
     """
-    Main function to initialize and run the Octopus Agile Price Tracker application.
+    Main function to initialize and run the Octopus Electricity Prices application.
     Loads custom CSS for styling.
     """
     logging.basicConfig(
@@ -53,7 +53,7 @@ def main(*args):
         stream=sys.stdout
     )
     logger = logging.getLogger(__name__)
-    logger.info("Starting Octopus Agile Price Tracker")
+    logger.info("Starting Octopus Electricity Prices")
 
     app = OctopusAgileApp()
 

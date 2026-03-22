@@ -64,7 +64,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
         group = Adw.PreferencesGroup.new()
         group.set_title("Your Tariff")
-        group.set_description("Configure your Octopus Agile tariff and region.")
+        group.set_description("Configure your Octopus tariff and region.")
         page.add(group)
 
         # Tariff Type selection
@@ -134,7 +134,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
     def load_tariffs_and_regions(self):
         """
-        Fetches available Octopus Agile tariffs in a separate thread.
+        Fetches available Octopus tariffs in a separate thread.
         """
         self._load_generation += 1
         request_id = self._load_generation
