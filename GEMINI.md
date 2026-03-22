@@ -4,14 +4,14 @@ This document provides a summary of the octopus-agile-energy codebase to assist 
 
 ## Project Overview
 
-This is a GTK desktop application that displays Octopus Agile electricity prices. It provides a chart showing the price for the next 48 hours, and it highlights the current price. The application uses the Octopus Energy API to fetch the price data.
+This is a GTK application that displays Octopus electricity prices. It provides an adaptive chart showing upcoming prices, highlights the current price, and can calculate the cheapest time window. The application uses the Octopus Energy API to fetch price data.
 
 ## Key Features
 
-*   **48-Hour Price Chart:** Displays Octopus Agile electricity prices for the next 48 hours with adaptive horizontal grid lines and price labels.
+*   **Adaptive Price Chart:** Displays upcoming Octopus electricity prices with adaptive horizontal grid lines, price labels, and a wider forecast horizon on larger windows.
 *   **Visual Enhancements:** Features a day transition indicator for "Tomorrow" and a three-sided highlight for the current price slot to maintain a clean baseline.
 *   **Find Cheapest Time:** A feature to find the cheapest time to use electricity based on a given duration and time window.
-*   **Tariff Support:** Supports Agile, Go, and Intelligent Octopus Go tariffs.
+*   **Tariff Support:** Supports Agile, Go, and Intelligent Octopus Go tariffs with an adaptive preferences window.
 *   **Average Price Calculation:** Displays average prices for selected periods.
 
 ## Accessibility

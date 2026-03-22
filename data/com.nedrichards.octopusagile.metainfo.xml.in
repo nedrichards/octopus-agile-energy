@@ -5,9 +5,10 @@
   <project_license>GPL-3.0-or-later</project_license>
 
   <name>Octopus Agile Prices</name>
-  <summary>Track Octopus electricity prices</summary>
+  <summary>Plan electricity use around prices</summary>
   <description>
-    <p>Half hourly electricity prices for the next 24 hours for users of Octopus Energy's agile tariff. This application is only relevant for people in the UK,</p>
+    <p>Follow current and upcoming half-hour electricity prices for Octopus Energy tariffs in the UK.</p>
+    <p>Octopus Agile Prices helps you check the current rate at a glance, compare the next available slots in the chart, and find the cheapest time to run appliances or charge devices.</p>
   </description>
 
   <developer id="com.nedrichards">
@@ -27,6 +28,14 @@
   <launchable type="desktop-id">com.nedrichards.octopusagile.desktop</launchable>
   <!-- Use the OARS website (https://hughsie.github.io/oars/generate.html) to generate these and make sure to use oars-1.1 -->
   <content_rating type="oars-1.1" />
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+    <control>touch</control>
+  </supports>
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
 
   <!-- Applications should set a brand color in both light and dark variants like so -->
   <branding>
@@ -36,12 +45,24 @@
 
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/nedrichards/octopus-agile-energy/main/data/octopus-agile-screenshot.png</image>
-      <caption>Current and next-day prices</caption>
+      <image>https://raw.githubusercontent.com/nedrichards/octopus-agile-energy/3627c1299df87d45eb38575573a6651e1d8eb0f2/data/octopus-agile-screenshot.png</image>
+      <caption>View current prices and upcoming cheaper slots</caption>
     </screenshot>
   </screenshots>
 
   <releases>
+    <release version="1.0.9" date="2026-03-22">
+      <description>
+        <p>This release improves planning tools and makes the interface adapt more cleanly across screen sizes.</p>
+        <ul>
+          <li>Improve the chart with clearer labels, day boundaries, and adaptive sizing</li>
+          <li>Improve adaptive window layouts across screen sizes</li>
+          <li>Auto-scroll the chart to the selected cheapest time window</li>
+          <li>Make the preferences window work better on narrow screens</li>
+          <li>Harden refresh and error handling so displayed prices stay in sync</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.8" date="2026-03-21">
       <description>
         <ul>
