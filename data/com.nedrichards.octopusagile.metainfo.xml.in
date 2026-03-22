@@ -51,6 +51,16 @@
   </screenshots>
 
   <releases>
+    <release version="1.0.10" date="2026-03-22">
+      <description>
+        <p>This release refreshes the app's public branding and iconography.</p>
+        <ul>
+          <li>Redesign the app icon with a more balanced footprint and clearer small-size readability</li>
+          <li>Update Flathub brand colors to better match the icon and improve listing presentation</li>
+          <li>Rename the app to Octopus Electricity Prices to reflect support for multiple tariffs</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.9" date="2026-03-22">
       <description>
         <p>This release improves planning tools and makes the interface adapt more cleanly across screen sizes.</p>

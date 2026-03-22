@@ -209,7 +209,7 @@ class MainWindow(Adw.ApplicationWindow):
             application_name="Octopus Electricity Prices",
             application_icon="com.nedrichards.octopusagile",
             developer_name="Nick Richards",
-            version="1.0.9",
+            version="1.0.10",
             website="https://www.nedrichards.com/2025/07/octopus-agile-prices-for-linux/",
             copyright="© 2026 Nick Richards",
             license_type=Gtk.License.GPL_3_0
