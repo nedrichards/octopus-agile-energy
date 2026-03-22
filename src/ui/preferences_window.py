@@ -68,42 +68,35 @@ class PreferencesWindow(Adw.PreferencesWindow):
         page.add(group)
 
         # Tariff Type selection
-        self.tariff_type_row = Adw.ActionRow.new()
+        self.tariff_type_model = Gtk.StringList.new(self.TARIFF_TYPES)
+        self.tariff_type_row = Adw.ComboRow.new()
         self.tariff_type_row.set_title("Tariff Type")
+        self.tariff_type_row.set_model(self.tariff_type_model)
         group.add(self.tariff_type_row)
-
-        self.tariff_type_dropdown = Gtk.DropDown.new_from_strings(self.TARIFF_TYPES)
-        self.tariff_type_dropdown.set_hexpand(True)
 
         # Set initial selected type
         current_type = self.settings.get_string("selected-tariff-type")
         current_type_name = self.TARIFF_CODE_TO_NAME.get(current_type, "Agile")
         if current_type_name in self.TARIFF_TYPES:
-            self.tariff_type_dropdown.set_selected(self.TARIFF_TYPES.index(current_type_name))
+            self.tariff_type_row.set_selected(self.TARIFF_TYPES.index(current_type_name))
 
-        self.tariff_type_handler_id = self.tariff_type_dropdown.connect("notify::selected-item", self.on_tariff_type_selected)
-        self.tariff_type_row.add_suffix(self.tariff_type_dropdown)
+        self.tariff_type_handler_id = self.tariff_type_row.connect("notify::selected", self.on_tariff_type_selected)
 
         # Region selection
-        self.region_row = Adw.ActionRow.new()
+        self.region_model = Gtk.StringList.new(self.all_regions)
+        self.region_row = Adw.ComboRow.new()
         self.region_row.set_title("Region")
+        self.region_row.set_model(self.region_model)
         group.add(self.region_row)
-
-        # Use new_from_strings directly with the list of full region names
-        self.region_dropdown = Gtk.DropDown.new_from_strings(self.all_regions)
-        self.region_dropdown.set_hexpand(True)
-        self.region_handler_id = self.region_dropdown.connect("notify::selected-item", self.on_region_selected)
-        self.region_row.add_suffix(self.region_dropdown)
+        self.region_handler_id = self.region_row.connect("notify::selected", self.on_region_selected)
 
         # Tariff selection
-        self.tariff_row = Adw.ActionRow.new()
+        self.tariff_model = Gtk.StringList.new(["Loading..."])
+        self.tariff_row = Adw.ComboRow.new()
         self.tariff_row.set_title("Tariff")
+        self.tariff_row.set_model(self.tariff_model)
         group.add(self.tariff_row)
-
-        self.tariff_dropdown = Gtk.DropDown.new_from_strings(["Loading..."]) # Placeholder
-        self.tariff_dropdown.set_hexpand(True)
-        self.tariff_handler_id = self.tariff_dropdown.connect("notify::selected-item", self.on_tariff_selected)
-        self.tariff_row.add_suffix(self.tariff_dropdown)
+        self.tariff_handler_id = self.tariff_row.connect("notify::selected", self.on_tariff_selected)
 
         # API Key Section
         api_group = Adw.PreferencesGroup.new()
@@ -132,7 +125,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
             clear_api_key()
 
     def on_tariff_type_selected(self, dropdown, pspec):
-        selected_display_name = dropdown.get_selected_item().get_string() if dropdown.get_selected_item() else ""
+        selected_display_name = self._get_selected_string(self.tariff_type_row)
         selected_type_code = self.TARIFF_TYPE_CODES.get(selected_display_name, "AGILE")
         self.settings.set_string("selected-tariff-type", selected_type_code)
 
@@ -145,8 +138,8 @@ class PreferencesWindow(Adw.PreferencesWindow):
         """
         self._load_generation += 1
         request_id = self._load_generation
-        self.region_dropdown.set_sensitive(True)
-        self.tariff_dropdown.set_sensitive(False)
+        self.region_row.set_sensitive(True)
+        self.tariff_row.set_sensitive(False)
         self.region_row.set_subtitle("Select your region.")
         self.tariff_row.set_subtitle("Fetching tariffs...")
 
@@ -258,10 +251,10 @@ class PreferencesWindow(Adw.PreferencesWindow):
         Updates the UI dropdowns with the fetched regions and tariffs.
         This must run on the main GTK thread.
         """
-        self.region_dropdown.handler_block(self.region_handler_id)
-        self.tariff_dropdown.handler_block(self.tariff_handler_id)
+        self.region_row.handler_block(self.region_handler_id)
+        self.tariff_row.handler_block(self.tariff_handler_id)
 
-        self.region_dropdown.set_sensitive(True)
+        self.region_row.set_sensitive(True)
         self.region_row.set_subtitle("Select your region to see available tariffs.")
 
         selected_region_code = self.settings.get_string("selected-region-code")
@@ -277,24 +270,24 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
         if selected_display_name and selected_display_name in self.all_regions:
             index = self.all_regions.index(selected_display_name)
-            self.region_dropdown.set_selected(index)
+            self.region_row.set_selected(index)
         elif self.all_regions:
-            self.region_dropdown.set_selected(0)
+            self.region_row.set_selected(0)
             self.settings.set_string("selected-region-code", self.REGION_NAME_TO_CODE[self.all_regions[0]])
         else:
             self.region_row.set_subtitle("No regions found.")
-            self.region_dropdown.set_sensitive(False)
+            self.region_row.set_sensitive(False)
 
         self._update_tariff_dropdown_for_region()
 
-        self.region_dropdown.handler_unblock(self.region_handler_id)
-        self.tariff_dropdown.handler_unblock(self.tariff_handler_id)
+        self.region_row.handler_unblock(self.region_handler_id)
+        self.tariff_row.handler_unblock(self.tariff_handler_id)
 
     def on_region_selected(self, dropdown, pspec):
         """
         Callback when a new region is selected. Updates the tariff dropdown and saves the setting.
         """
-        selected_display_name = dropdown.get_selected_item().get_string() if dropdown.get_selected_item() else ""
+        selected_display_name = self._get_selected_string(self.region_row)
         selected_region_code = self.REGION_NAME_TO_CODE.get(selected_display_name, "")
         self.settings.set_string("selected-region-code", selected_region_code)
         self._update_tariff_dropdown_for_region()
@@ -303,7 +296,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
         """
         Callback when a new tariff is selected. Saves the setting.
         """
-        selected_display_name = self.region_dropdown.get_selected_item().get_string() if self.region_dropdown.get_selected_item() else None
+        selected_display_name = self._get_selected_string(self.region_row)
         selected_region_code = self.REGION_NAME_TO_CODE.get(selected_display_name, None)
 
         if not selected_region_code or selected_region_code not in self.region_to_tariffs:
@@ -311,7 +304,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
             return
 
         tariffs_for_region = self.region_to_tariffs[selected_region_code]
-        selected_index = dropdown.get_selected()
+        selected_index = self.tariff_row.get_selected()
 
         if 0 <= selected_index < len(tariffs_for_region):
             selected_tariff_code = tariffs_for_region[selected_index]['code']
@@ -323,7 +316,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
         """
         Updates the tariff dropdown based on the currently selected region.
         """
-        selected_display_name = self.region_dropdown.get_selected_item().get_string() if self.region_dropdown.get_selected_item() else None
+        selected_display_name = self._get_selected_string(self.region_row)
         selected_region_code = self.REGION_NAME_TO_CODE.get(selected_display_name, None)
 
 
@@ -332,32 +325,32 @@ class PreferencesWindow(Adw.PreferencesWindow):
             tariff_names = [t['full_name'] for t in tariffs]
 
             tariff_model = Gtk.StringList.new(tariff_names)
-            self.tariff_dropdown.set_model(tariff_model)
-            self.tariff_dropdown.set_sensitive(True)
+            self.tariff_row.set_model(tariff_model)
+            self.tariff_row.set_sensitive(True)
             self.tariff_row.set_subtitle("Select your tariff from the list.")
 
             saved_tariff_code = self.settings.get_string("selected-tariff-code")
             if saved_tariff_code:
                 for i, tariff_data in enumerate(tariffs):
                     if tariff_data['code'] == saved_tariff_code:
-                        self.tariff_dropdown.set_selected(i)
+                        self.tariff_row.set_selected(i)
                         break
                 else: # Tariff not found for this region, default to first
                     if tariffs:
-                        self.tariff_dropdown.set_selected(0)
+                        self.tariff_row.set_selected(0)
                         self.settings.set_string("selected-tariff-code", tariffs[0]['code'])
                     else:
                         self.tariff_row.set_subtitle("There are no tariffs for this region.")
-                        self.tariff_dropdown.set_sensitive(False)
+                        self.tariff_row.set_sensitive(False)
             elif tariffs:
-                self.tariff_dropdown.set_selected(0)
+                self.tariff_row.set_selected(0)
                 self.settings.set_string("selected-tariff-code", tariffs[0]['code'])
             else:
                 self.tariff_row.set_subtitle("No tariffs for this region.")
-                self.tariff_dropdown.set_sensitive(False)
+                self.tariff_row.set_sensitive(False)
         else:
-            self.tariff_dropdown.set_model(Gtk.StringList.new(["No Tariffs Available"]))
-            self.tariff_dropdown.set_sensitive(False)
+            self.tariff_row.set_model(Gtk.StringList.new(["No Tariffs Available"]))
+            self.tariff_row.set_sensitive(False)
             self.tariff_row.set_subtitle("No region selected or no tariffs found.")
 
 
@@ -365,8 +358,12 @@ class PreferencesWindow(Adw.PreferencesWindow):
         """Displays an error message in the preferences window if loading fails."""
         self.region_row.set_subtitle(message)
         self.tariff_row.set_subtitle(message)
-        self.region_dropdown.set_sensitive(False)
-        self.tariff_dropdown.set_sensitive(False)
+        self.region_row.set_sensitive(False)
+        self.tariff_row.set_sensitive(False)
+
+    def _get_selected_string(self, combo_row):
+        item = combo_row.get_selected_item()
+        return item.get_string() if item else ""
 
     def on_close_request(self, window):
         """
