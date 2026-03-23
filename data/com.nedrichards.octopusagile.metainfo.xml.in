@@ -45,8 +45,16 @@
 
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/nedrichards/octopus-agile-energy/1cd8122726a5fffa83cbbf06cea9a5c9ee92b0e2/data/octopus-agile-screenshot.png</image>
-      <caption>View current prices and upcoming cheaper slots</caption>
+      <image>https://raw.githubusercontent.com/nedrichards/octopus-agile-energy/3399f48bf479f2ecf63baa66fa052a5dd4505451/data/octopus-agile-screenshot.png</image>
+      <caption>View current and upcoming prices</caption>
+    </screenshot>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/nedrichards/octopus-agile-energy/3399f48bf479f2ecf63baa66fa052a5dd4505451/data/octopus-agile-screenshot-find.png</image>
+      <caption>Find the cheapest time</caption>
+    </screenshot>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/nedrichards/octopus-agile-energy/3399f48bf479f2ecf63baa66fa052a5dd4505451/data/octopus-agile-screenshot-small.png</image>
+      <caption>Scale to any screen size</caption>
     </screenshot>
   </screenshots>
 
