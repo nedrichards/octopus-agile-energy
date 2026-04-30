@@ -363,9 +363,24 @@ class MainWindow(Adw.ApplicationWindow):
         self.usage_trend_bar_row = Adw.ActionRow.new()
         self.usage_trend_bar_row.set_title("Trend strength")
         self.usage_trend_bar = Gtk.LevelBar.new_for_interval(0.0, 100.0)
-        self.usage_trend_bar.set_size_request(180, -1)
+        self.usage_trend_bar.set_size_request(140, -1)
+        self.usage_trend_bar.set_margin_start(8)
+        self.usage_trend_bar.set_margin_end(8)
         self.usage_trend_bar_row.add_suffix(self.usage_trend_bar)
         usage_group.add(self.usage_trend_bar_row)
+
+        self.usage_chart_row = Adw.ActionRow.new()
+        self.usage_chart_row.set_title("Usage over time")
+        self.usage_chart_area = Gtk.DrawingArea.new()
+        self.usage_chart_area.set_content_width(320)
+        self.usage_chart_area.set_content_height(120)
+        self.usage_chart_area.set_hexpand(True)
+        self.usage_chart_area.set_margin_top(6)
+        self.usage_chart_area.set_margin_bottom(6)
+        self.usage_chart_area.set_draw_func(self._draw_usage_chart)
+        self.usage_chart_points = []
+        self.usage_chart_row.add_suffix(self.usage_chart_area)
+        usage_group.add(self.usage_chart_row)
 
         self.main_view_stack = Adw.ViewStack.new()
         self.main_view_stack.add_titled_with_icon(scrolled_content, "prices", "Prices", "view-list-symbolic")
@@ -939,12 +954,16 @@ class MainWindow(Adw.ApplicationWindow):
         self.usage_trend_label.set_text(insight["trend_text"])
         self.usage_month_label.set_text(insight["monthly_text"])
         self.usage_trend_bar.set_value(insight["trend_strength"])
+        self.usage_chart_points = insight["chart_points"]
+        self.usage_chart_area.queue_draw()
 
     def _set_usage_metric_placeholders(self):
         self.usage_avg_label.set_text("—")
         self.usage_trend_label.set_text("—")
         self.usage_month_label.set_text("—")
         self.usage_trend_bar.set_value(0.0)
+        self.usage_chart_points = []
+        self.usage_chart_area.queue_draw()
 
     def _build_usage_insight_data(self, samples, synced_at):
         if not samples:
@@ -954,6 +973,7 @@ class MainWindow(Adw.ApplicationWindow):
                 "trend_text": "—",
                 "monthly_text": "—",
                 "trend_strength": 0.0,
+                "chart_points": [],
             }
 
         daily_totals = {}
@@ -976,6 +996,7 @@ class MainWindow(Adw.ApplicationWindow):
                 "trend_text": "—",
                 "monthly_text": "—",
                 "trend_strength": 0.0,
+                "chart_points": [],
             }
 
         sorted_days = sorted(daily_totals.items(), key=lambda x: x[0])
@@ -999,7 +1020,30 @@ class MainWindow(Adw.ApplicationWindow):
             "trend_text": f"{trend_pct:+.1f}%",
             "monthly_text": f"{monthly_projection:.0f} kWh",
             "trend_strength": trend_strength,
+            "chart_points": values[-30:],
         }
+
+    def _draw_usage_chart(self, _area, cr, width, height):
+        cr.set_source_rgba(0.7, 0.7, 0.7, 0.2)
+        cr.rectangle(0, 0, width, height)
+        cr.fill()
+
+        if not self.usage_chart_points:
+            return
+
+        points = self.usage_chart_points
+        max_value = max(points) if points else 1.0
+        if max_value <= 0:
+            max_value = 1.0
+
+        cr.set_source_rgba(0.2, 0.6, 0.9, 0.9)
+        bar_width = max(2, width / max(1, len(points)))
+        for idx, value in enumerate(points):
+            x = idx * bar_width
+            bar_height = (value / max_value) * (height - 4)
+            y = height - bar_height
+            cr.rectangle(x + 1, y, max(1, bar_width - 2), bar_height)
+            cr.fill()
 
     def _apply_price_summary_classes(self):
         for widget in (self.price_card, self.compact_price_box):
