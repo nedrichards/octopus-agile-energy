@@ -339,6 +339,34 @@ class MainWindow(Adw.ApplicationWindow):
         self.usage_insights_row.set_subtitle("Refresh usage history in Preferences to fill this section.")
         usage_group.add(self.usage_insights_row)
 
+        self.usage_avg_row = Adw.ActionRow.new()
+        self.usage_avg_row.set_title("Average daily consumption")
+        self.usage_avg_row.add_prefix(Gtk.Image.new_from_icon_name("weather-clear-symbolic"))
+        self.usage_avg_label = Gtk.Label.new("—")
+        self.usage_avg_row.add_suffix(self.usage_avg_label)
+        usage_group.add(self.usage_avg_row)
+
+        self.usage_trend_row = Adw.ActionRow.new()
+        self.usage_trend_row.set_title("Seven-day trend")
+        self.usage_trend_row.add_prefix(Gtk.Image.new_from_icon_name("view-sort-descending-symbolic"))
+        self.usage_trend_label = Gtk.Label.new("—")
+        self.usage_trend_row.add_suffix(self.usage_trend_label)
+        usage_group.add(self.usage_trend_row)
+
+        self.usage_month_row = Adw.ActionRow.new()
+        self.usage_month_row.set_title("Estimated monthly consumption")
+        self.usage_month_row.add_prefix(Gtk.Image.new_from_icon_name("x-office-calendar-symbolic"))
+        self.usage_month_label = Gtk.Label.new("—")
+        self.usage_month_row.add_suffix(self.usage_month_label)
+        usage_group.add(self.usage_month_row)
+
+        self.usage_trend_bar_row = Adw.ActionRow.new()
+        self.usage_trend_bar_row.set_title("Trend strength")
+        self.usage_trend_bar = Gtk.LevelBar.new_for_interval(0.0, 100.0)
+        self.usage_trend_bar.set_size_request(180, -1)
+        self.usage_trend_bar_row.add_suffix(self.usage_trend_bar)
+        usage_group.add(self.usage_trend_bar_row)
+
         self.main_view_stack = Adw.ViewStack.new()
         self.main_view_stack.add_titled_with_icon(scrolled_content, "prices", "Prices", "view-list-symbolic")
         self.main_view_stack.add_titled_with_icon(usage_scroll, "usage", "Usage", "preferences-system-symbolic")
@@ -895,21 +923,38 @@ class MainWindow(Adw.ApplicationWindow):
         account_number = self.settings.get_string("octopus-account-number").strip()
         if not account_number:
             self.usage_insights_row.set_subtitle("Add your account number in Preferences to enable these insights.")
+            self._set_usage_metric_placeholders()
             return
 
         cache_key = f"octopus_usage_{account_number}"
         cached_data, _cache_mtime = self.cache_manager.get(cache_key)
         if not cached_data or "samples" not in cached_data:
             self.usage_insights_row.set_subtitle("No cached usage history found. Use Preferences → Refresh usage history.")
+            self._set_usage_metric_placeholders()
             return
 
-        self.usage_insights_row.set_subtitle(
-            self._build_usage_insight_text(cached_data.get("samples", []), cached_data.get("synced_at"))
-        )
+        insight = self._build_usage_insight_data(cached_data.get("samples", []), cached_data.get("synced_at"))
+        self.usage_insights_row.set_subtitle(insight["summary"])
+        self.usage_avg_label.set_text(insight["avg_text"])
+        self.usage_trend_label.set_text(insight["trend_text"])
+        self.usage_month_label.set_text(insight["monthly_text"])
+        self.usage_trend_bar.set_value(insight["trend_strength"])
 
-    def _build_usage_insight_text(self, samples, synced_at):
+    def _set_usage_metric_placeholders(self):
+        self.usage_avg_label.set_text("—")
+        self.usage_trend_label.set_text("—")
+        self.usage_month_label.set_text("—")
+        self.usage_trend_bar.set_value(0.0)
+
+    def _build_usage_insight_data(self, samples, synced_at):
         if not samples:
-            return "No usage samples available yet."
+            return {
+                "summary": "No usage samples available yet.",
+                "avg_text": "—",
+                "trend_text": "—",
+                "monthly_text": "—",
+                "trend_strength": 0.0,
+            }
 
         daily_totals = {}
         for sample in samples:
@@ -925,7 +970,13 @@ class MainWindow(Adw.ApplicationWindow):
                 continue
 
         if len(daily_totals) < 7:
-            return "Not enough usage data yet (need at least seven days)."
+            return {
+                "summary": "Not enough usage data yet (need at least seven days).",
+                "avg_text": "—",
+                "trend_text": "—",
+                "monthly_text": "—",
+                "trend_strength": 0.0,
+            }
 
         sorted_days = sorted(daily_totals.items(), key=lambda x: x[0])
         values = [value for _day, value in sorted_days]
@@ -936,13 +987,19 @@ class MainWindow(Adw.ApplicationWindow):
         previous_avg = (sum(previous_7) / len(previous_7)) if previous_7 else recent_avg
         trend_pct = 0.0 if previous_avg == 0 else ((recent_avg - previous_avg) / previous_avg) * 100.0
         monthly_projection = avg_daily * 30.0
+        trend_strength = min(100.0, abs(trend_pct) * 2.0)
         based_on = f" Based on data up to {synced_at[:10]}." if synced_at else ""
-        return (
-            f"Average daily consumption: {avg_daily:.2f} kWh · "
-            f"Seven-day trend: {trend_pct:+.1f}% · "
-            f"Estimated monthly consumption: {monthly_projection:.0f} kWh."
+        summary = (
+            f"Consumption is {'rising' if trend_pct > 1 else 'falling' if trend_pct < -1 else 'steady'} over the last week."
             f"{based_on}"
         )
+        return {
+            "summary": summary,
+            "avg_text": f"{avg_daily:.2f} kWh/day",
+            "trend_text": f"{trend_pct:+.1f}%",
+            "monthly_text": f"{monthly_projection:.0f} kWh",
+            "trend_strength": trend_strength,
+        }
 
     def _apply_price_summary_classes(self):
         for widget in (self.price_card, self.compact_price_box):
