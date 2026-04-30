@@ -123,6 +123,12 @@ class PreferencesWindow(Adw.PreferencesWindow):
         self.api_key_entry.connect("changed", self.on_api_key_changed)
         api_group.add(self.api_key_entry)
 
+        self.account_number_entry = Adw.EntryRow.new()
+        self.account_number_entry.set_title("Octopus Account Number")
+        self.account_number_entry.set_text(self.settings.get_string("octopus-account-number"))
+        self.account_number_entry.connect("changed", self.on_account_number_changed)
+        api_group.add(self.account_number_entry)
+
         self.auto_detect_button = Gtk.Button.new_with_label("Auto-detect tariff from account")
         self.auto_detect_button.connect("clicked", self.on_auto_detect_clicked)
         api_group.add(self.auto_detect_button)
@@ -144,6 +150,9 @@ class PreferencesWindow(Adw.PreferencesWindow):
         # Trigger reload of tariffs
         self.load_tariffs_and_regions()
 
+    def on_account_number_changed(self, entry):
+        self.settings.set_string("octopus-account-number", entry.get_text().strip())
+
     def on_auto_detect_clicked(self, _button):
         self.auto_detect_button.set_sensitive(False)
         self.auto_detect_button.set_label("Detecting...")
@@ -159,10 +168,21 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
     def _auto_detect_from_account(self):
         try:
-            accounts_data = get_json("https://api.octopus.energy/v1/accounts/", use_api_key=True, timeout=10)
-            tariff_code = self._extract_active_tariff_code(accounts_data)
+            account_number = self.settings.get_string("octopus-account-number").strip()
+            if not account_number:
+                GLib.idle_add(self._show_load_error, "Add your Octopus account number to use auto-detect.")
+                GLib.idle_add(self._set_auto_detect_button_state, "Auto-detect tariff from account", True)
+                return
+
+            account_data = get_json(
+                f"https://api.octopus.energy/v1/accounts/{account_number}/",
+                use_api_key=True,
+                timeout=10,
+            )
+            tariff_code = self._extract_active_tariff_code(account_data)
             if not tariff_code:
                 GLib.idle_add(self._show_load_error, "Could not find an active electricity tariff on your account.")
+                GLib.idle_add(self._set_auto_detect_button_state, "Auto-detect tariff from account", True)
                 return
 
             inferred_region_code = f"_{tariff_code.split('-')[-1]}" if "-" in tariff_code else ""
@@ -193,25 +213,24 @@ class PreferencesWindow(Adw.PreferencesWindow):
             return "GO"
         return "AGILE"
 
-    def _extract_active_tariff_code(self, accounts_data):
+    def _extract_active_tariff_code(self, account_data):
         now = datetime.now(timezone.utc)
 
-        for account in accounts_data.get("results", []):
-            for property_data in account.get("properties", []):
-                for meter_point in property_data.get("electricity_meter_points", []):
-                    for agreement in meter_point.get("agreements", []):
-                        valid_from = agreement.get("valid_from")
-                        valid_to = agreement.get("valid_to")
-                        tariff_code = agreement.get("tariff_code")
+        for property_data in account_data.get("properties", []):
+            for meter_point in property_data.get("electricity_meter_points", []):
+                for agreement in meter_point.get("agreements", []):
+                    valid_from = agreement.get("valid_from")
+                    valid_to = agreement.get("valid_to")
+                    tariff_code = agreement.get("tariff_code")
 
-                        if not tariff_code or not valid_from:
-                            continue
+                    if not tariff_code or not valid_from:
+                        continue
 
-                        start = datetime.fromisoformat(valid_from.replace("Z", "+00:00"))
-                        end = datetime.fromisoformat(valid_to.replace("Z", "+00:00")) if valid_to else None
+                    start = datetime.fromisoformat(valid_from.replace("Z", "+00:00"))
+                    end = datetime.fromisoformat(valid_to.replace("Z", "+00:00")) if valid_to else None
 
-                        if start <= now and (end is None or now < end):
-                            return tariff_code
+                    if start <= now and (end is None or now < end):
+                        return tariff_code
 
         return None
 
