@@ -5,10 +5,12 @@ gi.require_version('Adw', '1')
 import logging
 import threading
 import time
+from datetime import datetime, timezone
 
 import requests
 from gi.repository import Adw, GLib, Gtk
 
+from ..octopus_api import OctopusApiError, get_json
 from ..price_logic import build_region_to_tariffs_map
 from ..secrets_manager import clear_api_key, get_api_key, store_api_key
 from ..utils import CacheManager
@@ -38,6 +40,12 @@ class PreferencesWindow(Adw.PreferencesWindow):
     }
     # Create a reverse mapping for looking up codes by name
     REGION_NAME_TO_CODE = {name: code for code, name in REGION_CODE_TO_NAME.items()}
+
+    @staticmethod
+    def _contains_token(value, token):
+        normalized = value.upper().replace('_', '-')
+        parts = [part for part in normalized.split('-') if part]
+        return token in parts
 
 
     def __init__(self, settings, parent, **kwargs):
@@ -115,6 +123,10 @@ class PreferencesWindow(Adw.PreferencesWindow):
         self.api_key_entry.connect("changed", self.on_api_key_changed)
         api_group.add(self.api_key_entry)
 
+        self.auto_detect_button = Gtk.Button.new_with_label("Auto-detect tariff from account")
+        self.auto_detect_button.connect("clicked", self.on_auto_detect_clicked)
+        api_group.add(self.auto_detect_button)
+
         self.present()
 
     def on_api_key_changed(self, entry):
@@ -131,6 +143,77 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
         # Trigger reload of tariffs
         self.load_tariffs_and_regions()
+
+    def on_auto_detect_clicked(self, _button):
+        self.auto_detect_button.set_sensitive(False)
+        self.auto_detect_button.set_label("Detecting...")
+
+        thread = threading.Thread(target=self._auto_detect_from_account)
+        thread.daemon = True
+        thread.start()
+
+    def _set_auto_detect_button_state(self, label, sensitive):
+        self.auto_detect_button.set_label(label)
+        self.auto_detect_button.set_sensitive(sensitive)
+        return False
+
+    def _auto_detect_from_account(self):
+        try:
+            accounts_data = get_json("https://api.octopus.energy/v1/accounts/", use_api_key=True, timeout=10)
+            tariff_code = self._extract_active_tariff_code(accounts_data)
+            if not tariff_code:
+                GLib.idle_add(self._show_load_error, "Could not find an active electricity tariff on your account.")
+                return
+
+            inferred_region_code = f"_{tariff_code.split('-')[-1]}" if "-" in tariff_code else ""
+            inferred_tariff_type = self._infer_tariff_type_from_code(tariff_code)
+
+            self.settings.set_string("selected-tariff-code", tariff_code)
+            if inferred_region_code in self.REGION_CODE_TO_NAME:
+                self.settings.set_string("selected-region-code", inferred_region_code)
+            self.settings.set_string("selected-tariff-type", inferred_tariff_type)
+
+            GLib.idle_add(self.load_tariffs_and_regions)
+            GLib.idle_add(self._set_auto_detect_button_state, "Auto-detect complete", True)
+        except OctopusApiError as e:
+            GLib.idle_add(self._show_load_error, f"{e} Could not auto-detect tariff.")
+            GLib.idle_add(self._set_auto_detect_button_state, "Auto-detect tariff from account", True)
+        except requests.exceptions.RequestException as e:
+            GLib.idle_add(self._show_load_error, f"Network error: {e}. Could not auto-detect tariff.")
+            GLib.idle_add(self._set_auto_detect_button_state, "Auto-detect tariff from account", True)
+        except Exception as e:
+            GLib.idle_add(self._show_load_error, f"Error detecting tariff: {e}.")
+            GLib.idle_add(self._set_auto_detect_button_state, "Auto-detect tariff from account", True)
+
+    def _infer_tariff_type_from_code(self, tariff_code):
+        normalized = tariff_code.upper()
+        if "INTELLI" in normalized or "INTELLIGENT" in normalized:
+            return "INTELLIGENT"
+        if self._contains_token(normalized, "GO"):
+            return "GO"
+        return "AGILE"
+
+    def _extract_active_tariff_code(self, accounts_data):
+        now = datetime.now(timezone.utc)
+
+        for account in accounts_data.get("results", []):
+            for property_data in account.get("properties", []):
+                for meter_point in property_data.get("electricity_meter_points", []):
+                    for agreement in meter_point.get("agreements", []):
+                        valid_from = agreement.get("valid_from")
+                        valid_to = agreement.get("valid_to")
+                        tariff_code = agreement.get("tariff_code")
+
+                        if not tariff_code or not valid_from:
+                            continue
+
+                        start = datetime.fromisoformat(valid_from.replace("Z", "+00:00"))
+                        end = datetime.fromisoformat(valid_to.replace("Z", "+00:00")) if valid_to else None
+
+                        if start <= now and (end is None or now < end):
+                            return tariff_code
+
+        return None
 
     def load_tariffs_and_regions(self):
         """
@@ -180,9 +263,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
                 logger.debug("All products data loaded from cache.")
                 data = cached_data
             else:
-                response = requests.get(url, timeout=10)
-                response.raise_for_status()
-                data = response.json()
+                data = get_json(url, timeout=10)
                 self.cache_manager.set(cache_key, data)
                 logger.debug("All products data fetched from API and cached.")
 
@@ -192,12 +273,25 @@ class PreferencesWindow(Adw.PreferencesWindow):
                 is_match = False
                 code = product['code'].upper()
                 name = product.get('full_name', '').upper()
+                is_go_product = self._contains_token(code, "GO") or self._contains_token(name, "GO")
+                is_intelligent_product = (
+                    self._contains_token(code, "INTELLI")
+                    or self._contains_token(code, "INTELLIGENT")
+                    or self._contains_token(name, "INTELLI")
+                    or self._contains_token(name, "INTELLIGENT")
+                )
+                is_export_product = (
+                    self._contains_token(code, "OUTGOING")
+                    or self._contains_token(code, "EXPORT")
+                    or self._contains_token(name, "OUTGOING")
+                    or self._contains_token(name, "EXPORT")
+                )
 
-                if tariff_type == 'AGILE' and 'AGILE' in code:
+                if tariff_type == 'AGILE' and 'AGILE' in code and not is_export_product:
                     is_match = True
-                elif tariff_type == 'GO' and ('GO' in code or 'GO' in name) and 'INTELLIGENT' not in code and 'INTELLIGENT' not in name:
+                elif tariff_type == 'GO' and is_go_product and not is_intelligent_product:
                     is_match = True
-                elif tariff_type == 'INTELLIGENT' and ('INTELLIGENT' in code or 'INTELLIGENT' in name):
+                elif tariff_type == 'INTELLIGENT' and is_intelligent_product:
                     is_match = True
 
                 if is_match and product.get('available_from') and not product.get('available_to'):
@@ -216,16 +310,8 @@ class PreferencesWindow(Adw.PreferencesWindow):
                 logger.debug("Product %s data loaded from cache.", target_product['code'])
                 product_details = cached_product_data
             else:
-                # Use basic auth for intelligent go if API key is provided
-                auth = None
-                api_key = get_api_key()
-                if api_key and tariff_type == 'INTELLIGENT':
-                    from requests.auth import HTTPBasicAuth
-                    auth = HTTPBasicAuth(api_key, '')
-
-                product_response = requests.get(product_url, timeout=10, auth=auth)
-                product_response.raise_for_status()
-                product_details = product_response.json()
+                use_api_key = tariff_type == 'INTELLIGENT'
+                product_details = get_json(product_url, timeout=10, use_api_key=use_api_key)
                 self.cache_manager.set(product_cache_key, product_details)
                 logger.debug("Product %s data fetched from API and cached.", target_product['code'])
 
@@ -234,6 +320,8 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
             self._process_agile_tariffs(product_details, request_id)
 
+        except OctopusApiError as e:
+            GLib.idle_add(self._show_load_error_if_current, f"{e} Cannot load tariffs.", request_id)
         except requests.exceptions.RequestException as e:
             GLib.idle_add(self._show_load_error_if_current, f"Network error: {e}. Cannot load tariffs.", request_id)
         except Exception as e:
@@ -258,10 +346,16 @@ class PreferencesWindow(Adw.PreferencesWindow):
         self.region_row.set_subtitle("Select your region to see available tariffs.")
 
         selected_region_code = self.settings.get_string("selected-region-code")
+        saved_tariff_code = self.settings.get_string("selected-tariff-code")
         selected_display_name = None
 
         if selected_region_code and selected_region_code in self.REGION_CODE_TO_NAME:
             selected_display_name = self.REGION_CODE_TO_NAME[selected_region_code]
+        elif saved_tariff_code:
+            inferred_region_code = f"_{saved_tariff_code.split('-')[-1]}" if "-" in saved_tariff_code else ""
+            if inferred_region_code in self.REGION_CODE_TO_NAME:
+                selected_display_name = self.REGION_CODE_TO_NAME[inferred_region_code]
+                self.settings.set_string("selected-region-code", inferred_region_code)
         else:
             default_region_code = '_A'
             selected_display_name = self.REGION_CODE_TO_NAME.get(default_region_code, self.all_regions[0] if self.all_regions else None)
