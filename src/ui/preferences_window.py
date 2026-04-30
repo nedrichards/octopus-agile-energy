@@ -318,7 +318,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
     def _fetch_recent_usage_samples(self, account_data):
         now = datetime.now(timezone.utc)
-        period_from = (now - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        period_from = (now - timedelta(days=120)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         for property_data in account_data.get("properties", []):
             for meter_point in property_data.get("electricity_meter_points", []):
@@ -352,16 +352,17 @@ class PreferencesWindow(Adw.PreferencesWindow):
                             {
                                 "period_from": period_from,
                                 "order_by": "period",
+                                "page_size": 250,
                             }
                         )
                     )
                     try:
-                        data = get_json(url, use_api_key=True, timeout=10)
+                        data = self._fetch_all_consumption_pages(url)
                     except OctopusApiError as e:
                         logger.debug("Usage fetch failed for meter %s/%s: %s", mpan, serial_number, e)
                         continue
 
-                    samples = data.get("results", [])
+                    samples = data
                     if samples and len(samples) > len(best_samples):
                         best_samples = samples
 
@@ -369,6 +370,23 @@ class PreferencesWindow(Adw.PreferencesWindow):
                     return best_samples
 
         return []
+
+    def _fetch_all_consumption_pages(self, initial_url):
+        samples = []
+        next_url = initial_url
+        max_pages = 40
+        pages_fetched = 0
+
+        while next_url and pages_fetched < max_pages:
+            data = get_json(next_url, use_api_key=True, timeout=10)
+            page_results = data.get("results", [])
+            if page_results:
+                samples.extend(page_results)
+
+            next_url = data.get("next")
+            pages_fetched += 1
+
+        return samples
 
     def load_tariffs_and_regions(self):
         """
