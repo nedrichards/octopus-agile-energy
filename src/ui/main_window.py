@@ -341,7 +341,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.main_view_stack = Adw.ViewStack.new()
         self.main_view_stack.add_titled_with_icon(scrolled_content, "prices", "Prices", "view-list-symbolic")
-        self.main_view_stack.add_titled_with_icon(usage_scroll, "usage", "Usage", "org.gnome.Settings-symbolic")
+        self.main_view_stack.add_titled_with_icon(usage_scroll, "usage", "Usage", "preferences-system-symbolic")
 
         view_switcher = Adw.ViewSwitcher.new()
         view_switcher.set_stack(self.main_view_stack)
@@ -936,7 +936,7 @@ class MainWindow(Adw.ApplicationWindow):
         previous_avg = (sum(previous_7) / len(previous_7)) if previous_7 else recent_avg
         trend_pct = 0.0 if previous_avg == 0 else ((recent_avg - previous_avg) / previous_avg) * 100.0
         monthly_projection = avg_daily * 30.0
-        based_on = f" Based on data through {synced_at[:10]}." if synced_at else ""
+        based_on = f" Based on data up to {synced_at[:10]}." if synced_at else ""
         return (
             f"Average daily consumption: {avg_daily:.2f} kWh · "
             f"Seven-day trend: {trend_pct:+.1f}% · "
