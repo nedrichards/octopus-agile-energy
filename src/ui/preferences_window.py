@@ -141,6 +141,12 @@ class PreferencesWindow(Adw.PreferencesWindow):
         self.auto_detect_button.connect("clicked", self.on_auto_detect_clicked)
         api_group.add(self.auto_detect_button)
 
+        self.auto_detect_status = Gtk.Label.new("")
+        self.auto_detect_status.set_xalign(0)
+        self.auto_detect_status.add_css_class("dim-label")
+        self.auto_detect_status.set_wrap(True)
+        api_group.add(self.auto_detect_status)
+
         self.present()
 
     def on_api_key_changed(self, entry):
@@ -163,15 +169,18 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
     def on_auto_detect_clicked(self, _button):
         self.auto_detect_button.set_sensitive(False)
-        self.auto_detect_button.set_label("Detecting...")
+        self._set_auto_detect_status("Detecting tariff from account...")
 
         thread = threading.Thread(target=self._auto_detect_from_account)
         thread.daemon = True
         thread.start()
 
-    def _set_auto_detect_button_state(self, label, sensitive):
-        self.auto_detect_button.set_label(label)
+    def _set_auto_detect_button_state(self, sensitive):
         self.auto_detect_button.set_sensitive(sensitive)
+        return False
+
+    def _set_auto_detect_status(self, message):
+        self.auto_detect_status.set_label(message)
         return False
 
     def _auto_detect_from_account(self):
@@ -179,7 +188,8 @@ class PreferencesWindow(Adw.PreferencesWindow):
             account_number = self.settings.get_string("octopus-account-number").strip()
             if not account_number:
                 GLib.idle_add(self._show_load_error, "Add your Octopus account number to use auto-detect.")
-                GLib.idle_add(self._set_auto_detect_button_state, "Auto-detect tariff from account", True)
+                GLib.idle_add(self._set_auto_detect_status, "Add your Octopus account number, then try auto-detect again.")
+                GLib.idle_add(self._set_auto_detect_button_state, True)
                 return
 
             account_data = get_json(
@@ -190,7 +200,8 @@ class PreferencesWindow(Adw.PreferencesWindow):
             tariff_code = self._extract_active_tariff_code(account_data)
             if not tariff_code:
                 GLib.idle_add(self._show_load_error, "Could not find an active electricity tariff on your account.")
-                GLib.idle_add(self._set_auto_detect_button_state, "Auto-detect tariff from account", True)
+                GLib.idle_add(self._set_auto_detect_status, "No active electricity tariff agreement found on this account.")
+                GLib.idle_add(self._set_auto_detect_button_state, True)
                 return
 
             inferred_region_code = f"_{tariff_code.split('-')[-1]}" if "-" in tariff_code else ""
@@ -202,16 +213,20 @@ class PreferencesWindow(Adw.PreferencesWindow):
             self.settings.set_string("selected-tariff-type", inferred_tariff_type)
 
             GLib.idle_add(self.load_tariffs_and_regions)
-            GLib.idle_add(self._set_auto_detect_button_state, "Auto-detect complete", True)
+            GLib.idle_add(self._set_auto_detect_status, "Auto-detect complete. Tariff settings were updated.")
+            GLib.idle_add(self._set_auto_detect_button_state, True)
         except OctopusApiError as e:
             GLib.idle_add(self._show_load_error, f"{e} Could not auto-detect tariff.")
-            GLib.idle_add(self._set_auto_detect_button_state, "Auto-detect tariff from account", True)
+            GLib.idle_add(self._set_auto_detect_status, "Auto-detect failed. Check API key/account number and try again.")
+            GLib.idle_add(self._set_auto_detect_button_state, True)
         except requests.exceptions.RequestException as e:
             GLib.idle_add(self._show_load_error, f"Network error: {e}. Could not auto-detect tariff.")
-            GLib.idle_add(self._set_auto_detect_button_state, "Auto-detect tariff from account", True)
+            GLib.idle_add(self._set_auto_detect_status, "Network error while auto-detecting tariff. Please retry.")
+            GLib.idle_add(self._set_auto_detect_button_state, True)
         except Exception as e:
             GLib.idle_add(self._show_load_error, f"Error detecting tariff: {e}.")
-            GLib.idle_add(self._set_auto_detect_button_state, "Auto-detect tariff from account", True)
+            GLib.idle_add(self._set_auto_detect_status, "Unexpected error while auto-detecting tariff.")
+            GLib.idle_add(self._set_auto_detect_button_state, True)
 
     def _infer_tariff_type_from_code(self, tariff_code):
         normalized = tariff_code.upper()
