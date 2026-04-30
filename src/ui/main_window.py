@@ -329,6 +329,26 @@ class MainWindow(Adw.ApplicationWindow):
         usage_scroll.set_vexpand(True)
         usage_scroll.set_child(usage_clamp)
 
+        usage_chart_box = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        usage_chart_box.add_css_class("chart-background")
+        usage_content_box.append(usage_chart_box)
+
+        usage_chart_title = Gtk.Label.new("Usage over time")
+        usage_chart_title.set_halign(Gtk.Align.START)
+        usage_chart_title.add_css_class("title-4")
+        usage_chart_box.append(usage_chart_title)
+
+        self.usage_chart_area = Gtk.DrawingArea.new()
+        self.usage_chart_area.set_content_width(640)
+        self.usage_chart_area.set_content_height(220)
+        self.usage_chart_area.set_hexpand(True)
+        self.usage_chart_area.set_vexpand(False)
+        self.usage_chart_area.set_margin_top(8)
+        self.usage_chart_area.set_margin_bottom(8)
+        self.usage_chart_area.set_draw_func(self._draw_usage_chart)
+        self.usage_chart_points = []
+        usage_chart_box.append(self.usage_chart_area)
+
         usage_group = Adw.PreferencesGroup()
         usage_group.set_title("Usage Insights")
         usage_group.set_description("Recent electricity consumption trends from cached Octopus usage history.")
@@ -368,19 +388,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.usage_trend_bar.set_margin_end(8)
         self.usage_trend_bar_row.add_suffix(self.usage_trend_bar)
         usage_group.add(self.usage_trend_bar_row)
-
-        self.usage_chart_row = Adw.ActionRow.new()
-        self.usage_chart_row.set_title("Usage over time")
-        self.usage_chart_area = Gtk.DrawingArea.new()
-        self.usage_chart_area.set_content_width(320)
-        self.usage_chart_area.set_content_height(120)
-        self.usage_chart_area.set_hexpand(True)
-        self.usage_chart_area.set_margin_top(6)
-        self.usage_chart_area.set_margin_bottom(6)
-        self.usage_chart_area.set_draw_func(self._draw_usage_chart)
-        self.usage_chart_points = []
-        self.usage_chart_row.add_suffix(self.usage_chart_area)
-        usage_group.add(self.usage_chart_row)
 
         self.main_view_stack = Adw.ViewStack.new()
         self.main_view_stack.add_titled_with_icon(scrolled_content, "prices", "Prices", "view-list-symbolic")
@@ -1020,7 +1027,7 @@ class MainWindow(Adw.ApplicationWindow):
             "trend_text": f"{trend_pct:+.1f}%",
             "monthly_text": f"{monthly_projection:.0f} kWh",
             "trend_strength": trend_strength,
-            "chart_points": values[-30:],
+            "chart_points": values[-90:],
         }
 
     def _draw_usage_chart(self, _area, cr, width, height):
