@@ -389,6 +389,27 @@ class MainWindow(Adw.ApplicationWindow):
         self.usage_trend_bar_row.add_suffix(self.usage_trend_bar)
         usage_group.add(self.usage_trend_bar_row)
 
+        self.cost_daily_row = Adw.ActionRow.new()
+        self.cost_daily_row.set_title("Average daily spend")
+        self.cost_daily_row.add_prefix(Gtk.Image.new_from_icon_name("wallet-symbolic"))
+        self.cost_daily_label = Gtk.Label.new("—")
+        self.cost_daily_row.add_suffix(self.cost_daily_label)
+        usage_group.add(self.cost_daily_row)
+
+        self.cost_trend_row = Adw.ActionRow.new()
+        self.cost_trend_row.set_title("Recent spending trend")
+        self.cost_trend_row.add_prefix(Gtk.Image.new_from_icon_name("money-symbolic"))
+        self.cost_trend_label = Gtk.Label.new("—")
+        self.cost_trend_row.add_suffix(self.cost_trend_label)
+        usage_group.add(self.cost_trend_row)
+
+        self.cost_month_row = Adw.ActionRow.new()
+        self.cost_month_row.set_title("Estimated monthly spend")
+        self.cost_month_row.add_prefix(Gtk.Image.new_from_icon_name("x-office-spreadsheet-symbolic"))
+        self.cost_month_label = Gtk.Label.new("—")
+        self.cost_month_row.add_suffix(self.cost_month_label)
+        usage_group.add(self.cost_month_row)
+
         self.main_view_stack = Adw.ViewStack.new()
         self.main_view_stack.add_titled_with_icon(scrolled_content, "prices", "Prices", "view-list-symbolic")
         self.main_view_stack.add_titled_with_icon(usage_scroll, "usage", "Usage", "preferences-system-symbolic")
@@ -961,6 +982,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.usage_trend_label.set_text(insight["trend_text"])
         self.usage_month_label.set_text(insight["monthly_text"])
         self.usage_trend_bar.set_value(insight["trend_strength"])
+        self.cost_daily_label.set_text(insight["daily_cost_text"])
+        self.cost_trend_label.set_text(insight["cost_trend_text"])
+        self.cost_month_label.set_text(insight["monthly_cost_text"])
         self.usage_chart_points = insight["chart_points"]
         self.usage_chart_area.queue_draw()
 
@@ -969,6 +993,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.usage_trend_label.set_text("—")
         self.usage_month_label.set_text("—")
         self.usage_trend_bar.set_value(0.0)
+        self.cost_daily_label.set_text("—")
+        self.cost_trend_label.set_text("—")
+        self.cost_month_label.set_text("—")
         self.usage_chart_points = []
         self.usage_chart_area.queue_draw()
 
@@ -981,6 +1008,9 @@ class MainWindow(Adw.ApplicationWindow):
                 "monthly_text": "—",
                 "trend_strength": 0.0,
                 "chart_points": [],
+                "daily_cost_text": "—",
+                "cost_trend_text": "—",
+                "monthly_cost_text": "—",
             }
 
         daily_totals = {}
@@ -1004,6 +1034,9 @@ class MainWindow(Adw.ApplicationWindow):
                 "monthly_text": "—",
                 "trend_strength": 0.0,
                 "chart_points": [],
+                "daily_cost_text": "—",
+                "cost_trend_text": "—",
+                "monthly_cost_text": "—",
             }
 
         sorted_days = sorted(daily_totals.items(), key=lambda x: x[0])
@@ -1016,6 +1049,12 @@ class MainWindow(Adw.ApplicationWindow):
         trend_pct = 0.0 if previous_avg == 0 else ((recent_avg - previous_avg) / previous_avg) * 100.0
         monthly_projection = avg_daily * 30.0
         trend_strength = min(100.0, abs(trend_pct) * 2.0)
+        avg_unit_price = self._get_average_unit_price_gbp()
+        standing_charge_gbp = self._get_standing_charge_gbp_per_day()
+        avg_daily_cost = (avg_daily * avg_unit_price) + standing_charge_gbp
+        monthly_cost = avg_daily_cost * 30.0
+        price_trend_pct = self._get_recent_price_trend_pct()
+        combined_cost_trend_pct = trend_pct + price_trend_pct
         based_on = f" Based on data up to {synced_at[:10]}." if synced_at else ""
         summary = (
             f"Consumption is {'rising' if trend_pct > 1 else 'falling' if trend_pct < -1 else 'steady'} over the last week."
@@ -1028,7 +1067,51 @@ class MainWindow(Adw.ApplicationWindow):
             "monthly_text": f"{monthly_projection:.0f} kWh",
             "trend_strength": trend_strength,
             "chart_points": values[-90:],
+            "daily_cost_text": f"£{avg_daily_cost:.2f}/day",
+            "cost_trend_text": f"{combined_cost_trend_pct:+.1f}%",
+            "monthly_cost_text": f"£{monthly_cost:.0f}",
         }
+
+    def _get_average_unit_price_gbp(self):
+        if not self.all_prices:
+            return 0.25
+        return sum(p['price_gbp'] for p in self.all_prices) / len(self.all_prices)
+
+    def _get_recent_price_trend_pct(self):
+        if len(self.all_prices) < 48:
+            return 0.0
+        recent = self.all_prices[-24:]
+        previous = self.all_prices[-48:-24]
+        recent_avg = sum(p['price_gbp'] for p in recent) / len(recent)
+        previous_avg = sum(p['price_gbp'] for p in previous) / len(previous)
+        if previous_avg == 0:
+            return 0.0
+        return ((recent_avg - previous_avg) / previous_avg) * 100.0
+
+    def _get_standing_charge_gbp_per_day(self):
+        selected_tariff_code = self.settings.get_string("selected-tariff-code")
+        if not selected_tariff_code:
+            return 0.0
+
+        cache_key = f"octopus_standing_charge_{selected_tariff_code}"
+        cached_data, _cache_mtime = self.cache_manager.get(cache_key)
+        if cached_data and "value_inc_vat" in cached_data:
+            return float(cached_data["value_inc_vat"]) / 100.0
+
+        try:
+            product_code = extract_product_code(selected_tariff_code)
+            url = f"https://api.octopus.energy/v1/products/{product_code}/electricity-tariffs/{selected_tariff_code}/standing-charges/"
+            response = requests.get(url, params={"page_size": 1}, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            if data.get("results"):
+                standing = data["results"][0]
+                self.cache_manager.set(cache_key, standing)
+                return float(standing.get("value_inc_vat", 0.0)) / 100.0
+        except requests.exceptions.RequestException:
+            return 0.0
+
+        return 0.0
 
     def _draw_usage_chart(self, _area, cr, width, height):
         cr.set_source_rgba(0.7, 0.7, 0.7, 0.2)
