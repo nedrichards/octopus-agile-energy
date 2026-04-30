@@ -677,19 +677,21 @@ class MainWindow(Adw.ApplicationWindow):
             rates_cache_key = f"octopus_rates_{selected_tariff_code}_{now.strftime('%Y-%m-%d')}"
 
             raw_rates = None
-            if not force:
-                cached_data, cache_mtime_ts = self.cache_manager.get(rates_cache_key)
-                if cached_data and cache_mtime_ts:
-                    cache_mtime = datetime.fromtimestamp(cache_mtime_ts, tz=timezone.utc)
-                    release_time = now.replace(hour=16, minute=0, second=0, microsecond=0)
-                    if not (now >= release_time and cache_mtime < release_time):
-                        logger.debug("Rates data loaded from cache.")
-                        raw_rates = cached_data
-                    else:
-                        logger.debug("Stale cache, will refetch.")
+            cached_data, cache_mtime_ts = self.cache_manager.get(rates_cache_key)
+            if cached_data and cache_mtime_ts:
+                cache_mtime = datetime.fromtimestamp(cache_mtime_ts, tz=timezone.utc)
+                release_time = now.replace(hour=16, minute=0, second=0, microsecond=0)
+                if not (now >= release_time and cache_mtime < release_time):
+                    logger.debug("Rates data loaded from cache.")
+                    raw_rates = cached_data
+                else:
+                    logger.debug("Stale cache, will refetch.")
 
             if not raw_rates:
-                logger.debug("Fetching new data from API.")
+                if force:
+                    logger.debug("Forced refresh requested, but no valid cache available. Fetching new data from API.")
+                else:
+                    logger.debug("Fetching new data from API.")
                 rates_url = f"https://api.octopus.energy/v1/products/{product_code}/electricity-tariffs/{selected_tariff_code}/standard-unit-rates/"
 
                 # Use basic auth for intelligent go if API key is provided
