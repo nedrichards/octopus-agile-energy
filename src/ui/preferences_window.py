@@ -5,7 +5,7 @@ gi.require_version('Adw', '1')
 import logging
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import requests
 from gi.repository import Adw, GLib, Gtk
@@ -147,6 +147,17 @@ class PreferencesWindow(Adw.PreferencesWindow):
         self.auto_detect_status.set_wrap(True)
         api_group.add(self.auto_detect_status)
 
+        self.refresh_usage_button = Gtk.Button.new_with_label("Refresh usage history")
+        self.refresh_usage_button.set_margin_top(8)
+        self.refresh_usage_button.connect("clicked", self.on_refresh_usage_clicked)
+        api_group.add(self.refresh_usage_button)
+
+        self.usage_status = Gtk.Label.new("")
+        self.usage_status.set_xalign(0)
+        self.usage_status.add_css_class("dim-label")
+        self.usage_status.set_wrap(True)
+        api_group.add(self.usage_status)
+
         self.present()
 
     def on_api_key_changed(self, entry):
@@ -181,6 +192,21 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
     def _set_auto_detect_status(self, message):
         self.auto_detect_status.set_label(message)
+        return False
+
+    def on_refresh_usage_clicked(self, _button):
+        self.refresh_usage_button.set_sensitive(False)
+        self._set_usage_status("Refreshing usage history...")
+        thread = threading.Thread(target=self._refresh_usage_history)
+        thread.daemon = True
+        thread.start()
+
+    def _set_usage_status(self, message):
+        self.usage_status.set_label(message)
+        return False
+
+    def _set_refresh_usage_button_state(self, sensitive):
+        self.refresh_usage_button.set_sensitive(sensitive)
         return False
 
     def _auto_detect_from_account(self):
@@ -236,6 +262,17 @@ class PreferencesWindow(Adw.PreferencesWindow):
             return "GO"
         return "AGILE"
 
+    def _get_account_data(self):
+        account_number = self.settings.get_string("octopus-account-number").strip()
+        if not account_number:
+            raise OctopusApiError("Missing Octopus account number.")
+
+        return get_json(
+            f"https://api.octopus.energy/v1/accounts/{account_number}/",
+            use_api_key=True,
+            timeout=10,
+        )
+
     def _extract_active_tariff_code(self, account_data):
         now = datetime.now(timezone.utc)
 
@@ -256,6 +293,46 @@ class PreferencesWindow(Adw.PreferencesWindow):
                         return tariff_code
 
         return None
+
+    def _refresh_usage_history(self):
+        try:
+            account_data = self._get_account_data()
+            usage_samples = self._fetch_recent_usage_samples(account_data)
+            if not usage_samples:
+                GLib.idle_add(self._set_usage_status, "No recent usage data found for this account.")
+                return
+
+            account_number = self.settings.get_string("octopus-account-number").strip()
+            cache_key = f"octopus_usage_{account_number}"
+            self.cache_manager.set(cache_key, {"samples": usage_samples, "synced_at": datetime.now(timezone.utc).isoformat()})
+            GLib.idle_add(self._set_usage_status, f"Usage history refreshed ({len(usage_samples)} records).")
+        except OctopusApiError as e:
+            GLib.idle_add(self._set_usage_status, f"{e} Could not refresh usage history.")
+        except requests.exceptions.RequestException as e:
+            GLib.idle_add(self._set_usage_status, f"Network error: {e}. Could not refresh usage history.")
+        except Exception as e:
+            GLib.idle_add(self._set_usage_status, f"Error refreshing usage history: {e}.")
+        finally:
+            GLib.idle_add(self._set_refresh_usage_button_state, True)
+
+    def _fetch_recent_usage_samples(self, account_data):
+        for property_data in account_data.get("properties", []):
+            for meter_point in property_data.get("electricity_meter_points", []):
+                mpan = meter_point.get("mpan")
+                for meter in meter_point.get("meters", []):
+                    serial_number = meter.get("serial_number")
+                    if not mpan or not serial_number:
+                        continue
+
+                    url = (
+                        f"https://api.octopus.energy/v1/electricity-meter-points/{mpan}"
+                        f"/meters/{serial_number}/consumption/?period_from="
+                        f"{(datetime.now(timezone.utc) - timedelta(days=30)).isoformat()}&order_by=period"
+                    )
+                    data = get_json(url, use_api_key=True, timeout=10)
+                    return data.get("results", [])
+
+        return []
 
     def load_tariffs_and_regions(self):
         """
