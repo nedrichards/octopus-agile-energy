@@ -159,7 +159,13 @@ class PreferencesWindow(Adw.PreferencesWindow):
         self.usage_status.set_wrap(True)
         api_group.add(self.usage_status)
 
+        self.usage_insights_row = Adw.ActionRow.new()
+        self.usage_insights_row.set_title("Usage insights")
+        self.usage_insights_row.set_subtitle("Refresh usage history to generate insights.")
+        api_group.add(self.usage_insights_row)
+
         self.present()
+        self._update_usage_insights_from_cache()
 
     def on_api_key_changed(self, entry):
         text = entry.get_text()
@@ -307,6 +313,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
             cache_key = f"octopus_usage_{account_number}"
             self.cache_manager.set(cache_key, {"samples": usage_samples, "synced_at": datetime.now(timezone.utc).isoformat()})
             GLib.idle_add(self._set_usage_status, f"Usage history refreshed ({len(usage_samples)} records).")
+            GLib.idle_add(self._update_usage_insights_from_cache)
         except OctopusApiError as e:
             GLib.idle_add(self._set_usage_status, f"{e} Could not refresh usage history.")
         except requests.exceptions.RequestException as e:
@@ -315,6 +322,63 @@ class PreferencesWindow(Adw.PreferencesWindow):
             GLib.idle_add(self._set_usage_status, f"Error refreshing usage history: {e}.")
         finally:
             GLib.idle_add(self._set_refresh_usage_button_state, True)
+
+    def _update_usage_insights_from_cache(self):
+        account_number = self.settings.get_string("octopus-account-number").strip()
+        if not account_number:
+            self.usage_insights_row.set_subtitle("Add your account number to enable usage insights.")
+            return False
+
+        cache_key = f"octopus_usage_{account_number}"
+        cached_data, _cache_mtime = self.cache_manager.get(cache_key)
+        if not cached_data or "samples" not in cached_data:
+            self.usage_insights_row.set_subtitle("Refresh usage history to generate insights.")
+            return False
+
+        insight_text = self._build_usage_insight_text(cached_data.get("samples", []))
+        synced_at = cached_data.get("synced_at", "")
+        if synced_at:
+            self.usage_insights_row.set_subtitle(f"{insight_text}\nBased on data through {synced_at[:10]}.")
+        else:
+            self.usage_insights_row.set_subtitle(insight_text)
+        return False
+
+    def _build_usage_insight_text(self, samples):
+        if not samples:
+            return "No usage samples available yet."
+
+        daily_totals = {}
+        for sample in samples:
+            interval_start = sample.get("interval_start")
+            consumption = sample.get("consumption")
+            if interval_start is None or consumption is None:
+                continue
+
+            try:
+                start_dt = datetime.fromisoformat(interval_start.replace("Z", "+00:00"))
+                day_key = start_dt.date().isoformat()
+                daily_totals[day_key] = daily_totals.get(day_key, 0.0) + float(consumption)
+            except (ValueError, TypeError):
+                continue
+
+        if len(daily_totals) < 7:
+            return "Not enough usage data yet (need at least 7 days)."
+
+        sorted_days = sorted(daily_totals.items(), key=lambda x: x[0])
+        values = [value for _day, value in sorted_days]
+        avg_daily = sum(values) / len(values)
+        recent_7 = values[-7:]
+        previous_7 = values[-14:-7] if len(values) >= 14 else []
+        recent_avg = sum(recent_7) / len(recent_7)
+        previous_avg = (sum(previous_7) / len(previous_7)) if previous_7 else recent_avg
+        trend_pct = 0.0 if previous_avg == 0 else ((recent_avg - previous_avg) / previous_avg) * 100.0
+        monthly_projection = avg_daily * 30.0
+
+        return (
+            f"Average daily usage: {avg_daily:.2f} kWh. "
+            f"7-day trend: {trend_pct:+.1f}%. "
+            f"Projected monthly usage: {monthly_projection:.0f} kWh."
+        )
 
     def _fetch_recent_usage_samples(self, account_data):
         now = datetime.now(timezone.utc)
