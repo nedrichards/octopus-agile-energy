@@ -448,12 +448,12 @@ class MainWindow(Adw.ApplicationWindow):
 
         usage_group = Adw.PreferencesGroup()
         usage_group.set_title("Usage Insights")
-        usage_group.set_description("Recent consumption trends from cached Octopus usage history.")
+        usage_group.set_description("Recent electricity consumption trends from cached Octopus usage history.")
         bottom_content_box.append(usage_group)
 
         self.usage_insights_row = Adw.ActionRow.new()
         self.usage_insights_row.set_title("Recent usage trends")
-        self.usage_insights_row.set_subtitle("Refresh usage history from Preferences to populate this section.")
+        self.usage_insights_row.set_subtitle("Refresh usage history in Preferences to fill this section.")
         usage_group.add(self.usage_insights_row)
 
         # Use Adw.ToastOverlay to display temporary messages, wrapping the entire content.
@@ -868,7 +868,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _update_usage_insights(self):
         account_number = self.settings.get_string("octopus-account-number").strip()
         if not account_number:
-            self.usage_insights_row.set_subtitle("Add your account number in Preferences to enable usage insights.")
+            self.usage_insights_row.set_subtitle("Add your account number in Preferences to enable these insights.")
             return
 
         cache_key = f"octopus_usage_{account_number}"
@@ -899,7 +899,7 @@ class MainWindow(Adw.ApplicationWindow):
                 continue
 
         if len(daily_totals) < 7:
-            return "Not enough usage data yet (need at least 7 days)."
+            return "Not enough usage data yet (need at least seven days)."
 
         sorted_days = sorted(daily_totals.items(), key=lambda x: x[0])
         values = [value for _day, value in sorted_days]
@@ -912,9 +912,9 @@ class MainWindow(Adw.ApplicationWindow):
         monthly_projection = avg_daily * 30.0
         based_on = f" Based on data through {synced_at[:10]}." if synced_at else ""
         return (
-            f"Average daily usage: {avg_daily:.2f} kWh · "
-            f"7-day trend: {trend_pct:+.1f}% · "
-            f"Projected monthly usage: {monthly_projection:.0f} kWh."
+            f"Average daily consumption: {avg_daily:.2f} kWh · "
+            f"Seven-day trend: {trend_pct:+.1f}% · "
+            f"Estimated monthly consumption: {monthly_projection:.0f} kWh."
             f"{based_on}"
         )
 
