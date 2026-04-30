@@ -333,7 +333,7 @@ class MainWindow(Adw.ApplicationWindow):
         usage_chart_box.add_css_class("chart-background")
         usage_content_box.append(usage_chart_box)
 
-        usage_chart_title = Gtk.Label.new("Usage over time")
+        usage_chart_title = Gtk.Label.new("Daily consumption (last 90 days)")
         usage_chart_title.set_halign(Gtk.Align.START)
         usage_chart_title.add_css_class("title-4")
         usage_chart_box.append(usage_chart_title)
@@ -347,6 +347,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.usage_chart_area.set_margin_bottom(8)
         self.usage_chart_area.set_draw_func(self._draw_usage_chart)
         self.usage_chart_points = []
+        self.usage_chart_dates = []
         usage_chart_box.append(self.usage_chart_area)
 
         usage_group = Adw.PreferencesGroup()
@@ -991,6 +992,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.cost_trend_label.set_text(insight["cost_trend_text"])
         self.cost_month_label.set_text(insight["monthly_cost_text"])
         self.usage_chart_points = insight["chart_points"]
+        self.usage_chart_dates = insight["chart_dates"]
         self.usage_chart_area.queue_draw()
 
     def _set_usage_metric_placeholders(self):
@@ -1002,6 +1004,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.cost_trend_label.set_text("—")
         self.cost_month_label.set_text("—")
         self.usage_chart_points = []
+        self.usage_chart_dates = []
         self.usage_chart_area.queue_draw()
 
     def _build_usage_insight_data(self, samples, synced_at):
@@ -1013,6 +1016,7 @@ class MainWindow(Adw.ApplicationWindow):
                 "monthly_text": "—",
                 "trend_strength": 0.0,
                 "chart_points": [],
+                "chart_dates": [],
                 "daily_cost_text": "—",
                 "cost_trend_text": "—",
                 "monthly_cost_text": "—",
@@ -1039,12 +1043,14 @@ class MainWindow(Adw.ApplicationWindow):
                 "monthly_text": "—",
                 "trend_strength": 0.0,
                 "chart_points": [],
+                "chart_dates": [],
                 "daily_cost_text": "—",
                 "cost_trend_text": "—",
                 "monthly_cost_text": "—",
             }
 
         sorted_days = sorted(daily_totals.items(), key=lambda x: x[0])
+        day_keys = [day for day, _value in sorted_days]
         values = [value for _day, value in sorted_days]
         avg_daily = sum(values) / len(values)
         recent_7 = values[-7:]
@@ -1072,6 +1078,7 @@ class MainWindow(Adw.ApplicationWindow):
             "monthly_text": f"{monthly_projection:.0f} kWh",
             "trend_strength": trend_strength,
             "chart_points": values[-90:],
+            "chart_dates": day_keys[-90:],
             "daily_cost_text": f"£{avg_daily_cost:.2f}/day",
             "cost_trend_text": f"{combined_cost_trend_pct:+.1f}%",
             "monthly_cost_text": f"£{monthly_cost:.0f}",
@@ -1119,8 +1126,18 @@ class MainWindow(Adw.ApplicationWindow):
         return 0.0
 
     def _draw_usage_chart(self, _area, cr, width, height):
-        cr.set_source_rgba(0.7, 0.7, 0.7, 0.2)
-        cr.rectangle(0, 0, width, height)
+        margin_left = 40
+        margin_right = 12
+        margin_top = 14
+        margin_bottom = 24
+
+        plot_x = margin_left
+        plot_y = margin_top
+        plot_w = max(1, width - margin_left - margin_right)
+        plot_h = max(1, height - margin_top - margin_bottom)
+
+        cr.set_source_rgba(0.7, 0.7, 0.7, 0.12)
+        cr.rectangle(plot_x, plot_y, plot_w, plot_h)
         cr.fill()
 
         if not self.usage_chart_points:
@@ -1131,13 +1148,68 @@ class MainWindow(Adw.ApplicationWindow):
         if max_value <= 0:
             max_value = 1.0
 
-        cr.set_source_rgba(0.2, 0.6, 0.9, 0.9)
-        bar_width = max(2, width / max(1, len(points)))
+        # gridlines
+        cr.set_source_rgba(1, 1, 1, 0.14)
+        for i in range(1, 4):
+            y = plot_y + (plot_h * i / 4.0)
+            cr.move_to(plot_x, y)
+            cr.line_to(plot_x + plot_w, y)
+        cr.set_line_width(1.0)
+        cr.stroke()
+
+        # area + line
+        step = plot_w / max(1, len(points) - 1)
+        cr.set_source_rgba(0.2, 0.65, 0.9, 0.18)
+        cr.move_to(plot_x, plot_y + plot_h)
         for idx, value in enumerate(points):
-            x = idx * bar_width
-            bar_height = (value / max_value) * (height - 4)
-            y = height - bar_height
-            cr.rectangle(x + 1, y, max(1, bar_width - 2), bar_height)
+            x = plot_x + idx * step
+            y = plot_y + plot_h - ((value / max_value) * plot_h)
+            cr.line_to(x, y)
+        cr.line_to(plot_x + plot_w, plot_y + plot_h)
+        cr.close_path()
+        cr.fill()
+
+        cr.set_source_rgba(0.2, 0.65, 0.9, 0.95)
+        cr.move_to(plot_x, plot_y + plot_h - ((points[0] / max_value) * plot_h))
+        for idx, value in enumerate(points):
+            x = plot_x + idx * step
+            y = plot_y + plot_h - ((value / max_value) * plot_h)
+            cr.line_to(x, y)
+        cr.set_line_width(2.0)
+        cr.stroke()
+
+        # y-axis top value
+        cr.set_source_rgba(1, 1, 1, 0.8)
+        cr.select_font_face("Sans", 0, 0)
+        cr.set_font_size(10)
+        cr.move_to(4, plot_y + 10)
+        cr.show_text(f"{max_value:.1f} kWh")
+
+        # x-axis labels
+        if self.usage_chart_dates:
+            first_label = self.usage_chart_dates[0]
+            last_label = self.usage_chart_dates[-1]
+            cr.move_to(plot_x, height - 6)
+            cr.show_text(first_label)
+            ext = cr.text_extents(last_label)
+            cr.move_to(plot_x + plot_w - ext.width, height - 6)
+            cr.show_text(last_label)
+
+        # current point marker
+        cr.set_source_rgba(0.2, 0.65, 0.9, 1.0)
+        x = plot_x + (len(points) - 1) * step
+        y = plot_y + plot_h - ((points[-1] / max_value) * plot_h)
+        cr.arc(x, y, 3.5, 0, 6.2831)
+        cr.fill()
+
+        # subtle bars for day-level resolution
+        cr.set_source_rgba(0.2, 0.65, 0.9, 0.18)
+        bar_width = max(1.0, step * 0.5)
+        for idx, value in enumerate(points):
+            x = plot_x + idx * step - (bar_width / 2)
+            bar_height = (value / max_value) * plot_h
+            y = plot_y + plot_h - bar_height
+            cr.rectangle(x, y, bar_width, bar_height)
             cr.fill()
 
     def _apply_price_summary_classes(self):
