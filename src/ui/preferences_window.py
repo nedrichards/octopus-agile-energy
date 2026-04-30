@@ -136,6 +136,8 @@ class PreferencesWindow(Adw.PreferencesWindow):
         api_group.add(self.account_number_row)
 
         self.auto_detect_button = Gtk.Button.new_with_label("Auto-detect tariff from account")
+        self.auto_detect_button.set_margin_top(8)
+        self.auto_detect_button.set_margin_bottom(4)
         self.auto_detect_button.connect("clicked", self.on_auto_detect_clicked)
         api_group.add(self.auto_detect_button)
 
