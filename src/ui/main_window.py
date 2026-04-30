@@ -320,6 +320,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         # Usage page content.
         usage_content_box = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.usage_content_box = usage_content_box
         usage_clamp = Adw.Clamp.new()
         usage_clamp.set_child(usage_content_box)
 
@@ -339,8 +340,8 @@ class MainWindow(Adw.ApplicationWindow):
         usage_group.add(self.usage_insights_row)
 
         self.main_view_stack = Adw.ViewStack.new()
-        self.main_view_stack.add_titled(scrolled_content, "prices", "Prices")
-        self.main_view_stack.add_titled(usage_scroll, "usage", "Usage")
+        self.main_view_stack.add_titled_with_icon(scrolled_content, "prices", "Prices", "view-list-symbolic")
+        self.main_view_stack.add_titled_with_icon(usage_scroll, "usage", "Usage", "org.gnome.Settings-symbolic")
 
         view_switcher = Adw.ViewSwitcher.new()
         view_switcher.set_stack(self.main_view_stack)
@@ -505,6 +506,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.overall_content_box.set_margin_bottom(margin)
         self.overall_content_box.set_margin_start(margin)
         self.overall_content_box.set_margin_end(margin)
+        self.usage_content_box.set_margin_top(margin)
+        self.usage_content_box.set_margin_bottom(margin)
+        self.usage_content_box.set_margin_start(margin)
+        self.usage_content_box.set_margin_end(margin)
 
         chart_margin = max(8, margin - 2)
         self.chart_box.set_margin_top(chart_margin)
