@@ -6,6 +6,7 @@ import logging
 import threading
 import time
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlencode
 
 import requests
 from gi.repository import Adw, GLib, Gtk
@@ -326,8 +327,13 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
                     url = (
                         f"https://api.octopus.energy/v1/electricity-meter-points/{mpan}"
-                        f"/meters/{serial_number}/consumption/?period_from="
-                        f"{(datetime.now(timezone.utc) - timedelta(days=30)).isoformat()}&order_by=period"
+                        f"/meters/{serial_number}/consumption/?"
+                        + urlencode(
+                            {
+                                "period_from": (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                                "order_by": "period",
+                            }
+                        )
                     )
                     data = get_json(url, use_api_key=True, timeout=10)
                     return data.get("results", [])
