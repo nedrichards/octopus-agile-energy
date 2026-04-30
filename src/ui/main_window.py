@@ -318,7 +318,38 @@ class MainWindow(Adw.ApplicationWindow):
         scrolled_content.set_vexpand(True)
         scrolled_content.set_child(overall_content_box)
 
-        root_vbox.append(scrolled_content) # The scrolled content is the second child of the root box.
+        # Usage page content.
+        usage_content_box = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        usage_clamp = Adw.Clamp.new()
+        usage_clamp.set_child(usage_content_box)
+
+        usage_scroll = Gtk.ScrolledWindow.new()
+        usage_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        usage_scroll.set_vexpand(True)
+        usage_scroll.set_child(usage_clamp)
+
+        usage_group = Adw.PreferencesGroup()
+        usage_group.set_title("Usage Insights")
+        usage_group.set_description("Recent electricity consumption trends from cached Octopus usage history.")
+        usage_content_box.append(usage_group)
+
+        self.usage_insights_row = Adw.ActionRow.new()
+        self.usage_insights_row.set_title("Recent usage trends")
+        self.usage_insights_row.set_subtitle("Refresh usage history in Preferences to fill this section.")
+        usage_group.add(self.usage_insights_row)
+
+        self.main_view_stack = Adw.ViewStack.new()
+        self.main_view_stack.add_titled(scrolled_content, "prices", "Prices")
+        self.main_view_stack.add_titled(usage_scroll, "usage", "Usage")
+
+        view_switcher = Adw.ViewSwitcher.new()
+        view_switcher.set_stack(self.main_view_stack)
+        view_switcher.set_policy(Adw.ViewSwitcherPolicy.WIDE)
+        view_switcher.set_halign(Gtk.Align.CENTER)
+        view_switcher.set_margin_top(6)
+        view_switcher.set_margin_bottom(6)
+        root_vbox.append(view_switcher)
+        root_vbox.append(self.main_view_stack) # Replaces single-page content with adaptive sections.
 
         # Current price display card.
         self.price_card_stack = Gtk.Stack.new()
@@ -445,16 +476,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.status_label.set_halign(Gtk.Align.CENTER)
         self.status_label.add_css_class("error") # Style with red text for errors.
         bottom_content_box.append(self.status_label)
-
-        usage_group = Adw.PreferencesGroup()
-        usage_group.set_title("Usage Insights")
-        usage_group.set_description("Recent electricity consumption trends from cached Octopus usage history.")
-        bottom_content_box.append(usage_group)
-
-        self.usage_insights_row = Adw.ActionRow.new()
-        self.usage_insights_row.set_title("Recent usage trends")
-        self.usage_insights_row.set_subtitle("Refresh usage history in Preferences to fill this section.")
-        usage_group.add(self.usage_insights_row)
 
         # Use Adw.ToastOverlay to display temporary messages, wrapping the entire content.
         self.toast_overlay = Adw.ToastOverlay.new()
