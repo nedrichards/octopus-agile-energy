@@ -317,9 +317,29 @@ class PreferencesWindow(Adw.PreferencesWindow):
             GLib.idle_add(self._set_refresh_usage_button_state, True)
 
     def _fetch_recent_usage_samples(self, account_data):
+        now = datetime.now(timezone.utc)
+        period_from = (now - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
         for property_data in account_data.get("properties", []):
             for meter_point in property_data.get("electricity_meter_points", []):
+                has_active_agreement = False
+                for agreement in meter_point.get("agreements", []):
+                    valid_from = agreement.get("valid_from")
+                    valid_to = agreement.get("valid_to")
+                    if not valid_from:
+                        continue
+
+                    start = datetime.fromisoformat(valid_from.replace("Z", "+00:00"))
+                    end = datetime.fromisoformat(valid_to.replace("Z", "+00:00")) if valid_to else None
+                    if start <= now and (end is None or now < end):
+                        has_active_agreement = True
+                        break
+
+                if not has_active_agreement:
+                    continue
+
                 mpan = meter_point.get("mpan")
+                best_samples = []
                 for meter in meter_point.get("meters", []):
                     serial_number = meter.get("serial_number")
                     if not mpan or not serial_number:
@@ -330,13 +350,23 @@ class PreferencesWindow(Adw.PreferencesWindow):
                         f"/meters/{serial_number}/consumption/?"
                         + urlencode(
                             {
-                                "period_from": (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                                "period_from": period_from,
                                 "order_by": "period",
                             }
                         )
                     )
-                    data = get_json(url, use_api_key=True, timeout=10)
-                    return data.get("results", [])
+                    try:
+                        data = get_json(url, use_api_key=True, timeout=10)
+                    except OctopusApiError as e:
+                        logger.debug("Usage fetch failed for meter %s/%s: %s", mpan, serial_number, e)
+                        continue
+
+                    samples = data.get("results", [])
+                    if samples and len(samples) > len(best_samples):
+                        best_samples = samples
+
+                if best_samples:
+                    return best_samples
 
         return []
 
