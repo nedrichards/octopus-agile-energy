@@ -446,6 +446,16 @@ class MainWindow(Adw.ApplicationWindow):
         self.status_label.add_css_class("error") # Style with red text for errors.
         bottom_content_box.append(self.status_label)
 
+        usage_group = Adw.PreferencesGroup()
+        usage_group.set_title("Usage Insights")
+        usage_group.set_description("Recent consumption trends from cached Octopus usage history.")
+        bottom_content_box.append(usage_group)
+
+        self.usage_insights_row = Adw.ActionRow.new()
+        self.usage_insights_row.set_title("Recent usage trends")
+        self.usage_insights_row.set_subtitle("Refresh usage history from Preferences to populate this section.")
+        usage_group.add(self.usage_insights_row)
+
         # Use Adw.ToastOverlay to display temporary messages, wrapping the entire content.
         self.toast_overlay = Adw.ToastOverlay.new()
         self.toast_overlay.set_child(root_vbox) # The root_vbox (containing header and scrolled content) is the child.
@@ -809,6 +819,7 @@ class MainWindow(Adw.ApplicationWindow):
         )
         self.price_chart.set_prices(chart_prices, current_index)
         self.status_label.set_text("")
+        self._update_usage_insights()
         self.header_refresh_button.set_sensitive(True)
 
     def show_error(self, error_message):
@@ -853,6 +864,59 @@ class MainWindow(Adw.ApplicationWindow):
         self._apply_price_summary_classes()
         self.price_card_stack.set_visible_child_name(self.price_summary_mode)
         self._queue_price_summary_refresh()
+
+    def _update_usage_insights(self):
+        account_number = self.settings.get_string("octopus-account-number").strip()
+        if not account_number:
+            self.usage_insights_row.set_subtitle("Add your account number in Preferences to enable usage insights.")
+            return
+
+        cache_key = f"octopus_usage_{account_number}"
+        cached_data, _cache_mtime = self.cache_manager.get(cache_key)
+        if not cached_data or "samples" not in cached_data:
+            self.usage_insights_row.set_subtitle("No cached usage history found. Use Preferences → Refresh usage history.")
+            return
+
+        self.usage_insights_row.set_subtitle(
+            self._build_usage_insight_text(cached_data.get("samples", []), cached_data.get("synced_at"))
+        )
+
+    def _build_usage_insight_text(self, samples, synced_at):
+        if not samples:
+            return "No usage samples available yet."
+
+        daily_totals = {}
+        for sample in samples:
+            interval_start = sample.get("interval_start")
+            consumption = sample.get("consumption")
+            if interval_start is None or consumption is None:
+                continue
+            try:
+                start_dt = datetime.fromisoformat(interval_start.replace("Z", "+00:00"))
+                day_key = start_dt.date().isoformat()
+                daily_totals[day_key] = daily_totals.get(day_key, 0.0) + float(consumption)
+            except (TypeError, ValueError):
+                continue
+
+        if len(daily_totals) < 7:
+            return "Not enough usage data yet (need at least 7 days)."
+
+        sorted_days = sorted(daily_totals.items(), key=lambda x: x[0])
+        values = [value for _day, value in sorted_days]
+        avg_daily = sum(values) / len(values)
+        recent_7 = values[-7:]
+        previous_7 = values[-14:-7] if len(values) >= 14 else []
+        recent_avg = sum(recent_7) / len(recent_7)
+        previous_avg = (sum(previous_7) / len(previous_7)) if previous_7 else recent_avg
+        trend_pct = 0.0 if previous_avg == 0 else ((recent_avg - previous_avg) / previous_avg) * 100.0
+        monthly_projection = avg_daily * 30.0
+        based_on = f" Based on data through {synced_at[:10]}." if synced_at else ""
+        return (
+            f"Average daily usage: {avg_daily:.2f} kWh · "
+            f"7-day trend: {trend_pct:+.1f}% · "
+            f"Projected monthly usage: {monthly_projection:.0f} kWh."
+            f"{based_on}"
+        )
 
     def _apply_price_summary_classes(self):
         for widget in (self.price_card, self.compact_price_box):
