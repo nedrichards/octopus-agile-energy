@@ -34,6 +34,7 @@ install_data(
     'utils.py',
     'secrets_manager.py',
     'octopus_api.py',
+    'usage_insights.py',
     'price_logic.py',
   ],
   install_dir: moduledir

@@ -12,6 +12,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 from ..price_logic import extract_product_code
 from ..price_logic import find_cheapest_slot as calculate_cheapest_slot
 from ..secrets_manager import get_api_key
+from ..usage_insights import build_usage_insight_data
 from ..utils import CacheManager
 from .adaptive_layout import (
     DEFAULT_CHART_SLOTS,
@@ -1007,82 +1008,22 @@ class MainWindow(Adw.ApplicationWindow):
         self.usage_chart_dates = []
         self.usage_chart_area.queue_draw()
 
+    
     def _build_usage_insight_data(self, samples, synced_at):
-        if not samples:
-            return {
-                "summary": "No usage samples available yet.",
-                "avg_text": "—",
-                "trend_text": "—",
-                "monthly_text": "—",
-                "trend_strength": 0.0,
-                "chart_points": [],
-                "chart_dates": [],
-                "daily_cost_text": "—",
-                "cost_trend_text": "—",
-                "monthly_cost_text": "—",
-            }
-
-        daily_totals = {}
-        for sample in samples:
-            interval_start = sample.get("interval_start")
-            consumption = sample.get("consumption")
-            if interval_start is None or consumption is None:
-                continue
-            try:
-                start_dt = datetime.fromisoformat(interval_start.replace("Z", "+00:00"))
-                day_key = start_dt.date().isoformat()
-                daily_totals[day_key] = daily_totals.get(day_key, 0.0) + float(consumption)
-            except (TypeError, ValueError):
-                continue
-
-        if len(daily_totals) < 7:
-            return {
-                "summary": "Not enough usage data yet (need at least seven days).",
-                "avg_text": "—",
-                "trend_text": "—",
-                "monthly_text": "—",
-                "trend_strength": 0.0,
-                "chart_points": [],
-                "chart_dates": [],
-                "daily_cost_text": "—",
-                "cost_trend_text": "—",
-                "monthly_cost_text": "—",
-            }
-
-        sorted_days = sorted(daily_totals.items(), key=lambda x: x[0])
-        day_keys = [day for day, _value in sorted_days]
-        values = [value for _day, value in sorted_days]
-        avg_daily = sum(values) / len(values)
-        recent_7 = values[-7:]
-        previous_7 = values[-14:-7] if len(values) >= 14 else []
-        recent_avg = sum(recent_7) / len(recent_7)
-        previous_avg = (sum(previous_7) / len(previous_7)) if previous_7 else recent_avg
-        trend_pct = 0.0 if previous_avg == 0 else ((recent_avg - previous_avg) / previous_avg) * 100.0
-        monthly_projection = avg_daily * 30.0
-        trend_strength = min(100.0, abs(trend_pct) * 2.0)
+        insight = build_usage_insight_data(samples, synced_at)
+        avg_daily = 0.0
+        if insight["avg_text"] != "—":
+            avg_daily = float(insight["avg_text"].split(" ")[0])
         avg_unit_price = self._get_average_unit_price_gbp()
         standing_charge_gbp = self._get_standing_charge_gbp_per_day()
         avg_daily_cost = (avg_daily * avg_unit_price) + standing_charge_gbp
         monthly_cost = avg_daily_cost * 30.0
         price_trend_pct = self._get_recent_price_trend_pct()
-        combined_cost_trend_pct = trend_pct + price_trend_pct
-        based_on = f" Based on data up to {synced_at[:10]}." if synced_at else ""
-        summary = (
-            f"Consumption is {'rising' if trend_pct > 1 else 'falling' if trend_pct < -1 else 'steady'} over the last week."
-            f"{based_on}"
-        )
-        return {
-            "summary": summary,
-            "avg_text": f"{avg_daily:.2f} kWh/day",
-            "trend_text": f"{trend_pct:+.1f}%",
-            "monthly_text": f"{monthly_projection:.0f} kWh",
-            "trend_strength": trend_strength,
-            "chart_points": values[-90:],
-            "chart_dates": day_keys[-90:],
-            "daily_cost_text": f"£{avg_daily_cost:.2f}/day",
-            "cost_trend_text": f"{combined_cost_trend_pct:+.1f}%",
-            "monthly_cost_text": f"£{monthly_cost:.0f}",
-        }
+        combined_cost_trend_pct = insight["trend_pct"] + price_trend_pct
+        insight["daily_cost_text"] = "—" if insight["avg_text"] == "—" else f"£{avg_daily_cost:.2f}/day"
+        insight["cost_trend_text"] = "—" if insight["trend_text"] == "—" else f"{combined_cost_trend_pct:+.1f}%"
+        insight["monthly_cost_text"] = "—" if insight["monthly_text"] == "—" else f"£{monthly_cost:.0f}"
+        return insight
 
     def _get_average_unit_price_gbp(self):
         if not self.all_prices:
