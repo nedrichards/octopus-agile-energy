@@ -16,8 +16,8 @@ from ..usage_insights import build_usage_insight_data
 from ..utils import CacheManager
 from .adaptive_layout import (
     DEFAULT_CHART_SLOTS,
-    get_chart_slot_count,
     get_chart_scroll_value,
+    get_chart_slot_count,
     get_content_margin,
     get_price_summary_mode,
     is_compact_width,
@@ -1008,7 +1008,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.usage_chart_dates = []
         self.usage_chart_area.queue_draw()
 
-    
+
     def _build_usage_insight_data(self, samples, synced_at):
         insight = build_usage_insight_data(samples, synced_at)
         avg_daily = 0.0

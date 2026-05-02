@@ -5,8 +5,9 @@
     "runtime-version": "50",
     "sdk": "org.gnome.Sdk",
     "command": "com.nedrichards.octopusagile",
-    "rename-desktop-file": "com.nedrichards.octopusagile-dev.desktop",
-    "rename-icon": "com.nedrichards.octopusagile-dev",
+    "rename-desktop-file": "com.nedrichards.octopusagile.desktop",
+    "rename-appdata-file": "com.nedrichards.octopusagile.metainfo.xml",
+    "rename-icon": "com.nedrichards.octopusagile",
     "finish-args": [
         "--share=network",
         "--share=ipc",
@@ -56,6 +57,7 @@
             "name": "octopusagile",
             "builddir": true,
             "buildsystem": "meson",
+            "run-tests": true,
             "sources": [
                 {
                     "type": "dir",
