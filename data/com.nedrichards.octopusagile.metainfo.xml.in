@@ -4,11 +4,12 @@
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
 
-  <name>Octopus Electricity Prices</name>
-  <summary>Plan and understand electricity use</summary>
+  <name>Agile Rates</name>
+  <summary>Rates and usage for UK smart electricity tariffs</summary>
   <description>
-    <p>Follow current and upcoming half-hour electricity prices for Octopus Energy tariffs in the UK.</p>
+    <p>Follow current and upcoming half-hour electricity rates, usage history, and estimated spend for supported Octopus Energy electricity tariffs in the UK.</p>
     <p>Check the current rate at a glance, and find the cheapest time to run appliances or charge devices.</p>
+    <p>This app is independent and is not affiliated with, endorsed by, or sponsored by Octopus Energy.</p>
   </description>
 
   <developer id="com.nedrichards">
@@ -65,7 +66,7 @@
         <ul>
           <li>Redesign the app icon with a more balanced footprint and clearer small-size readability</li>
           <li>Update Flathub brand colors to better match the icon and improve listing presentation</li>
-          <li>Rename the app to Octopus Electricity Prices to reflect support for multiple tariffs</li>
+          <li>Rename the app to reflect support for multiple tariffs</li>
         </ul>
       </description>
     </release>
@@ -108,7 +109,7 @@
       <description translate="no">
         <p>This release introduces new tariff types and other small improvements. Thanks to Andy Piper.</p>
         <ul>
-          <li>Added support for multiple tariffs: Octopus Agile, Octopus Go, and Intelligent Octopus Go.</li>
+          <li>Added support for multiple tariffs: Agile, Go, and Intelligent Go.</li>
           <li>Bug fixes and other UI improvements.</li>
         </ul>
       </description>

@@ -1,12 +1,12 @@
-# Octopus Electricity Prices
+# Agile Rates
 
-This is a modern GNOME application built to track and visualise Octopus Energy electricity prices in real time. It fetches current and forecast half-hourly prices across supported tariffs, helping users quickly see the best times to use electricity. It is intended for UK Octopus Energy customers.
+This is a modern GNOME application built to track and visualise UK smart electricity tariff rates in real time. It fetches current and forecast half-hourly prices across supported Octopus Energy tariffs, helping users quickly see the best times to use electricity. It is intended for UK Octopus Energy customers, but is independent and is not affiliated with, endorsed by, or sponsored by Octopus Energy.
 
 * **Current Price Display:** Shows the real-time electricity price (pence/kWh).
 * **Price Level Indicators:** Visually indicates whether the current price is low, medium, high, or even negative.
 * **Adaptive Price Forecast Chart:** Displays a bar chart of upcoming half-hourly price data, adapting the visible horizon to the available space while keeping small-screen layouts usable.
 * **Find Cheapest Time:** A built-in calculator to find the cheapest time window for a specific duration (e.g., "find the cheapest 3 hours in the next 24 hours").
-* **Region and Tariff Selection:** Allows users to select their specific Octopus Energy region and tariff through a preferences window. Supports Agile, Go, and Intelligent Octopus Go tariffs. Go and Intelligent tariffs need a user-provided API key.
+* **Region and Tariff Selection:** Allows users to select their region and tariff through a preferences window. Supports Agile, Go, and Intelligent Go tariffs. Intelligent Go needs a user-provided API key.
 * **Adaptive GTK Interface:** The main window and preferences window now adapt more cleanly across narrow and wide GTK layouts.
 
 ![The application interface, showing the current price and a graph of future prices](data/octopus-agile-screenshot.png "Application screenshot")

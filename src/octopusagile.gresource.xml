@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <gresources>
   <gresource prefix="/com/nedrichards/octopusagile">
+    <file>assets/setup-complete-illustration.png</file>
+    <file>assets/setup-tour-illustration.png</file>
     <file preprocess="xml-stripblanks">gtk/help-overlay.ui</file>
   </gresource>
 </gresources>
