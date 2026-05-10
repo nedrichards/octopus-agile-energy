@@ -12,7 +12,7 @@ DEFAULT_TIMEOUT_SECONDS = 10
 
 
 class OctopusApiError(Exception):
-    """Raised when the Octopus API returns an error response."""
+    """Raised when the tariff API returns an error response."""
 
 
 def _build_auth(use_api_key: bool):
@@ -21,14 +21,14 @@ def _build_auth(use_api_key: bool):
 
     api_key = get_api_key()
     if not api_key:
-        raise OctopusApiError("Missing Octopus API key.")
+        raise OctopusApiError("Missing API key.")
 
     return HTTPBasicAuth(api_key, "")
 
 
 def get_json(url: str, *, use_api_key: bool = False, timeout: int = DEFAULT_TIMEOUT_SECONDS) -> dict[str, Any]:
     """
-    Fetches JSON data from an Octopus API endpoint.
+    Fetches JSON data from a tariff API endpoint.
 
     Raises:
         OctopusApiError: If authentication is missing or response is not successful.
@@ -39,12 +39,12 @@ def get_json(url: str, *, use_api_key: bool = False, timeout: int = DEFAULT_TIME
 
     if response.status_code == 401:
         logger.warning("Octopus API authentication failed for URL: %s", url)
-        raise OctopusApiError("Authentication failed for Octopus API.")
+        raise OctopusApiError("Authentication failed for the API.")
 
     try:
         response.raise_for_status()
     except requests.exceptions.HTTPError as exc:
         logger.error("Octopus API HTTP error for URL %s: status=%s", url, response.status_code)
-        raise OctopusApiError(f"Octopus API request failed with status {response.status_code}.") from exc
+        raise OctopusApiError(f"API request failed with status {response.status_code}.") from exc
 
     return response.json()

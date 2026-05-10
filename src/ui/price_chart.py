@@ -16,7 +16,7 @@ from .adaptive_layout import (
 
 class PriceChartWidget(Gtk.DrawingArea):
     """
-    A custom Gtk.DrawingArea widget for displaying Octopus Agile electricity prices as a bar chart.
+    A custom Gtk.DrawingArea widget for displaying half-hour electricity rates as a bar chart.
     This version is optimized to work with pre-processed data for better performance.
     """
     def __init__(self):

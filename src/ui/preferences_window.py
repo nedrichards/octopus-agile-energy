@@ -5,8 +5,7 @@ gi.require_version('Adw', '1')
 import logging
 import threading
 import time
-from datetime import datetime, timedelta, timezone
-from urllib.parse import urlencode
+from datetime import datetime, timezone
 
 import requests
 from gi.repository import Adw, GLib, Gtk
@@ -14,6 +13,12 @@ from gi.repository import Adw, GLib, Gtk
 from ..octopus_api import OctopusApiError, get_json
 from ..price_logic import build_region_to_tariffs_map
 from ..secrets_manager import clear_api_key, get_api_key, store_api_key
+from ..usage_history import (
+    build_historical_usage_costs,
+    fetch_all_consumption_pages,
+    fetch_recent_usage_samples,
+    get_account_data,
+)
 from ..utils import CacheManager
 
 logger = logging.getLogger(__name__)
@@ -73,7 +78,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
         group = Adw.PreferencesGroup.new()
         group.set_title("Your Tariff")
-        group.set_description("Configure your Octopus tariff and region.")
+        group.set_description("Configure your tariff and region.")
         page.add(group)
 
         # Tariff Type selection
@@ -110,11 +115,11 @@ class PreferencesWindow(Adw.PreferencesWindow):
         # API Key Section
         api_group = Adw.PreferencesGroup.new()
         api_group.set_title("API Authentication (Optional)")
-        api_group.set_description("Required for Intelligent Octopus Go rates and account features.")
+        api_group.set_description("Required for Intelligent Go rates and account features.")
         page.add(api_group)
 
         self.api_key_entry = Adw.PasswordEntryRow.new()
-        self.api_key_entry.set_title("Octopus API Key")
+        self.api_key_entry.set_title("API Key")
 
         # Load existing key securely
         existing_key = get_api_key()
@@ -125,7 +130,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
         api_group.add(self.api_key_entry)
 
         self.account_number_row = Adw.ActionRow.new()
-        self.account_number_row.set_title("Octopus Account Number")
+        self.account_number_row.set_title("Account Number")
         self.account_number_row.set_subtitle("Used for API auto-detection (e.g. A-12345678)")
         self.account_number_entry = Gtk.Entry.new()
         self.account_number_entry.set_hexpand(True)
@@ -214,8 +219,8 @@ class PreferencesWindow(Adw.PreferencesWindow):
         try:
             account_number = self.settings.get_string("octopus-account-number").strip()
             if not account_number:
-                GLib.idle_add(self._show_load_error, "Add your Octopus account number to use auto-detect.")
-                GLib.idle_add(self._set_auto_detect_status, "Add your Octopus account number, then try auto-detect again.")
+                GLib.idle_add(self._show_load_error, "Add your account number to use auto-detect.")
+                GLib.idle_add(self._set_auto_detect_status, "Add your account number, then try auto-detect again.")
                 GLib.idle_add(self._set_auto_detect_button_state, True)
                 return
 
@@ -265,14 +270,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
     def _get_account_data(self):
         account_number = self.settings.get_string("octopus-account-number").strip()
-        if not account_number:
-            raise OctopusApiError("Missing Octopus account number.")
-
-        return get_json(
-            f"https://api.octopus.energy/v1/accounts/{account_number}/",
-            use_api_key=True,
-            timeout=10,
-        )
+        return get_account_data(account_number)
 
     def _extract_active_tariff_code(self, account_data):
         now = datetime.now(timezone.utc)
@@ -305,7 +303,15 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
             account_number = self.settings.get_string("octopus-account-number").strip()
             cache_key = f"octopus_usage_{account_number}"
-            self.cache_manager.set(cache_key, {"samples": usage_samples, "synced_at": datetime.now(timezone.utc).isoformat()})
+            daily_costs = self._build_historical_usage_costs_for_cache(account_data, usage_samples)
+            self.cache_manager.set(
+                cache_key,
+                {
+                    "samples": usage_samples,
+                    "daily_costs": daily_costs,
+                    "synced_at": datetime.now(timezone.utc).isoformat(),
+                },
+            )
             GLib.idle_add(self._set_usage_status, f"Usage history refreshed ({len(usage_samples)} records).")
         except OctopusApiError as e:
             GLib.idle_add(self._set_usage_status, f"{e} Could not refresh usage history.")
@@ -316,77 +322,22 @@ class PreferencesWindow(Adw.PreferencesWindow):
         finally:
             GLib.idle_add(self._set_refresh_usage_button_state, True)
 
-    def _fetch_recent_usage_samples(self, account_data):
-        now = datetime.now(timezone.utc)
-        period_from = (now - timedelta(days=120)).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-        for property_data in account_data.get("properties", []):
-            for meter_point in property_data.get("electricity_meter_points", []):
-                has_active_agreement = False
-                for agreement in meter_point.get("agreements", []):
-                    valid_from = agreement.get("valid_from")
-                    valid_to = agreement.get("valid_to")
-                    if not valid_from:
-                        continue
-
-                    start = datetime.fromisoformat(valid_from.replace("Z", "+00:00"))
-                    end = datetime.fromisoformat(valid_to.replace("Z", "+00:00")) if valid_to else None
-                    if start <= now and (end is None or now < end):
-                        has_active_agreement = True
-                        break
-
-                if not has_active_agreement:
-                    continue
-
-                mpan = meter_point.get("mpan")
-                best_samples = []
-                for meter in meter_point.get("meters", []):
-                    serial_number = meter.get("serial_number")
-                    if not mpan or not serial_number:
-                        continue
-
-                    url = (
-                        f"https://api.octopus.energy/v1/electricity-meter-points/{mpan}"
-                        f"/meters/{serial_number}/consumption/?"
-                        + urlencode(
-                            {
-                                "period_from": period_from,
-                                "order_by": "period",
-                                "page_size": 250,
-                            }
-                        )
-                    )
-                    try:
-                        data = self._fetch_all_consumption_pages(url)
-                    except OctopusApiError as e:
-                        logger.debug("Usage fetch failed for meter %s/%s: %s", mpan, serial_number, e)
-                        continue
-
-                    samples = data
-                    if samples and len(samples) > len(best_samples):
-                        best_samples = samples
-
-                if best_samples:
-                    return best_samples
-
+    def _build_historical_usage_costs_for_cache(self, account_data, usage_samples):
+        try:
+            return build_historical_usage_costs(account_data, usage_samples)
+        except OctopusApiError as e:
+            logger.debug("Historical usage cost refresh failed: %s", e)
+        except requests.exceptions.RequestException as e:
+            logger.debug("Historical usage cost network error: %s", e)
+        except Exception as e:
+            logger.debug("Unexpected historical usage cost error: %s", e)
         return []
 
+    def _fetch_recent_usage_samples(self, account_data):
+        return fetch_recent_usage_samples(account_data)
+
     def _fetch_all_consumption_pages(self, initial_url):
-        samples = []
-        next_url = initial_url
-        max_pages = 40
-        pages_fetched = 0
-
-        while next_url and pages_fetched < max_pages:
-            data = get_json(next_url, use_api_key=True, timeout=10)
-            page_results = data.get("results", [])
-            if page_results:
-                samples.extend(page_results)
-
-            next_url = data.get("next")
-            pages_fetched += 1
-
-        return samples
+        return fetch_all_consumption_pages(initial_url)
 
     def load_tariffs_and_regions(self):
         """
