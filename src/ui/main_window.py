@@ -237,7 +237,7 @@ class MainWindow(Adw.ApplicationWindow):
             application_icon="com.nedrichards.octopusagile",
             developer_name="Nick Richards",
             version="1.0.11",
-            website="https://www.nedrichards.com/2025/07/octopus-agile-prices-for-linux/",
+            website="https://www.nedrichards.com/2026/05/agile-rates-after-launch/",
             copyright="© 2026 Nick Richards",
             license_type=Gtk.License.GPL_3_0
         )
