@@ -151,8 +151,6 @@ class MainWindow(Adw.ApplicationWindow):
         menu_button.set_tooltip_text("Main Menu")
 
         menu_model = Gio.Menu.new()
-        # TODO: Remove this temporary entry before release once first-run setup has settled.
-        menu_model.append("Setup Assistant", "app.setup")
         menu_model.append("Preferences", "app.preferences") # New: Preferences action
         menu_model.append("About", "app.about")
         menu_model.append("Quit", "app.quit")
@@ -238,7 +236,7 @@ class MainWindow(Adw.ApplicationWindow):
             application_name="Agile Rates",
             application_icon="com.nedrichards.octopusagile",
             developer_name="Nick Richards",
-            version="1.0.10",
+            version="1.0.11",
             website="https://www.nedrichards.com/2025/07/octopus-agile-prices-for-linux/",
             copyright="© 2026 Nick Richards",
             license_type=Gtk.License.GPL_3_0

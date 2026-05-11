@@ -60,6 +60,18 @@
   </screenshots>
 
   <releases>
+    <release version="1.0.11" date="2026-05-11">
+      <description>
+        <p>This release adds first-run setup, usage history, and estimated spend insights.</p>
+        <ul>
+          <li>Add a setup assistant with account-based setup and manual tariff selection</li>
+          <li>Add usage history charts with kWh, energy spend, and total spend views</li>
+          <li>Add historical spend estimates using tariff rates and standing charges</li>
+          <li>Improve usage refresh behaviour with cache-first background updates</li>
+          <li>Rename the app to Agile Rates and clarify its independent status</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.10" date="2026-03-22">
       <description>
         <p>This release refreshes the app's public branding and iconography.</p>
