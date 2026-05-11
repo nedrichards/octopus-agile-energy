@@ -1,10 +1,10 @@
-# Gemini Codebase Summary: octopus-agile-energy
+# Agent Codebase Summary: octopus-agile-energy
 
 This document provides a summary of the octopus-agile-energy codebase to assist with future development and maintenance.
 
 ## Project Overview
 
-This is a GTK application that displays Octopus electricity prices. It provides an adaptive chart showing upcoming prices, highlights the current price, and can calculate the cheapest time window. The application uses the Octopus Energy API to fetch price data.
+This is a GNOME application for UK Octopus Energy customers. It displays current and forecast electricity prices, supports multiple Octopus tariffs, highlights the current price, and can calculate the cheapest time window. The application uses the Octopus Energy API to fetch price data.
 
 ## Key Features
 
@@ -43,7 +43,8 @@ We are committed to providing good accessibility for all users. The application 
 *   `data/`: Contains the application's data files, such as the desktop entry, icons, and GSettings schema.
 *   `po/`: Contains the localization files.
 *   `meson.build`: The build configuration file.
-*   `com.nedrichards.octopusagile.json`: The Flatpak manifest file.
+*   `com.nedrichards.octopusagile.Devel.json`: The local development Flatpak manifest. This builds from the checkout and runs tests inside the GNOME SDK.
+*   `com.nedrichards.octopusagile.json`: The production-style Flatpak manifest. This builds from a pinned upstream Git commit.
 
 ## Key Files
 
@@ -51,16 +52,52 @@ We are committed to providing good accessibility for all users. The application 
 *   `src/ui/price_chart.py`: This is a custom GTK widget that draws the price chart. It uses the Cairo graphics library to draw the chart.
 *   `src/ui/styles.py`: This file contains the CSS styles for the application. It is used to style the widgets in the application.
 *   `meson.build`: This is the build configuration file for the project. It specifies how the application is built and installed.
-*   `com.nedrichards.octopusagile.json`: This is the Flatpak manifest file. It is used to build the Flatpak bundle for the application.
+*   `com.nedrichards.octopusagile.Devel.json`: This is the primary manifest for active development and agent verification.
+*   `com.nedrichards.octopusagile.json`: This is the pinned production-style manifest used for release-style packaging.
 
-## How to Build and Run
+## How to Build, Test, and Run
 
-The application is built and run using Flatpak. The following commands can be used to build and run the application:
+The authoritative development loop uses the local development Flatpak manifest. It builds from the checkout and runs the Meson test suite inside the GNOME SDK sandbox:
 
 ```bash
-flatpak-builder --force-clean build-dir com.nedrichards.octopusagile.json
-flatpak-builder --run build-dir com.nedrichards.octopusagile.json octopusagile
+flatpak-builder --user --install --force-clean build-dir com.nedrichards.octopusagile.Devel.json
+flatpak run com.nedrichards.octopusagile.Devel
 ```
+
+The `octopusagile` module in `com.nedrichards.octopusagile.Devel.json` has `run-tests` enabled, so the Flatpak build fails if `meson test` fails in the SDK environment.
+
+If `rofiles-fuse` fails in the agent environment, rerun the build with Flatpak Builder's fallback flag:
+
+```bash
+flatpak-builder --disable-rofiles-fuse --user --install --force-clean build-dir com.nedrichards.octopusagile.Devel.json
+```
+
+For an interactive debug shell in the built sandbox:
+
+```bash
+flatpak-builder --run build-dir com.nedrichards.octopusagile.Devel.json sh
+meson test -C /run/build/octopusagile/_flatpak_build --print-errorlogs
+G_MESSAGES_DEBUG=all com.nedrichards.octopusagile
+```
+
+For installed-app logs and first-run settings debugging:
+
+```bash
+journalctl --user -f
+flatpak run com.nedrichards.octopusagile.Devel
+flatpak run --command=sh com.nedrichards.octopusagile.Devel
+gsettings reset-recursively com.nedrichards.octopusagile
+```
+
+Host-side checks are optional fast paths for pure Python changes:
+
+```bash
+python3 -m pip install -r requirements-dev.txt
+python3 -m pytest
+python3 -m ruff check src tests
+```
+
+Use `build` for host Meson checks and `build-dir` for Flatpak Builder output.
 
 ## Dependencies
 
@@ -75,7 +112,11 @@ The application has the following dependencies:
 
 ## Development Environment
 
-I am running in a containerized environment and do not have access to a graphical user interface. Therefore, I am unable to build or test the application myself. The user is responsible for building and testing the application, and for providing debug information or screenshots as required.
+Agents should prefer the Flatpak development manifest for build and test verification because it provides the GNOME SDK environment used by the application. Use host-side pytest or Ruff only as a faster supplemental check for logic-only changes.
+
+## AI Assistance
+
+Development of this project has been assisted by a variety of AI coding tools.
 
 ## Flathub Releases
 

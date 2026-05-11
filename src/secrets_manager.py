@@ -22,14 +22,14 @@ SECRET_ATTRIBUTES = {
 
 def store_api_key(api_key: str) -> bool:
     """
-    Securely stores the Octopus Energy API key in the system keyring.
+    Securely stores the API key in the system keyring.
     """
     try:
         Secret.password_store_sync(
             SECRET_SCHEMA,
             SECRET_ATTRIBUTES,
             Secret.COLLECTION_DEFAULT,
-            "Octopus Energy API Key",
+            "Agile Rates API Key",
             api_key,
             None
         )
@@ -41,7 +41,7 @@ def store_api_key(api_key: str) -> bool:
 
 def get_api_key() -> str | None:
     """
-    Retrieves the Octopus Energy API key from the system keyring.
+    Retrieves the API key from the system keyring.
     """
     try:
         password = Secret.password_lookup_sync(
@@ -56,7 +56,7 @@ def get_api_key() -> str | None:
 
 def clear_api_key() -> bool:
     """
-    Removes the Octopus Energy API key from the system keyring.
+    Removes the API key from the system keyring.
     """
     try:
         Secret.password_clear_sync(

@@ -3,20 +3,29 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 import logging
+import math
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 
+import cairo
 import requests
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
+from ..octopus_api import OctopusApiError
 from ..price_logic import extract_product_code
 from ..price_logic import find_cheapest_slot as calculate_cheapest_slot
 from ..secrets_manager import get_api_key
+from ..usage_history import build_historical_usage_costs, fetch_recent_usage_samples, get_account_data
+from ..usage_insights import build_usage_insight_data
 from ..utils import CacheManager
 from .adaptive_layout import (
     DEFAULT_CHART_SLOTS,
-    get_chart_slot_count,
+    get_chart_content_width,
+    get_chart_height,
     get_chart_scroll_value,
+    get_chart_slot_count,
+    get_time_label_interval,
     get_content_margin,
     get_price_summary_mode,
     is_compact_width,
@@ -24,8 +33,10 @@ from .adaptive_layout import (
 from .custom_spin_button import CustomSpinButton
 from .preferences_window import PreferencesWindow
 from .price_chart import PriceChartWidget
+from .setup_window import SetupWindow
 
 logger = logging.getLogger(__name__)
+USAGE_BACKGROUND_REFRESH_INTERVAL_SECONDS = 6 * 60 * 60
 
 class MainWindow(Adw.ApplicationWindow):
     """
@@ -36,6 +47,8 @@ class MainWindow(Adw.ApplicationWindow):
         super().__init__(**kwargs)
 
         self.settings = Gio.Settings.new("com.nedrichards.octopusagile")
+        if self.settings.get_string("selected-tariff-code") and not self.settings.get_boolean("setup-completed"):
+            self.settings.set_boolean("setup-completed", True)
         self._update_window_title()
 
         self.all_prices = []
@@ -47,12 +60,14 @@ class MainWindow(Adw.ApplicationWindow):
         self.settings.connect("changed::selected-tariff-type", self.on_setting_changed)
         self.settings.connect("changed::selected-tariff-code", self.on_setting_changed)
         self.settings.connect("changed::selected-region-code", self.on_setting_changed)
+        self.settings.connect("changed::octopus-account-number", self.on_usage_account_changed)
 
         self.settings.bind("window-width", self, "default-width", Gio.SettingsBindFlags.DEFAULT)
         self.settings.bind("window-height", self, "default-height", Gio.SettingsBindFlags.DEFAULT)
         self.settings.bind("window-maximized", self, "maximized", Gio.SettingsBindFlags.DEFAULT)
 
         self.preferences_window = None
+        self.setup_window = None
         self.timer_id = None
         self.best_slot_start_time = None
         self.is_first_expansion = True
@@ -62,6 +77,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.price_summary_description = "Fetching current electricity price"
         self.price_summary_compact_description = "Fetching current electricity price"
         self.price_summary_css_class = None
+        self.usage_refresh_in_progress = False
+        self.usage_refresh_attempted = False
+        self.usage_graph_mode = "kwh"
 
         self.connect("notify::visible", self.on_visibility_change)
         self.connect("notify::width", self.on_window_width_changed)
@@ -73,7 +91,11 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.create_actions()
         self.setup_ui()
-        self.refresh_price()
+        if self._needs_setup():
+            GLib.idle_add(self.on_first_run)
+        else:
+            self.refresh_usage_history_background()
+            self.refresh_price()
         self.schedule_next_ui_update()
         self.schedule_next_data_fetch()
 
@@ -102,7 +124,8 @@ class MainWindow(Adw.ApplicationWindow):
         GLib.timeout_add_seconds(int(delay), self._on_data_fetch_timer)
 
     def _on_data_fetch_timer(self):
-        self.refresh_price()
+        if not self._needs_setup():
+            self.refresh_price()
         self.schedule_next_data_fetch()
         return False
 
@@ -112,7 +135,7 @@ class MainWindow(Adw.ApplicationWindow):
         This method is now called from setup_ui to create a widget to be appended.
         """
         header_bar = Adw.HeaderBar.new()
-        self.header_title_widget = Adw.WindowTitle.new("Octopus Electricity Prices", "")
+        self.header_title_widget = Adw.WindowTitle.new("Agile Rates", "")
         header_bar.set_title_widget(self.header_title_widget)
 
         # Refresh button on the left.
@@ -157,6 +180,10 @@ class MainWindow(Adw.ApplicationWindow):
         preferences_action.connect("activate", self.on_preferences_action)
         self.get_application().add_action(preferences_action)
         self.get_application().set_accels_for_action("app.preferences", ["<primary>comma"])
+
+        setup_action = Gio.SimpleAction.new("setup", None)
+        setup_action.connect("activate", self.on_setup_action)
+        self.get_application().add_action(setup_action)
 
         # Refresh action, triggers a data refresh
         refresh_action = Gio.SimpleAction.new("refresh", None)
@@ -206,10 +233,10 @@ class MainWindow(Adw.ApplicationWindow):
         """
         about_dialog = Adw.AboutWindow(
             transient_for=self,
-            application_name="Octopus Electricity Prices",
+            application_name="Agile Rates",
             application_icon="com.nedrichards.octopusagile",
             developer_name="Nick Richards",
-            version="1.0.10",
+            version="1.0.11",
             website="https://www.nedrichards.com/2025/07/octopus-agile-prices-for-linux/",
             copyright="© 2026 Nick Richards",
             license_type=Gtk.License.GPL_3_0
@@ -219,7 +246,8 @@ class MainWindow(Adw.ApplicationWindow):
     def on_visibility_change(self, *args):
         if self.is_visible():
             self._refresh_adaptive_layout()
-            self.refresh_price()
+            if not self._needs_setup():
+                self.refresh_price()
 
     def on_quit_action(self, action, param):
         """
@@ -237,22 +265,55 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.preferences_window.present()
 
+    def on_setup_action(self, action, param):
+        self.present_setup_window()
+
     def on_preferences_hidden(self, window):
         """
         Handles the closing of the preferences window.
         """
+        self.usage_refresh_attempted = False
+        self._update_usage_insights()
+        self.refresh_usage_history_background()
         self.refresh_price(force=True)
 
     def on_first_run(self):
         """
-        Shows a welcome message and opens the preferences window.
+        Shows a welcome message and opens the setup assistant.
         """
         self._set_price_summary(
-            "Welcome to Octopus Electricity Prices",
-            "Please select your tariff in the preferences.",
-            compact_description="Select your tariff in preferences.",
+            "Welcome to Agile Rates",
+            "Complete setup to start seeing electricity prices.",
+            compact_description="Complete setup to continue.",
         )
-        self.on_preferences_action(None, None)
+        self.present_setup_window()
+        return False
+
+    def present_setup_window(self):
+        if not self.setup_window:
+            self.setup_window = SetupWindow(
+                settings=self.settings,
+                parent=self,
+                on_complete=self.on_setup_complete,
+            )
+            self.setup_window.connect("close-request", self.on_setup_closed)
+
+        self.setup_window.present()
+
+    def on_setup_closed(self, _window):
+        self.setup_window = None
+        return False
+
+    def on_setup_complete(self):
+        self.usage_refresh_attempted = False
+        self.refresh_usage_history_background(force=True)
+        self.refresh_price(force=True)
+
+    def _needs_setup(self):
+        return (
+            not self.settings.get_boolean("setup-completed")
+            or not self.settings.get_string("selected-tariff-code")
+        )
 
     def on_setting_changed(self, settings, key):
         """
@@ -261,15 +322,24 @@ class MainWindow(Adw.ApplicationWindow):
         if key == "selected-tariff-type":
             self._update_window_title()
 
-        if self.preferences_window and self.preferences_window.is_visible():
+        if (
+            (self.preferences_window and self.preferences_window.is_visible())
+            or (self.setup_window and self.setup_window.is_visible())
+        ):
             return
 
         logger.debug("Setting '%s' changed. Refreshing price data.", key)
         self.refresh_price()
 
+    def on_usage_account_changed(self, _settings, _key):
+        self.usage_refresh_attempted = False
+        if not self.preferences_window or not self.preferences_window.is_visible():
+            self._update_usage_insights()
+            self.refresh_usage_history_background()
+
     def _update_window_title(self):
         tariff_type = self.settings.get_string("selected-tariff-type")
-        title = "Octopus Electricity Prices"
+        title = "Agile Rates"
         subtitle = {
             'AGILE': "Agile tariff",
             'GO': "Go tariff",
@@ -318,7 +388,154 @@ class MainWindow(Adw.ApplicationWindow):
         scrolled_content.set_vexpand(True)
         scrolled_content.set_child(overall_content_box)
 
-        root_vbox.append(scrolled_content) # The scrolled content is the second child of the root box.
+        # Usage page content. The chart mirrors the price tab by staying outside
+        # the clamp, while the preference-style rows remain constrained.
+        usage_page_box = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.usage_page_box = usage_page_box
+
+        usage_content_box = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        self.usage_content_box = usage_content_box
+        usage_clamp = Adw.Clamp.new()
+        usage_clamp.set_child(usage_content_box)
+        usage_page_box.append(usage_clamp)
+
+        usage_scroll = Gtk.ScrolledWindow.new()
+        usage_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        usage_scroll.set_vexpand(True)
+        usage_scroll.set_child(usage_page_box)
+
+        usage_chart_box = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        usage_chart_box.add_css_class("chart-background")
+        self.usage_chart_box = usage_chart_box
+        usage_page_box.prepend(usage_chart_box)
+
+        self.usage_chart_scroller = Gtk.ScrolledWindow.new()
+        self.usage_chart_scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        self.usage_chart_scroller.set_hexpand(True)
+        self.usage_chart_scroller.set_propagate_natural_height(True)
+
+        usage_chart_mode_box = Gtk.Box.new(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        usage_chart_mode_box.set_halign(Gtk.Align.END)
+        usage_chart_mode_box.add_css_class("linked")
+        self.usage_chart_mode_box = usage_chart_mode_box
+        self.usage_kwh_button = Gtk.ToggleButton.new_with_label("kWh")
+        self.usage_kwh_button.set_active(True)
+        self.usage_kwh_button.set_tooltip_text("Daily electricity consumption.")
+        self.usage_energy_cost_button = Gtk.ToggleButton.new_with_label("£ Energy")
+        self.usage_energy_cost_button.set_group(self.usage_kwh_button)
+        self.usage_energy_cost_button.set_tooltip_text("Daily energy cost from matched usage and unit rates, excluding standing charge.")
+        self.usage_total_cost_button = Gtk.ToggleButton.new_with_label("£ Total")
+        self.usage_total_cost_button.set_group(self.usage_kwh_button)
+        self.usage_total_cost_button.set_tooltip_text("Daily total cost from matched usage, unit rates, and standing charge.")
+        self.usage_kwh_button.connect("toggled", self.on_usage_graph_mode_toggled, "kwh")
+        self.usage_energy_cost_button.connect("toggled", self.on_usage_graph_mode_toggled, "energy_cost_gbp")
+        self.usage_total_cost_button.connect("toggled", self.on_usage_graph_mode_toggled, "total_cost_gbp")
+        usage_chart_mode_box.append(self.usage_kwh_button)
+        usage_chart_mode_box.append(self.usage_energy_cost_button)
+        usage_chart_mode_box.append(self.usage_total_cost_button)
+        usage_chart_box.append(usage_chart_mode_box)
+
+        self.usage_chart_area = Gtk.DrawingArea.new()
+        self.usage_chart_area.set_hexpand(True)
+        self.usage_chart_area.set_vexpand(False)
+        self.usage_chart_area.set_draw_func(self._draw_usage_chart)
+        self.usage_chart_points = []
+        self.usage_chart_dates = []
+        self.usage_chart_daily_data = []
+        self.usage_chart_scroller.set_child(self.usage_chart_area)
+        self.usage_chart_area.set_has_tooltip(True)
+        self.usage_chart_area.connect("query-tooltip", self.on_usage_chart_query_tooltip)
+        usage_chart_box.append(self.usage_chart_scroller)
+
+        usage_group = Adw.PreferencesGroup()
+        usage_group.set_title("Usage")
+        usage_content_box.append(usage_group)
+
+        self.usage_insights_row = Adw.ActionRow.new()
+        self.usage_insights_row.set_title("Recent usage trends")
+        self.usage_insights_row.set_subtitle("Refresh usage history in Preferences to fill this section.")
+        usage_group.add(self.usage_insights_row)
+
+        self.usage_avg_row = Adw.ActionRow.new()
+        self.usage_avg_row.set_title("Average daily consumption")
+        self.usage_avg_row.add_prefix(Gtk.Image.new_from_icon_name("weather-clear-symbolic"))
+        self.usage_avg_label = Gtk.Label.new("—")
+        self.usage_avg_row.add_suffix(self.usage_avg_label)
+        usage_group.add(self.usage_avg_row)
+
+        self.usage_trend_row = Adw.ActionRow.new()
+        self.usage_trend_row.set_title("Seven-day trend")
+        self.usage_trend_row.add_prefix(Gtk.Image.new_from_icon_name("view-sort-descending-symbolic"))
+        self.usage_trend_label = Gtk.Label.new("—")
+        self.usage_trend_row.add_suffix(self.usage_trend_label)
+        usage_group.add(self.usage_trend_row)
+
+        self.usage_month_row = Adw.ActionRow.new()
+        self.usage_month_row.set_title("Estimated monthly consumption")
+        self.usage_month_row.add_prefix(Gtk.Image.new_from_icon_name("x-office-calendar-symbolic"))
+        self.usage_month_label = Gtk.Label.new("—")
+        self.usage_month_row.add_suffix(self.usage_month_label)
+        usage_group.add(self.usage_month_row)
+
+        spending_group = Adw.PreferencesGroup()
+        spending_group.set_title("Estimated Spend")
+        self.spending_group = spending_group
+        usage_content_box.append(spending_group)
+
+        self.cost_accuracy_row = Adw.ActionRow.new()
+        self.cost_accuracy_row.set_title("Spend accuracy")
+        self.cost_accuracy_row.set_subtitle("Waiting for historical usage and rate data.")
+        self.cost_accuracy_row.add_prefix(Gtk.Image.new_from_icon_name("dialog-information-symbolic"))
+        spending_group.add(self.cost_accuracy_row)
+
+        self.cost_daily_row = Adw.ActionRow.new()
+        self.cost_daily_row.set_title("Average daily energy spend")
+        self.cost_daily_row.add_prefix(Gtk.Image.new_from_icon_name("accessories-calculator-symbolic"))
+        self.cost_daily_label = Gtk.Label.new("—")
+        self.cost_daily_row.add_suffix(self.cost_daily_label)
+        spending_group.add(self.cost_daily_row)
+
+        self.cost_total_daily_row = Adw.ActionRow.new()
+        self.cost_total_daily_row.set_title("Average daily total spend")
+        self.cost_total_daily_row.add_prefix(Gtk.Image.new_from_icon_name("accessories-calculator-symbolic"))
+        self.cost_total_daily_label = Gtk.Label.new("—")
+        self.cost_total_daily_row.add_suffix(self.cost_total_daily_label)
+        spending_group.add(self.cost_total_daily_row)
+
+        self.cost_trend_row = Adw.ActionRow.new()
+        self.cost_trend_row.set_title("Recent total spend trend")
+        self.cost_trend_row.add_prefix(Gtk.Image.new_from_icon_name("view-sort-descending-symbolic"))
+        self.cost_trend_label = Gtk.Label.new("—")
+        self.cost_trend_row.add_suffix(self.cost_trend_label)
+        spending_group.add(self.cost_trend_row)
+
+        self.cost_month_row = Adw.ActionRow.new()
+        self.cost_month_row.set_title("Estimated monthly total spend")
+        self.cost_month_row.add_prefix(Gtk.Image.new_from_icon_name("x-office-spreadsheet-symbolic"))
+        self.cost_month_label = Gtk.Label.new("—")
+        self.cost_month_row.add_suffix(self.cost_month_label)
+        spending_group.add(self.cost_month_row)
+
+        self.usage_updated_label = Gtk.Label.new()
+        self.usage_updated_label.set_markup("<span size='small'>Last updated: Never</span>")
+        self.usage_updated_label.set_halign(Gtk.Align.END)
+        self.usage_updated_label.set_margin_top(10)
+        self.usage_updated_label.set_margin_end(10)
+        usage_content_box.append(self.usage_updated_label)
+
+        self.main_view_stack = Adw.ViewStack.new()
+        self.main_view_stack.add_titled_with_icon(scrolled_content, "prices", "Prices", "view-list-symbolic")
+        self.main_view_stack.add_titled_with_icon(usage_scroll, "usage", "Usage", "preferences-system-symbolic")
+        self.main_view_stack.connect("notify::visible-child-name", self.on_visible_tab_changed)
+
+        view_switcher = Adw.ViewSwitcher.new()
+        view_switcher.set_stack(self.main_view_stack)
+        view_switcher.set_policy(Adw.ViewSwitcherPolicy.WIDE)
+        view_switcher.set_halign(Gtk.Align.CENTER)
+        view_switcher.set_margin_top(6)
+        view_switcher.set_margin_bottom(6)
+        root_vbox.append(view_switcher)
+        root_vbox.append(self.main_view_stack) # Replaces single-page content with adaptive sections.
 
         # Current price display card.
         self.price_card_stack = Gtk.Stack.new()
@@ -474,20 +691,37 @@ class MainWindow(Adw.ApplicationWindow):
         self.overall_content_box.set_margin_bottom(margin)
         self.overall_content_box.set_margin_start(margin)
         self.overall_content_box.set_margin_end(margin)
+        self.usage_page_box.set_margin_top(margin)
+        self.usage_page_box.set_margin_bottom(margin)
+        self.usage_page_box.set_margin_start(margin)
+        self.usage_page_box.set_margin_end(margin)
+        self.usage_content_box.set_spacing(12 if compact else 16)
 
         chart_margin = max(8, margin - 2)
         self.chart_box.set_margin_top(chart_margin)
         self.chart_box.set_margin_bottom(chart_margin)
         self.chart_box.set_margin_start(chart_margin)
         self.chart_box.set_margin_end(chart_margin)
+        self.usage_chart_box.set_margin_top(chart_margin)
+        self.usage_chart_box.set_margin_bottom(chart_margin)
+        self.usage_chart_box.set_margin_start(chart_margin)
+        self.usage_chart_box.set_margin_end(chart_margin)
+        mode_padding = 8 if compact else 10
+        self.usage_chart_mode_box.set_margin_top(mode_padding)
+        self.usage_chart_mode_box.set_margin_bottom(mode_padding)
+        self.usage_chart_mode_box.set_margin_start(mode_padding)
+        self.usage_chart_mode_box.set_margin_end(mode_padding)
 
         self.time_label.set_halign(Gtk.Align.CENTER if compact else Gtk.Align.END)
         self.time_label.set_margin_top(10 if compact else 14)
         self.time_label.set_margin_end(0 if compact else 10)
+        self.usage_updated_label.set_halign(Gtk.Align.CENTER if compact else Gtk.Align.END)
+        self.usage_updated_label.set_margin_end(0 if compact else 10)
         self.status_label.set_wrap(compact)
 
         chart_slot_count = len(self.chart_prices) if self.chart_prices else DEFAULT_CHART_SLOTS
         self.price_chart.set_compact_mode(compact, width, chart_slot_count)
+        self._set_usage_chart_layout(width)
         self._set_price_summary_mode(price_summary_mode)
         self.header_title_widget.set_visible(not compact)
         self.menu_button.set_tooltip_text("Menu" if compact else "Main Menu")
@@ -502,6 +736,18 @@ class MainWindow(Adw.ApplicationWindow):
         Handles chart bar clicks. Currently mirrors hover logic but can be expanded.
         """
         pass
+
+    def on_visible_tab_changed(self, stack, _pspec):
+        if stack.get_visible_child_name() == "usage":
+            self._update_usage_insights()
+            self.refresh_usage_history_background()
+
+    def on_usage_graph_mode_toggled(self, button, mode):
+        if not button.get_active():
+            return
+
+        self.usage_graph_mode = mode
+        self._update_usage_insights()
 
     def on_refresh_clicked(self, *args):
         """
@@ -623,6 +869,12 @@ class MainWindow(Adw.ApplicationWindow):
         """
         self._fetch_generation += 1
         request_id = self._fetch_generation
+        setup_issue = self._get_price_setup_issue()
+        if setup_issue:
+            title, description = setup_issue
+            self._show_price_setup_issue(title, description)
+            return
+
         current_title = (
             f"£{self.current_price_data['price_gbp']:.2f}/kWh"
             if self.current_price_data
@@ -664,12 +916,14 @@ class MainWindow(Adw.ApplicationWindow):
         """
         Fetches and processes electricity price data from the Octopus Energy API.
         """
-        selected_tariff_code = self.settings.get_string("selected-tariff-code")
-        if not selected_tariff_code:
-            GLib.idle_add(self.on_first_run)
+        setup_issue = self._get_price_setup_issue()
+        if setup_issue:
+            title, description = setup_issue
+            GLib.idle_add(self._show_price_setup_issue, title, description)
             return
 
         try:
+            selected_tariff_code = self.settings.get_string("selected-tariff-code")
             tariff_type = self.settings.get_string("selected-tariff-type")
             product_code = extract_product_code(selected_tariff_code)
 
@@ -677,19 +931,21 @@ class MainWindow(Adw.ApplicationWindow):
             rates_cache_key = f"octopus_rates_{selected_tariff_code}_{now.strftime('%Y-%m-%d')}"
 
             raw_rates = None
-            if not force:
-                cached_data, cache_mtime_ts = self.cache_manager.get(rates_cache_key)
-                if cached_data and cache_mtime_ts:
-                    cache_mtime = datetime.fromtimestamp(cache_mtime_ts, tz=timezone.utc)
-                    release_time = now.replace(hour=16, minute=0, second=0, microsecond=0)
-                    if not (now >= release_time and cache_mtime < release_time):
-                        logger.debug("Rates data loaded from cache.")
-                        raw_rates = cached_data
-                    else:
-                        logger.debug("Stale cache, will refetch.")
+            cached_data, cache_mtime_ts = self.cache_manager.get(rates_cache_key)
+            if cached_data and cache_mtime_ts:
+                cache_mtime = datetime.fromtimestamp(cache_mtime_ts, tz=timezone.utc)
+                release_time = now.replace(hour=16, minute=0, second=0, microsecond=0)
+                if not (now >= release_time and cache_mtime < release_time):
+                    logger.debug("Rates data loaded from cache.")
+                    raw_rates = cached_data
+                else:
+                    logger.debug("Stale cache, will refetch.")
 
             if not raw_rates:
-                logger.debug("Fetching new data from API.")
+                if force:
+                    logger.debug("Forced refresh requested, but no valid cache available. Fetching new data from API.")
+                else:
+                    logger.debug("Fetching new data from API.")
                 rates_url = f"https://api.octopus.energy/v1/products/{product_code}/electricity-tariffs/{selected_tariff_code}/standard-unit-rates/"
 
                 # Use basic auth for intelligent go if API key is provided
@@ -700,6 +956,27 @@ class MainWindow(Adw.ApplicationWindow):
                     auth = HTTPBasicAuth(api_key, '')
 
                 response = requests.get(rates_url, params={'page_size': 1500}, timeout=10, auth=auth)
+                if response.status_code == 401:
+                    GLib.idle_add(
+                        self._show_error_if_current,
+                        "The API key was rejected. Check the key in setup or Preferences.",
+                        request_id,
+                    )
+                    return
+                if response.status_code == 403:
+                    GLib.idle_add(
+                        self._show_error_if_current,
+                        "This tariff requires account access. Check your API key or choose another tariff.",
+                        request_id,
+                    )
+                    return
+                if response.status_code == 404:
+                    GLib.idle_add(
+                        self._show_error_if_current,
+                        "The selected tariff code was not found. Choose your tariff again in setup.",
+                        request_id,
+                    )
+                    return
                 response.raise_for_status()
                 data = response.json()
 
@@ -726,6 +1003,68 @@ class MainWindow(Adw.ApplicationWindow):
             import traceback
             traceback.print_exc()
             GLib.idle_add(self._show_error_if_current, f"An unexpected error occurred: {e}", request_id)
+
+    def _get_price_setup_issue(self):
+        tariff_code = self.settings.get_string("selected-tariff-code")
+        tariff_type = self.settings.get_string("selected-tariff-type")
+
+        if not self.settings.get_boolean("setup-completed"):
+            return (
+                "Setup Required",
+                "Complete setup to start seeing electricity prices.",
+            )
+
+        if not tariff_code:
+            return (
+                "Choose a Tariff",
+                "No tariff is selected. Open setup and choose your tariff manually or connect your account.",
+            )
+
+        inferred_type = self._infer_tariff_type_from_code(tariff_code)
+        if tariff_type != inferred_type:
+            return (
+                "Check Tariff Settings",
+                f"The selected tariff looks like {self._tariff_type_label(inferred_type)}, but the app is set to {self._tariff_type_label(tariff_type)}. Choose the tariff again in setup.",
+            )
+
+        if tariff_type == "INTELLIGENT" and not get_api_key():
+            return (
+                "API Key Required",
+                "Intelligent Go prices need an API key. Add one in setup or Preferences, then load the tariff again.",
+            )
+
+        return None
+
+    def _show_price_setup_issue(self, title, description):
+        self._set_price_summary(
+            title,
+            description,
+            compact_description=description,
+            css_class=None,
+        )
+        self.status_label.set_text(description)
+        self.header_refresh_button.set_sensitive(True)
+        if self._needs_setup():
+            self.present_setup_window()
+        return False
+
+    @staticmethod
+    def _infer_tariff_type_from_code(tariff_code):
+        normalized = tariff_code.upper().replace("_", "-")
+        parts = [part for part in normalized.split("-") if part]
+        if "INTELLI" in normalized or "INTELLIGENT" in normalized:
+            return "INTELLIGENT"
+        if "GO" in parts:
+            return "GO"
+        return "AGILE"
+
+    @staticmethod
+    def _tariff_type_label(tariff_type):
+        return {
+            "AGILE": "Agile",
+            "GO": "Go",
+            "INTELLIGENT": "Intelligent Go",
+        }.get(tariff_type, "an unknown tariff type")
 
     def _process_and_set_prices(self, raw_rates, request_id):
         """
@@ -807,6 +1146,7 @@ class MainWindow(Adw.ApplicationWindow):
         )
         self.price_chart.set_prices(chart_prices, current_index)
         self.status_label.set_text("")
+        self._update_usage_insights()
         self.header_refresh_button.set_sensitive(True)
 
     def show_error(self, error_message):
@@ -851,6 +1191,525 @@ class MainWindow(Adw.ApplicationWindow):
         self._apply_price_summary_classes()
         self.price_card_stack.set_visible_child_name(self.price_summary_mode)
         self._queue_price_summary_refresh()
+
+    def _update_usage_insights(self):
+        account_number = self.settings.get_string("octopus-account-number").strip()
+        if not account_number:
+            self.usage_insights_row.set_subtitle("Add your account number in Preferences to enable these insights.")
+            self._set_usage_metric_placeholders()
+            self._set_usage_updated_label(None)
+            return
+
+        cache_key = f"octopus_usage_{account_number}"
+        cached_data, _cache_mtime = self.cache_manager.get(cache_key)
+        if not cached_data or "samples" not in cached_data:
+            self.usage_insights_row.set_subtitle("No cached usage history found. Usage will refresh in the background when an API key is available.")
+            self._set_usage_metric_placeholders()
+            self._set_usage_updated_label(None)
+            return
+
+        daily_costs = cached_data.get("daily_costs", [])
+        self._set_usage_updated_label(cached_data.get("synced_at"))
+        self._set_usage_cost_graph_controls_enabled(self._has_complete_daily_costs(daily_costs))
+        insight = self._build_usage_insight_data(
+            cached_data.get("samples", []),
+            cached_data.get("synced_at"),
+            daily_costs,
+        )
+        self.usage_insights_row.set_subtitle(insight["summary"])
+        self._update_spend_accuracy_ui(daily_costs, cached_data.get("synced_at"))
+        self.usage_avg_label.set_text(insight["avg_text"])
+        self.usage_trend_label.set_text(insight["trend_text"])
+        self.usage_month_label.set_text(insight["monthly_text"])
+        self.cost_daily_label.set_text(insight["daily_cost_text"])
+        self.cost_total_daily_label.set_text(insight["daily_total_cost_text"])
+        self.cost_trend_label.set_text(insight["cost_trend_text"])
+        self.cost_month_label.set_text(insight["monthly_cost_text"])
+        chart_points, chart_dates, chart_unit, chart_daily_data = self._get_usage_chart_series(insight, daily_costs)
+        self.usage_chart_points = list(reversed(chart_points))
+        self.usage_chart_dates = list(reversed(chart_dates))
+        self.usage_chart_daily_data = list(reversed(chart_daily_data))
+        self.usage_chart_unit = chart_unit
+        self._set_usage_chart_layout(self.get_width() or self.settings.get_int("window-width"))
+        self.usage_chart_area.queue_draw()
+
+    def _set_usage_updated_label(self, synced_at):
+        if not synced_at:
+            self.usage_updated_label.set_markup("<span size='small'>Last updated: Never</span>")
+            return
+
+        try:
+            synced_dt = datetime.fromisoformat(synced_at.replace("Z", "+00:00"))
+            if synced_dt.tzinfo is None:
+                synced_dt = synced_dt.replace(tzinfo=timezone.utc)
+            local_dt = synced_dt.astimezone()
+            label = local_dt.strftime("%d %b %Y, %H:%M")
+        except (TypeError, ValueError):
+            label = "Unknown"
+
+        escaped_label = GLib.markup_escape_text(label)
+        self.usage_updated_label.set_markup(f"<span size='small'>Last updated: {escaped_label}</span>")
+
+    def refresh_usage_history_background(self, force=False):
+        if self.usage_refresh_in_progress or (self.usage_refresh_attempted and not force):
+            return
+
+        account_number = self.settings.get_string("octopus-account-number").strip()
+        if not account_number or not get_api_key():
+            return
+        if not force and self._usage_cache_is_fresh(account_number):
+            self.usage_refresh_attempted = True
+            return
+
+        self.usage_refresh_in_progress = True
+        self.usage_refresh_attempted = True
+        thread = threading.Thread(target=self._refresh_usage_history_background, args=(account_number,))
+        thread.daemon = True
+        thread.start()
+
+    def _usage_cache_is_fresh(self, account_number):
+        cache_key = f"octopus_usage_{account_number}"
+        cached_data, cache_mtime = self.cache_manager.get(cache_key)
+        if not cached_data or "samples" not in cached_data or "daily_costs" not in cached_data or not cache_mtime:
+            return False
+
+        return (time.time() - cache_mtime) < USAGE_BACKGROUND_REFRESH_INTERVAL_SECONDS
+
+    def _refresh_usage_history_background(self, account_number):
+        try:
+            account_data = get_account_data(account_number)
+            usage_samples = fetch_recent_usage_samples(account_data)
+            if usage_samples:
+                daily_costs = self._build_historical_usage_costs_for_cache(account_data, usage_samples)
+                cache_key = f"octopus_usage_{account_number}"
+                self.cache_manager.set(
+                    cache_key,
+                    {
+                        "samples": usage_samples,
+                        "daily_costs": daily_costs,
+                        "synced_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                )
+                GLib.idle_add(self._finish_usage_history_background_refresh, True)
+            else:
+                GLib.idle_add(self._finish_usage_history_background_refresh, False)
+        except OctopusApiError as e:
+            logger.debug("Background usage refresh failed: %s", e)
+            GLib.idle_add(self._finish_usage_history_background_refresh, False)
+        except requests.exceptions.RequestException as e:
+            logger.debug("Background usage refresh network error: %s", e)
+            GLib.idle_add(self._finish_usage_history_background_refresh, False)
+        except Exception as e:
+            logger.debug("Unexpected background usage refresh error: %s", e)
+            GLib.idle_add(self._finish_usage_history_background_refresh, False)
+
+    def _build_historical_usage_costs_for_cache(self, account_data, usage_samples):
+        try:
+            return build_historical_usage_costs(account_data, usage_samples)
+        except OctopusApiError as e:
+            logger.debug("Historical usage cost refresh failed: %s", e)
+        except requests.exceptions.RequestException as e:
+            logger.debug("Historical usage cost network error: %s", e)
+        except Exception as e:
+            logger.debug("Unexpected historical usage cost error: %s", e)
+        return []
+
+    def _finish_usage_history_background_refresh(self, updated):
+        self.usage_refresh_in_progress = False
+        if updated or self.main_view_stack.get_visible_child_name() == "usage":
+            self._update_usage_insights()
+        return False
+
+    def _set_usage_metric_placeholders(self):
+        self.usage_avg_label.set_text("—")
+        self.usage_trend_label.set_text("—")
+        self.usage_month_label.set_text("—")
+        self.cost_daily_label.set_text("—")
+        self.cost_total_daily_label.set_text("—")
+        self.cost_trend_label.set_text("—")
+        self.cost_month_label.set_text("—")
+        self.cost_accuracy_row.set_subtitle("Waiting for historical usage and rate data.")
+        self.spending_group.set_title("Estimated Spend")
+        self.usage_chart_points = []
+        self.usage_chart_dates = []
+        self.usage_chart_daily_data = []
+        self.usage_chart_unit = "kWh"
+        self._set_usage_updated_label(None)
+        self._set_usage_cost_graph_controls_enabled(False)
+        self._set_usage_chart_layout(self.get_width() or self.settings.get_int("window-width"))
+        self.usage_chart_area.queue_draw()
+
+    def _has_complete_daily_costs(self, daily_costs):
+        return any(
+            day.get("missing_rate_count", 0) == 0 and day.get("sample_count", 0) >= 48
+            for day in daily_costs
+        )
+
+    def _set_usage_cost_graph_controls_enabled(self, enabled):
+        self.usage_energy_cost_button.set_sensitive(enabled)
+        self.usage_total_cost_button.set_sensitive(enabled)
+        if not enabled and self.usage_graph_mode != "kwh":
+            self.usage_graph_mode = "kwh"
+            self.usage_kwh_button.set_active(True)
+
+
+    def _update_spend_accuracy_ui(self, daily_costs, synced_at):
+        complete_days = self._get_complete_daily_costs(daily_costs, synced_at)
+        total_days = len(daily_costs)
+        incomplete_days = max(0, total_days - len(complete_days))
+
+        if complete_days:
+            self.spending_group.set_title("Historical Spend")
+            if incomplete_days:
+                self.cost_accuracy_row.set_subtitle(
+                    f"Matched historical rates for {len(complete_days)} complete days; "
+                    f"{incomplete_days} incomplete days ignored."
+                )
+            else:
+                self.cost_accuracy_row.set_subtitle(
+                    f"Matched historical rates and standing charges for {len(complete_days)} complete days."
+                )
+            return
+
+        self.spending_group.set_title("Estimated Spend")
+        if daily_costs:
+            self.cost_accuracy_row.set_subtitle(
+                "Historical rate data is incomplete, so spend is estimated from average available rates."
+            )
+        else:
+            self.cost_accuracy_row.set_subtitle(
+                "Estimated from average available unit rate and standing charge until historical rates are cached."
+            )
+
+
+    def _set_usage_chart_layout(self, width):
+        compact = is_compact_width(width)
+        slot_count = len(self.usage_chart_points) if self.usage_chart_points else DEFAULT_CHART_SLOTS
+        content_width = get_chart_content_width(width, slot_count)
+        self.usage_chart_area.set_size_request(content_width, get_chart_height(width))
+        self.usage_chart_area.set_content_width(content_width)
+        self.usage_chart_area.set_content_height(get_chart_height(width))
+        self.usage_chart_margin_left = 38 if compact else 45
+        self.usage_chart_margin_right = 10 if compact else 15
+        self.usage_chart_margin_top = 16 if compact else 20
+        self.usage_chart_margin_bottom = 26 if compact else 30
+
+
+    def _build_usage_insight_data(self, samples, synced_at, daily_costs=None):
+        insight = build_usage_insight_data(samples, synced_at)
+        avg_daily = 0.0
+        if insight["avg_text"] != "—":
+            avg_daily = float(insight["avg_text"].split(" ")[0])
+
+        if daily_costs:
+            complete_daily_costs = self._get_complete_daily_costs(daily_costs, synced_at)
+            if complete_daily_costs:
+                energy_totals = [float(day.get("energy_cost_gbp", 0.0)) for day in complete_daily_costs]
+                totals = [float(day.get("total_cost_gbp", 0.0)) for day in complete_daily_costs]
+                avg_daily_energy_cost = sum(energy_totals) / len(energy_totals)
+                avg_daily_cost = sum(totals) / len(totals)
+                monthly_cost = avg_daily_cost * 30.0
+                cost_trend_pct = self._get_series_trend_pct(totals)
+                insight["daily_cost_text"] = f"£{avg_daily_energy_cost:.2f}/day"
+                insight["daily_total_cost_text"] = f"£{avg_daily_cost:.2f}/day"
+                insight["cost_trend_text"] = "—" if cost_trend_pct is None else f"{cost_trend_pct:+.1f}%"
+                insight["monthly_cost_text"] = f"£{monthly_cost:.0f}"
+                return insight
+
+        avg_unit_price = self._get_average_unit_price_gbp()
+        standing_charge_gbp = self._get_standing_charge_gbp_per_day()
+        avg_daily_energy_cost = avg_daily * avg_unit_price
+        avg_daily_total_cost = avg_daily_energy_cost + standing_charge_gbp
+        monthly_cost = avg_daily_total_cost * 30.0
+        price_trend_pct = self._get_recent_price_trend_pct()
+        combined_cost_trend_pct = insight["trend_pct"] + price_trend_pct
+        insight["daily_cost_text"] = "—" if insight["avg_text"] == "—" else f"£{avg_daily_energy_cost:.2f}/day"
+        insight["daily_total_cost_text"] = "—" if insight["avg_text"] == "—" else f"£{avg_daily_total_cost:.2f}/day"
+        insight["cost_trend_text"] = "—" if insight["trend_text"] == "—" else f"{combined_cost_trend_pct:+.1f}%"
+        insight["monthly_cost_text"] = "—" if insight["monthly_text"] == "—" else f"£{monthly_cost:.0f}"
+        return insight
+
+    def _get_usage_chart_series(self, insight, daily_costs):
+        daily_cost_by_date = {
+            day.get("date"): day
+            for day in daily_costs
+            if day.get("date")
+        }
+
+        if self.usage_graph_mode == "kwh":
+            daily_data = []
+            for date, kwh in zip(insight["chart_dates"], insight["chart_points"]):
+                day = daily_cost_by_date.get(date, {})
+                daily_data.append({
+                    "date": date,
+                    "kwh": kwh,
+                    "energy_cost_gbp": day.get("energy_cost_gbp"),
+                    "total_cost_gbp": day.get("total_cost_gbp"),
+                    "standing_charge_gbp": day.get("standing_charge_gbp"),
+                    "missing_rate_count": day.get("missing_rate_count"),
+                    "sample_count": day.get("sample_count"),
+                })
+            return insight["chart_points"], insight["chart_dates"], "kWh", daily_data
+
+        points = []
+        dates = []
+        daily_data = []
+        for date in insight["chart_dates"]:
+            day = daily_cost_by_date.get(date)
+            if not day or day.get("missing_rate_count", 0) != 0:
+                continue
+            points.append(float(day.get(self.usage_graph_mode, 0.0)))
+            dates.append(date)
+            daily_data.append(day)
+
+        return points, dates, "£", daily_data
+
+    def _get_series_trend_pct(self, values):
+        if len(values) < 14:
+            return None
+        recent = values[-7:]
+        previous = values[-14:-7]
+        recent_avg = sum(recent) / len(recent)
+        previous_avg = sum(previous) / len(previous)
+        if previous_avg == 0:
+            return 0.0
+        return max(-100.0, min(100.0, ((recent_avg - previous_avg) / previous_avg) * 100.0))
+
+    def _get_complete_daily_costs(self, daily_costs, synced_at):
+        latest_complete_day = None
+        if synced_at:
+            try:
+                synced_dt = datetime.fromisoformat(synced_at.replace("Z", "+00:00"))
+                if synced_dt.tzinfo is None:
+                    synced_dt = synced_dt.replace(tzinfo=timezone.utc)
+                latest_complete_day = synced_dt.astimezone(timezone.utc).date()
+                if synced_dt.time() != datetime.min.time():
+                    latest_complete_day = latest_complete_day - timedelta(days=1)
+            except (TypeError, ValueError):
+                latest_complete_day = None
+
+        complete_daily_costs = []
+        for day in daily_costs:
+            if day.get("missing_rate_count", 0) != 0 or day.get("sample_count", 0) < 48:
+                continue
+
+            try:
+                day_date = datetime.fromisoformat(day.get("date")).date()
+            except (TypeError, ValueError):
+                continue
+            if latest_complete_day and day_date > latest_complete_day:
+                continue
+
+            complete_daily_costs.append(day)
+
+        return complete_daily_costs
+
+    def _get_average_unit_price_gbp(self):
+        if not self.all_prices:
+            return 0.25
+        return sum(p['price_gbp'] for p in self.all_prices) / len(self.all_prices)
+
+    def _get_recent_price_trend_pct(self):
+        if len(self.all_prices) < 48:
+            return 0.0
+        recent = self.all_prices[-24:]
+        previous = self.all_prices[-48:-24]
+        recent_avg = sum(p['price_gbp'] for p in recent) / len(recent)
+        previous_avg = sum(p['price_gbp'] for p in previous) / len(previous)
+        if previous_avg == 0:
+            return 0.0
+        return ((recent_avg - previous_avg) / previous_avg) * 100.0
+
+    def _get_standing_charge_gbp_per_day(self):
+        selected_tariff_code = self.settings.get_string("selected-tariff-code")
+        if not selected_tariff_code:
+            return 0.0
+
+        cache_key = f"octopus_standing_charge_{selected_tariff_code}"
+        cached_data, _cache_mtime = self.cache_manager.get(cache_key)
+        if cached_data and "value_inc_vat" in cached_data:
+            return float(cached_data["value_inc_vat"]) / 100.0
+
+        try:
+            product_code = extract_product_code(selected_tariff_code)
+            url = f"https://api.octopus.energy/v1/products/{product_code}/electricity-tariffs/{selected_tariff_code}/standing-charges/"
+            response = requests.get(url, params={"page_size": 1}, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            if data.get("results"):
+                standing = data["results"][0]
+                self.cache_manager.set(cache_key, standing)
+                return float(standing.get("value_inc_vat", 0.0)) / 100.0
+        except requests.exceptions.RequestException:
+            return 0.0
+
+        return 0.0
+
+    def on_usage_chart_query_tooltip(self, _widget, x, _y, _keyboard_mode, tooltip):
+        index = self._get_usage_chart_index_at_x(x)
+        if index is None or index >= len(self.usage_chart_daily_data):
+            return False
+
+        day = self.usage_chart_daily_data[index]
+        date = day.get("date") or self.usage_chart_dates[index]
+        lines = [f"<b>{GLib.markup_escape_text(date)}</b>"]
+
+        kwh = day.get("kwh")
+        if kwh is not None:
+            lines.append(f"{float(kwh):.2f} kWh")
+
+        energy_cost = day.get("energy_cost_gbp")
+        total_cost = day.get("total_cost_gbp")
+        standing_charge = day.get("standing_charge_gbp")
+        if energy_cost is not None:
+            lines.append(f"Energy: £{float(energy_cost):.2f}")
+        if standing_charge is not None:
+            lines.append(f"Standing charge: £{float(standing_charge):.2f}")
+        if total_cost is not None:
+            lines.append(f"Total: £{float(total_cost):.2f}")
+
+        if day.get("missing_rate_count", 0):
+            lines.append("Historical rates incomplete")
+        elif day.get("sample_count") and day.get("sample_count", 0) < 48:
+            lines.append("Partial usage day")
+        elif total_cost is not None:
+            lines.append("Matched historical rates")
+
+        tooltip.set_markup("\n".join(lines))
+        return True
+
+    def _get_usage_chart_index_at_x(self, x):
+        if not self.usage_chart_points:
+            return None
+
+        width = self.usage_chart_area.get_width() or self.usage_chart_area.get_allocated_width()
+        margin_left = getattr(self, "usage_chart_margin_left", 45)
+        margin_right = getattr(self, "usage_chart_margin_right", 15)
+        chart_width = width - margin_left - margin_right
+        if chart_width <= 0 or not (margin_left <= x <= width - margin_right):
+            return None
+
+        chart_x = x - margin_left
+        bar_width = chart_width / len(self.usage_chart_points)
+        index = int(chart_x / bar_width)
+        if 0 <= index < len(self.usage_chart_points):
+            return index
+
+        return None
+
+    def _draw_usage_chart(self, _area, cr, width, height):
+        margin_left = getattr(self, "usage_chart_margin_left", 45)
+        margin_right = getattr(self, "usage_chart_margin_right", 15)
+        margin_top = getattr(self, "usage_chart_margin_top", 20)
+        margin_bottom = getattr(self, "usage_chart_margin_bottom", 30)
+
+        chart_width = width - margin_left - margin_right
+        chart_height = height - margin_top - margin_bottom
+        if chart_width <= 0 or chart_height <= 0:
+            return
+
+        style_context = _area.get_style_context()
+        fg_color = style_context.get_color()
+
+        if not self.usage_chart_points:
+            return
+
+        points = self.usage_chart_points
+        min_value = min(points) if points else 0.0
+        max_value = max(points) if points else 1.0
+        display_min_value = 0 if min_value >= 0 else min_value
+        value_range = max_value - display_min_value
+        if value_range <= 0:
+            value_range = 0.01
+
+        zero_y = (
+            margin_top + chart_height * (max_value / value_range)
+            if display_min_value < 0
+            else margin_top + chart_height
+        )
+
+        ideal_step = value_range / 5
+        if ideal_step > 0:
+            magnitude = 10 ** math.floor(math.log10(ideal_step))
+            normalized_step = ideal_step / magnitude
+            if normalized_step < 1.6:
+                step = 1 * magnitude
+            elif normalized_step < 3.5:
+                step = 2 * magnitude
+            elif normalized_step < 7.5:
+                step = 5 * magnitude
+            else:
+                step = 10 * magnitude
+        else:
+            step = 1.0
+
+        cr.set_font_size(10)
+        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+
+        current_grid_value = math.ceil(display_min_value / step) * step
+        while current_grid_value <= max_value + 0.0001:
+            line_y = zero_y - (current_grid_value / value_range) * chart_height
+            cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, 0.1)
+            cr.set_line_width(1.0)
+            cr.move_to(margin_left, round(line_y) + 0.5)
+            cr.line_to(margin_left + chart_width, round(line_y) + 0.5)
+            cr.stroke()
+
+            chart_unit = getattr(self, "usage_chart_unit", "kWh")
+            if chart_unit == "£":
+                label = f"£{current_grid_value:.2f}" if current_grid_value < 10 else f"£{current_grid_value:.0f}"
+            else:
+                label_value = f"{current_grid_value:.0f}" if current_grid_value >= 10 else f"{current_grid_value:.1f}"
+                label = f"{label_value}kWh"
+            extents = cr.text_extents(label)
+            cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, 0.5)
+            label_y = line_y - (extents.height / 2 + extents.y_bearing)
+            cr.move_to(margin_left - extents.width - 5, label_y)
+            cr.show_text(label)
+
+            current_grid_value += step
+
+        success, color = style_context.lookup_color("blue_4")
+        base_color = (color.red, color.green, color.blue) if success else (0.2, 0.4, 0.8)
+        success, color = style_context.lookup_color("green_4")
+        negative_color = (color.red, color.green, color.blue) if success else (0.2, 0.8, 0.2)
+
+        for idx, value in enumerate(points):
+            bar_x_start = margin_left + (idx * chart_width) / len(points)
+            bar_x_end = margin_left + ((idx + 1) * chart_width) / len(points)
+            bar_x = round(bar_x_start)
+            bar_width = max(1, round(bar_x_end) - bar_x)
+            bar_height = abs(value / value_range) * chart_height
+            bar_y = zero_y - bar_height if value >= 0 else zero_y
+
+            color = negative_color if value < 0 else base_color
+            cr.set_source_rgb(color[0] * 0.8, color[1] * 0.8, color[2] * 0.8)
+            cr.rectangle(bar_x, bar_y, max(1, bar_width - 1), bar_height)
+            cr.fill()
+
+        cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, 0.5)
+        cr.set_font_size(9 if is_compact_width(width) else 10)
+        label_interval = get_time_label_interval(width, len(points))
+        last_index = len(points) - 1
+        for idx in range(0, len(points), label_interval):
+            if not self.usage_chart_dates or idx >= len(self.usage_chart_dates) or idx == last_index:
+                continue
+
+            date_label = self.usage_chart_dates[idx]
+            extents = cr.text_extents(date_label)
+            bar_x_center = margin_left + ((idx + 0.5) * chart_width) / len(points)
+            text_x = round(bar_x_center - extents.width / 2)
+            text_y = height - 10
+            cr.move_to(text_x, text_y)
+            cr.show_text(date_label)
+
+        if self.usage_chart_dates:
+            last_label = self.usage_chart_dates[last_index]
+            extents = cr.text_extents(last_label)
+            text_x = margin_left + chart_width - extents.width
+            text_y = height - 10
+            cr.move_to(text_x, text_y)
+            cr.show_text(last_label)
 
     def _apply_price_summary_classes(self):
         for widget in (self.price_card, self.compact_price_box):

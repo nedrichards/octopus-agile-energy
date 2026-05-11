@@ -25,3 +25,4 @@ jobs:
           bundle: octopusagile.flatpak
           manifest-path: com.nedrichards.octopusagile.json
           cache-key: flatpak-builder-${{ github.sha }}
+          upload-artifact: true

@@ -33,6 +33,10 @@ install_data(
     'main.py',
     'utils.py',
     'secrets_manager.py',
+    'historical_costs.py',
+    'octopus_api.py',
+    'usage_history.py',
+    'usage_insights.py',
     'price_logic.py',
   ],
   install_dir: moduledir
@@ -45,6 +49,7 @@ install_data(
     'ui/main_window.py',
     'ui/preferences_window.py',
     'ui/price_chart.py',
+    'ui/setup_window.py',
     'ui/styles.py',
     'ui/custom_spin_button.py',
   ],
