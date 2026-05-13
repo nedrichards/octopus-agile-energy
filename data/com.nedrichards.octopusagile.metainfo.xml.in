@@ -60,6 +60,18 @@
   </screenshots>
 
   <releases>
+    <release version="1.0.12" date="2026-05-13">
+      <description>
+        <p>This release improves cheapest-time planning and chart presentation.</p>
+        <ul>
+          <li>Add a finish countdown for appliances with finish-at timers</li>
+          <li>Condense cheapest-time results into a clearer summary layout</li>
+          <li>Label the selected cheapest window on the price chart</li>
+          <li>Use the GNOME accent color for usage chart bars</li>
+          <li>Add a source code link to the About window</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.11" date="2026-05-11">
       <description>
         <p>This release adds first-run setup, usage history, and estimated spend insights.</p>
