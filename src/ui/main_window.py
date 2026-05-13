@@ -25,9 +25,9 @@ from .adaptive_layout import (
     get_chart_height,
     get_chart_scroll_value,
     get_chart_slot_count,
-    get_time_label_interval,
     get_content_margin,
     get_price_summary_mode,
+    get_time_label_interval,
     is_compact_width,
 )
 from .custom_spin_button import CustomSpinButton
@@ -210,6 +210,18 @@ class MainWindow(Adw.ApplicationWindow):
         self.expander_row.set_expanded(True)
         self.duration_spin_button.grab_focus()
 
+    def _add_best_slot_summary_item(self, title, row):
+        title_label = Gtk.Label.new(title)
+        title_label.set_xalign(0)
+        title_label.add_css_class("dim-label")
+        self.best_slot_summary_grid.attach(title_label, 0, row, 1, 1)
+
+        value_label = Gtk.Label.new()
+        value_label.set_xalign(1)
+        value_label.set_hexpand(True)
+        self.best_slot_summary_grid.attach(value_label, 1, row, 1, 1)
+        return value_label
+
     def on_key_pressed(self, controller, keyval, keycode, modifier):
         """
         Handles key press events for the main window.
@@ -242,6 +254,7 @@ class MainWindow(Adw.ApplicationWindow):
             copyright="© 2026 Nick Richards",
             license_type=Gtk.License.GPL_3_0
         )
+        about_dialog.add_link("Source Code", "https://github.com/nedrichards/octopus-agile-energy")
         about_dialog.present()
 
     def on_visibility_change(self, *args):
@@ -628,35 +641,38 @@ class MainWindow(Adw.ApplicationWindow):
         self.start_within_spin_button.connect('value-changed', self.on_find_cheapest_slot_triggered)
         self.expander_row.add_row(self.start_within_row)
 
-        # --- Result rows ---
-        self.best_slot_result_row = Adw.ActionRow.new()
-        self.best_slot_result_row.set_title("Best time to start is")
-        self.best_slot_result_label = Gtk.Label.new()
-        self.best_slot_result_row.add_suffix(self.best_slot_result_label)
-        self.best_slot_result_row.set_visible(False)
-        self.expander_row.add_row(self.best_slot_result_row)
+        # --- Result summary ---
+        self.best_slot_summary_row = Gtk.ListBoxRow.new()
+        self.best_slot_summary_row.set_selectable(False)
+        self.best_slot_summary_row.set_activatable(False)
 
-        self.average_price_row = Adw.ActionRow.new()
-        self.average_price_row.set_title("Average Price")
-        self.average_price_label = Gtk.Label.new()
-        self.average_price_row.add_suffix(self.average_price_label)
-        self.average_price_row.set_visible(False)
-        self.expander_row.add_row(self.average_price_row)
+        summary_box = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        summary_box.set_margin_top(12)
+        summary_box.set_margin_bottom(12)
+        summary_box.set_margin_start(12)
+        summary_box.set_margin_end(12)
+        self.best_slot_summary_row.set_child(summary_box)
 
+        self.best_slot_message_label = Gtk.Label.new("Not enough data to find the cheapest time.")
+        self.best_slot_message_label.set_xalign(0)
+        self.best_slot_message_label.set_wrap(True)
+        self.best_slot_message_label.add_css_class("dim-label")
+        summary_box.append(self.best_slot_message_label)
 
-        self.timer_row = Adw.ActionRow.new()
-        self.timer_row.set_title("Starts in")
-        self.timer_label = Gtk.Label.new()
-        self.timer_row.add_suffix(self.timer_label)
-        self.timer_row.set_visible(False)
-        self.expander_row.add_row(self.timer_row)
+        self.best_slot_summary_grid = Gtk.Grid.new()
+        self.best_slot_summary_grid.set_column_spacing(18)
+        self.best_slot_summary_grid.set_row_spacing(6)
+        summary_box.append(self.best_slot_summary_grid)
 
-        self.finish_time_row = Adw.ActionRow.new()
-        self.finish_time_row.set_title("Finishes after")
-        self.finish_time_label = Gtk.Label.new()
-        self.finish_time_row.add_suffix(self.finish_time_label)
-        self.finish_time_row.set_visible(False)
-        self.expander_row.add_row(self.finish_time_row)
+        self.best_slot_result_label = self._add_best_slot_summary_item("Best start", 0)
+        self.timer_label = self._add_best_slot_summary_item("Starts in", 1)
+        self.finish_time_label = self._add_best_slot_summary_item("Finishes after", 2)
+        self.average_price_label = self._add_best_slot_summary_item("Average price", 3)
+
+        self.best_slot_summary_row.set_visible(False)
+        self.best_slot_message_label.set_visible(False)
+        self.best_slot_summary_grid.set_visible(False)
+        self.expander_row.add_row(self.best_slot_summary_row)
         # --- End of new section ---
 
         self.time_label = Gtk.Label.new()
@@ -792,11 +808,10 @@ class MainWindow(Adw.ApplicationWindow):
                 self.timer_id = None
             self.best_slot_start_time = None
             self.best_slot_end_time = None
-            self.best_slot_result_label.set_text("Not enough data to find the cheapest time.")
-            self.best_slot_result_row.set_visible(True)
-            self.average_price_row.set_visible(False)
-            self.timer_row.set_visible(False)
-            self.finish_time_row.set_visible(False)
+            self.best_slot_message_label.set_text("Not enough data to find the cheapest time.")
+            self.best_slot_message_label.set_visible(True)
+            self.best_slot_summary_grid.set_visible(False)
+            self.best_slot_summary_row.set_visible(True)
             return
 
         if self.timer_id:
@@ -805,21 +820,26 @@ class MainWindow(Adw.ApplicationWindow):
 
         best_slot_start_time = cheapest_slot['start']
         best_slot_end_time = cheapest_slot['end']
-        self.price_chart.set_highlight_range(best_slot_start_time, best_slot_end_time)
+        self.price_chart.set_highlight_range(
+            best_slot_start_time,
+            best_slot_end_time,
+            f"Best {duration_hours}h",
+        )
         self._scroll_chart_to_time(best_slot_start_time)
 
         self.best_slot_result_label.set_text(f"{best_slot_start_time.astimezone().strftime('%H:%M')}")
-        self.best_slot_result_row.set_visible(True)
 
         average_price = cheapest_slot['average_price_gbp']
         self.average_price_label.set_text(f"£{average_price:.2f}/kWh")
-        self.average_price_row.set_visible(True)
+
+        self.best_slot_message_label.set_visible(False)
+        self.best_slot_summary_grid.set_visible(True)
+        self.best_slot_summary_row.set_visible(True)
 
         self.best_slot_start_time = best_slot_start_time.astimezone()
         self.best_slot_end_time = best_slot_end_time.astimezone()
         self.timer_id = GLib.timeout_add_seconds(1, self._update_countdown)
         self._update_countdown() # Initial update
-        self.timer_row.set_visible(True)
 
     def _scroll_chart_to_time(self, target_time):
         target_index = self._find_chart_index_for_time(target_time)
@@ -866,7 +886,7 @@ class MainWindow(Adw.ApplicationWindow):
         finish_delta = self.best_slot_end_time - now
 
         if start_delta.total_seconds() <= 0:
-            self.timer_label.set_text("The cheapest time is now.")
+            self.timer_label.set_text("Now")
         else:
             self.timer_label.set_text(self._format_countdown_duration(start_delta))
 
@@ -876,8 +896,7 @@ class MainWindow(Adw.ApplicationWindow):
             return False # Stop the timer
 
         self.finish_time_label.set_text(self._format_countdown_duration(finish_delta))
-        self.timer_row.set_visible(True)
-        self.finish_time_row.set_visible(True)
+        self.best_slot_summary_row.set_visible(True)
         return True # Continue the timer
 
     def _format_countdown_duration(self, delta):
@@ -1161,7 +1180,7 @@ class MainWindow(Adw.ApplicationWindow):
             compact_description="",
             css_class=css_class,
         )
-        self.time_label.set_markup(f"<span size='small'>Last updated: {datetime.now().strftime('%H:%M:%S')}</span>")
+        self._set_last_updated_label(self.time_label, datetime.now().astimezone())
         self.price_chart.set_compact_mode(
             is_compact_width(self.get_width()),
             self.get_width() or self.settings.get_int("window-width"),
@@ -1257,21 +1276,26 @@ class MainWindow(Adw.ApplicationWindow):
         self.usage_chart_area.queue_draw()
 
     def _set_usage_updated_label(self, synced_at):
-        if not synced_at:
-            self.usage_updated_label.set_markup("<span size='small'>Last updated: Never</span>")
-            return
+        self._set_last_updated_label(self.usage_updated_label, synced_at)
+
+    def _set_last_updated_label(self, label_widget, updated_at):
+        label = self._format_last_updated(updated_at)
+        escaped_label = GLib.markup_escape_text(label)
+        label_widget.set_markup(f"<span size='small'>Last updated: {escaped_label}</span>")
+
+    def _format_last_updated(self, updated_at):
+        if not updated_at:
+            return "Never"
 
         try:
-            synced_dt = datetime.fromisoformat(synced_at.replace("Z", "+00:00"))
-            if synced_dt.tzinfo is None:
-                synced_dt = synced_dt.replace(tzinfo=timezone.utc)
-            local_dt = synced_dt.astimezone()
-            label = local_dt.strftime("%d %b %Y, %H:%M")
+            if isinstance(updated_at, str):
+                updated_at = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+            if updated_at.tzinfo is None:
+                updated_at = updated_at.replace(tzinfo=timezone.utc)
+            local_dt = updated_at.astimezone()
+            return local_dt.strftime("%d %b %Y, %H:%M")
         except (TypeError, ValueError):
-            label = "Unknown"
-
-        escaped_label = GLib.markup_escape_text(label)
-        self.usage_updated_label.set_markup(f"<span size='small'>Last updated: {escaped_label}</span>")
+            return "Unknown"
 
     def refresh_usage_history_background(self, force=False):
         if self.usage_refresh_in_progress or (self.usage_refresh_attempted and not force):

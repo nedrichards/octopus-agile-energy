@@ -32,6 +32,7 @@ class PriceChartWidget(Gtk.DrawingArea):
         self.margin_bottom = 30
         self.highlight_start_time = None
         self.highlight_end_time = None
+        self.highlight_label = None
         self.slot_count = 0
 
         self.set_size_request(-1, get_chart_height(0))
@@ -69,12 +70,13 @@ class PriceChartWidget(Gtk.DrawingArea):
         self.current_price_index = current_index
         self.queue_draw()
 
-    def set_highlight_range(self, start_time, end_time):
+    def set_highlight_range(self, start_time, end_time, label=None):
         """
         Sets the time range to highlight on the chart.
         """
         self.highlight_start_time = start_time
         self.highlight_end_time = end_time
+        self.highlight_label = label
         self.queue_draw()
 
     def get_bar_start_x(self, index):
@@ -240,6 +242,8 @@ class PriceChartWidget(Gtk.DrawingArea):
         # --- Draw Bars ---
         last_date = None
         day_transition_x = None
+        highlight_x_start = None
+        highlight_x_end = None
 
         for i, price_data in enumerate(self.prices):
             price = price_data['price_gbp']
@@ -289,6 +293,12 @@ class PriceChartWidget(Gtk.DrawingArea):
                     cr.set_source_rgba(0.9, 0.9, 0.2, 0.3)  # Semi-transparent yellow
                     cr.rectangle(bar_x, self.margin_top, bar_width - 1, chart_height)
                     cr.fill()
+                    highlight_x_start = bar_x if highlight_x_start is None else min(highlight_x_start, bar_x)
+                    highlight_x_end = (
+                        bar_x + bar_width - 1
+                        if highlight_x_end is None
+                        else max(highlight_x_end, bar_x + bar_width - 1)
+                    )
 
             if i == self.current_price_index:
                 cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha)
@@ -307,6 +317,8 @@ class PriceChartWidget(Gtk.DrawingArea):
                     cr.line_to(bar_x + bar_width - 1, bar_y + bar_height)
                     cr.line_to(bar_x + bar_width - 1, chart_zero_y)
                 cr.stroke()
+
+        self._draw_highlight_label(cr, fg_color, highlight_x_start, highlight_x_end, width)
 
         # --- Draw Day Transition Indicator ---
         if day_transition_x:
@@ -336,3 +348,35 @@ class PriceChartWidget(Gtk.DrawingArea):
                 text_y = height - 10
                 cr.move_to(text_x, text_y)
                 cr.show_text(time_str)
+
+    def _draw_highlight_label(self, cr, fg_color, highlight_x_start, highlight_x_end, width):
+        if not self.highlight_label or highlight_x_start is None or highlight_x_end is None:
+            return
+
+        cr.save()
+        cr.set_font_size(10)
+        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+        text_extents = cr.text_extents(self.highlight_label)
+        padding_x = 6
+        padding_y = 3
+        label_width = text_extents.width + padding_x * 2
+        label_height = text_extents.height + padding_y * 2
+        highlight_center = highlight_x_start + (highlight_x_end - highlight_x_start) / 2
+        label_x = max(
+            self.margin_left,
+            min(
+                highlight_center - label_width / 2,
+                width - self.margin_right - label_width,
+            ),
+        )
+        label_y = self.margin_top + 6
+
+        cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, 0.72)
+        cr.rectangle(label_x, label_y, label_width, label_height)
+        cr.fill()
+        luminance = 0.2126 * fg_color.red + 0.7152 * fg_color.green + 0.0722 * fg_color.blue
+        text_color = 0 if luminance > 0.5 else 1
+        cr.set_source_rgba(text_color, text_color, text_color, 0.95)
+        cr.move_to(label_x + padding_x, label_y + padding_y - text_extents.y_bearing)
+        cr.show_text(self.highlight_label)
+        cr.restore()
