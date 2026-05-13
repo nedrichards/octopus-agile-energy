@@ -70,6 +70,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.setup_window = None
         self.timer_id = None
         self.best_slot_start_time = None
+        self.best_slot_end_time = None
         self.is_first_expansion = True
         self._fetch_generation = 0
         self.price_summary_mode = "regular"
@@ -439,6 +440,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.usage_chart_area.set_hexpand(True)
         self.usage_chart_area.set_vexpand(False)
         self.usage_chart_area.set_draw_func(self._draw_usage_chart)
+        self._connect_usage_chart_style_updates()
         self.usage_chart_points = []
         self.usage_chart_dates = []
         self.usage_chart_daily_data = []
@@ -648,6 +650,13 @@ class MainWindow(Adw.ApplicationWindow):
         self.timer_row.add_suffix(self.timer_label)
         self.timer_row.set_visible(False)
         self.expander_row.add_row(self.timer_row)
+
+        self.finish_time_row = Adw.ActionRow.new()
+        self.finish_time_row.set_title("Finishes after")
+        self.finish_time_label = Gtk.Label.new()
+        self.finish_time_row.add_suffix(self.finish_time_label)
+        self.finish_time_row.set_visible(False)
+        self.expander_row.add_row(self.finish_time_row)
         # --- End of new section ---
 
         self.time_label = Gtk.Label.new()
@@ -778,10 +787,16 @@ class MainWindow(Adw.ApplicationWindow):
         )
 
         if not cheapest_slot:
+            if self.timer_id:
+                GLib.source_remove(self.timer_id)
+                self.timer_id = None
+            self.best_slot_start_time = None
+            self.best_slot_end_time = None
             self.best_slot_result_label.set_text("Not enough data to find the cheapest time.")
             self.best_slot_result_row.set_visible(True)
             self.average_price_row.set_visible(False)
             self.timer_row.set_visible(False)
+            self.finish_time_row.set_visible(False)
             return
 
         if self.timer_id:
@@ -800,15 +815,11 @@ class MainWindow(Adw.ApplicationWindow):
         self.average_price_label.set_text(f"£{average_price:.2f}/kWh")
         self.average_price_row.set_visible(True)
 
-        delta = best_slot_start_time.astimezone() - datetime.now().astimezone()
-        if delta.total_seconds() > 0:
-            self.best_slot_start_time = best_slot_start_time.astimezone()
-            self.timer_id = GLib.timeout_add_seconds(1, self._update_countdown)
-            self._update_countdown() # Initial update
-            self.timer_row.set_visible(True)
-        else:
-            self.timer_label.set_text("The cheapest time is now.")
-            self.timer_row.set_visible(True)
+        self.best_slot_start_time = best_slot_start_time.astimezone()
+        self.best_slot_end_time = best_slot_end_time.astimezone()
+        self.timer_id = GLib.timeout_add_seconds(1, self._update_countdown)
+        self._update_countdown() # Initial update
+        self.timer_row.set_visible(True)
 
     def _scroll_chart_to_time(self, target_time):
         target_index = self._find_chart_index_for_time(target_time)
@@ -847,20 +858,32 @@ class MainWindow(Adw.ApplicationWindow):
         return False
 
     def _update_countdown(self):
-        if not self.best_slot_start_time:
+        if not self.best_slot_start_time or not self.best_slot_end_time:
             return False
 
-        delta = self.best_slot_start_time - datetime.now().astimezone()
-        if delta.total_seconds() <= 0:
+        now = datetime.now().astimezone()
+        start_delta = self.best_slot_start_time - now
+        finish_delta = self.best_slot_end_time - now
+
+        if start_delta.total_seconds() <= 0:
             self.timer_label.set_text("The cheapest time is now.")
+        else:
+            self.timer_label.set_text(self._format_countdown_duration(start_delta))
+
+        if finish_delta.total_seconds() <= 0:
+            self.finish_time_label.set_text("Finished")
             self.timer_id = None
             return False # Stop the timer
 
+        self.finish_time_label.set_text(self._format_countdown_duration(finish_delta))
+        self.timer_row.set_visible(True)
+        self.finish_time_row.set_visible(True)
+        return True # Continue the timer
+
+    def _format_countdown_duration(self, delta):
         hours, remainder = divmod(delta.total_seconds(), 3600)
         minutes, _ = divmod(remainder, 60)
-        self.timer_label.set_text(f"{int(hours):02}:{int(minutes):02}")
-        self.timer_row.set_visible(True)
-        return True # Continue the timer
+        return f"{int(hours):02}:{int(minutes):02}"
 
     def refresh_price(self, force=False):
         """
@@ -1394,6 +1417,14 @@ class MainWindow(Adw.ApplicationWindow):
         self.usage_chart_margin_top = 16 if compact else 20
         self.usage_chart_margin_bottom = 26 if compact else 30
 
+    def _connect_usage_chart_style_updates(self):
+        style_manager = Adw.StyleManager.get_default()
+        for property_name in ("accent-color-rgba", "accent-color", "color-scheme"):
+            if style_manager.find_property(property_name):
+                style_manager.connect(f"notify::{property_name}", self._on_usage_chart_style_changed)
+
+    def _on_usage_chart_style_changed(self, *_args):
+        self.usage_chart_area.queue_draw()
 
     def _build_usage_insight_data(self, samples, synced_at, daily_costs=None):
         insight = build_usage_insight_data(samples, synced_at)
@@ -1597,6 +1628,20 @@ class MainWindow(Adw.ApplicationWindow):
 
         return None
 
+    def _lookup_style_color(self, style_context, color_names, fallback):
+        for color_name in color_names:
+            success, color = style_context.lookup_color(color_name)
+            if success:
+                return (color.red, color.green, color.blue)
+
+        return fallback
+
+    def _mix_colors(self, base_color, tint_color, tint_amount):
+        return tuple(
+            base_component * (1 - tint_amount) + tint_component * tint_amount
+            for base_component, tint_component in zip(base_color, tint_color)
+        )
+
     def _draw_usage_chart(self, _area, cr, width, height):
         margin_left = getattr(self, "usage_chart_margin_left", 45)
         margin_right = getattr(self, "usage_chart_margin_right", 15)
@@ -1669,8 +1714,13 @@ class MainWindow(Adw.ApplicationWindow):
 
             current_grid_value += step
 
-        success, color = style_context.lookup_color("blue_4")
-        base_color = (color.red, color.green, color.blue) if success else (0.2, 0.4, 0.8)
+        accent_color = self._lookup_style_color(
+            style_context,
+            ("accent_color", "accent_bg_color", "blue_4"),
+            (0.2, 0.4, 0.8),
+        )
+        fg_rgb = (fg_color.red, fg_color.green, fg_color.blue)
+        base_color = self._mix_colors(accent_color, fg_rgb, 0.12)
         success, color = style_context.lookup_color("green_4")
         negative_color = (color.red, color.green, color.blue) if success else (0.2, 0.8, 0.2)
 
