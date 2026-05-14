@@ -5,7 +5,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from price_logic import build_region_to_tariffs_map, extract_product_code, find_cheapest_slot
+from price_logic import (
+    build_dual_register_price_windows,
+    build_region_to_tariffs_map,
+    extract_product_code,
+    find_cheapest_slot,
+)
 
 
 class PriceLogicTests(unittest.TestCase):
@@ -166,6 +171,56 @@ class PriceLogicTests(unittest.TestCase):
         }]
 
         self.assertIsNone(find_cheapest_slot(prices, now, duration_hours=1, start_within_hours=1))
+
+    def test_build_dual_register_price_windows_uses_night_rate_inside_window(self):
+        period_start = datetime(2026, 5, 13, 0, 0, tzinfo=timezone.utc)
+        period_end = datetime(2026, 5, 13, 8, 0, tzinfo=timezone.utc)
+        day_rates = [{
+            'valid_from': '2026-01-01T00:00:00Z',
+            'valid_to': None,
+            'value_inc_vat': 30.0,
+        }]
+        night_rates = [{
+            'valid_from': '2026-01-01T00:00:00Z',
+            'valid_to': None,
+            'value_inc_vat': 10.0,
+        }]
+
+        prices = build_dual_register_price_windows(day_rates, night_rates, period_start, period_end)
+
+        self.assertEqual(len(prices), 16)
+        self.assertEqual(prices[0]['value_inc_vat'], 30.0)
+        self.assertEqual(prices[1]['valid_from'], '2026-05-13T00:30:00Z')
+        self.assertEqual(prices[1]['value_inc_vat'], 10.0)
+        self.assertEqual(prices[14]['valid_from'], '2026-05-13T07:00:00Z')
+        self.assertEqual(prices[14]['value_inc_vat'], 10.0)
+        self.assertEqual(prices[15]['valid_from'], '2026-05-13T07:30:00Z')
+        self.assertEqual(prices[15]['value_inc_vat'], 30.0)
+
+    def test_build_dual_register_price_windows_uses_rate_valid_at_slot(self):
+        period_start = datetime(2026, 4, 1, 0, 0, tzinfo=timezone.utc)
+        period_end = datetime(2026, 4, 1, 1, 0, tzinfo=timezone.utc)
+        day_rates = [{
+            'valid_from': '2026-01-01T00:00:00Z',
+            'valid_to': None,
+            'value_inc_vat': 30.0,
+        }]
+        night_rates = [
+            {
+                'valid_from': '2026-01-01T00:00:00Z',
+                'valid_to': '2026-04-01T00:30:00Z',
+                'value_inc_vat': 12.0,
+            },
+            {
+                'valid_from': '2026-04-01T00:30:00Z',
+                'valid_to': None,
+                'value_inc_vat': 9.0,
+            },
+        ]
+
+        prices = build_dual_register_price_windows(day_rates, night_rates, period_start, period_end)
+
+        self.assertEqual([price['value_inc_vat'] for price in prices], [30.0, 9.0])
 
     def test_build_region_to_tariffs_map_prefers_direct_debit(self):
         product_data = {
