@@ -6,7 +6,17 @@ def extract_product_code(selected_tariff_code):
     return '-'.join(parts[2:-1])
 
 
-def find_cheapest_slot(prices, now, duration_hours, start_within_hours):
+def find_cheapest_slot(
+    prices,
+    now,
+    duration_hours,
+    start_within_hours,
+    whole_hour_starts_only=False,
+    continuous_starts=False,
+):
+    if continuous_starts:
+        return _find_cheapest_continuous_slot(prices, now, duration_hours, start_within_hours)
+
     num_slots = duration_hours * 2
     cutoff = now + timedelta(hours=start_within_hours)
     prices_to_search = [p for p in prices if now <= p['valid_from'] < cutoff]
@@ -19,6 +29,9 @@ def find_cheapest_slot(prices, now, duration_hours, start_within_hours):
 
     for i in range(len(prices_to_search) - num_slots + 1):
         window = prices_to_search[i:i + num_slots]
+        if whole_hour_starts_only and window[0]['valid_from'].astimezone().minute != 0:
+            continue
+
         total_price = sum(p['price_gbp'] for p in window)
         if total_price < best_total_price:
             best_total_price = total_price
@@ -32,6 +45,69 @@ def find_cheapest_slot(prices, now, duration_hours, start_within_hours):
         'end': best_window[-1]['valid_to'],
         'average_price_gbp': best_total_price / num_slots,
     }
+
+
+def _find_cheapest_continuous_slot(prices, now, duration_hours, start_within_hours):
+    now = now.replace(second=0, microsecond=0)
+    duration = timedelta(hours=duration_hours)
+    cutoff = now + timedelta(hours=start_within_hours)
+    sorted_prices = sorted(prices, key=lambda price: price['valid_from'])
+    candidates = []
+    candidate = now
+    while candidate < cutoff:
+        candidates.append(candidate)
+        candidate += timedelta(minutes=30)
+
+    best_start = None
+    best_average_price = float('inf')
+
+    for start in sorted(candidates):
+        end = start + duration
+        average_price = _calculate_weighted_average_price(sorted_prices, start, end)
+        if average_price is None:
+            continue
+
+        if average_price < best_average_price:
+            best_average_price = average_price
+            best_start = start
+
+    if best_start is None:
+        return None
+
+    return {
+        'start': best_start,
+        'end': best_start + duration,
+        'average_price_gbp': best_average_price,
+    }
+
+
+def _calculate_weighted_average_price(prices, start, end):
+    duration_seconds = (end - start).total_seconds()
+    if duration_seconds <= 0:
+        return None
+
+    cursor = start
+    total_price_seconds = 0.0
+
+    for price in prices:
+        if price['valid_to'] <= cursor:
+            continue
+        if price['valid_from'] >= end:
+            break
+        if price['valid_from'] > cursor:
+            return None
+
+        overlap_start = max(cursor, price['valid_from'])
+        overlap_end = min(end, price['valid_to'])
+        if overlap_end <= overlap_start:
+            continue
+
+        total_price_seconds += price['price_gbp'] * (overlap_end - overlap_start).total_seconds()
+        cursor = overlap_end
+        if cursor >= end:
+            return total_price_seconds / duration_seconds
+
+    return None
 
 
 def build_region_to_tariffs_map(product_data, region_code_to_name):

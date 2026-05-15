@@ -68,7 +68,6 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.preferences_window = None
         self.setup_window = None
-        self.timer_id = None
         self.best_slot_start_time = None
         self.best_slot_end_time = None
         self.is_first_expansion = True
@@ -664,9 +663,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.best_slot_summary_grid.set_row_spacing(6)
         summary_box.append(self.best_slot_summary_grid)
 
-        self.best_slot_result_label = self._add_best_slot_summary_item("Best start", 0)
-        self.timer_label = self._add_best_slot_summary_item("Starts in", 1)
-        self.finish_time_label = self._add_best_slot_summary_item("Finishes after", 2)
+        self.best_slot_result_label = self._add_best_slot_summary_item("Best window", 0)
+        self.timer_label = self._add_best_slot_summary_item("Start after", 1)
+        self.finish_time_label = self._add_best_slot_summary_item("Finish before", 2)
         self.average_price_label = self._add_best_slot_summary_item("Average price", 3)
 
         self.best_slot_summary_row.set_visible(False)
@@ -794,18 +793,25 @@ class MainWindow(Adw.ApplicationWindow):
 
     def find_cheapest_slot(self, duration_hours, start_within_hours):
         self.price_chart.set_highlight_range(None, None) # Clear previous highlight
-        now = datetime.now(timezone.utc)
-        cheapest_slot = calculate_cheapest_slot(
+        now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+        whole_hour_cheapest_slot = calculate_cheapest_slot(
             self.all_prices,
             now,
             duration_hours,
             start_within_hours,
+            whole_hour_starts_only=True,
         )
+        exact_cheapest_slot = calculate_cheapest_slot(
+            self.all_prices,
+            now,
+            duration_hours,
+            start_within_hours,
+            continuous_starts=True,
+        )
+        cheapest_slot = exact_cheapest_slot or whole_hour_cheapest_slot
+        practical_slot = whole_hour_cheapest_slot or cheapest_slot
 
         if not cheapest_slot:
-            if self.timer_id:
-                GLib.source_remove(self.timer_id)
-                self.timer_id = None
             self.best_slot_start_time = None
             self.best_slot_end_time = None
             self.best_slot_message_label.set_text("Not enough data to find the cheapest time.")
@@ -814,12 +820,10 @@ class MainWindow(Adw.ApplicationWindow):
             self.best_slot_summary_row.set_visible(True)
             return
 
-        if self.timer_id:
-            GLib.source_remove(self.timer_id)
-            self.timer_id = None
-
         best_slot_start_time = cheapest_slot['start']
         best_slot_end_time = cheapest_slot['end']
+        practical_slot_start_time = practical_slot['start']
+        practical_slot_end_time = practical_slot['end']
         self.price_chart.set_highlight_range(
             best_slot_start_time,
             best_slot_end_time,
@@ -827,7 +831,15 @@ class MainWindow(Adw.ApplicationWindow):
         )
         self._scroll_chart_to_time(best_slot_start_time)
 
-        self.best_slot_result_label.set_text(f"{best_slot_start_time.astimezone().strftime('%H:%M')}")
+        self.best_slot_result_label.set_text(
+            self._format_time_window(best_slot_start_time, best_slot_end_time)
+        )
+        self.timer_label.set_text(
+            self._format_practical_time(practical_slot_start_time, best_slot_start_time)
+        )
+        self.finish_time_label.set_text(
+            self._format_practical_time(practical_slot_end_time, best_slot_end_time)
+        )
 
         average_price = cheapest_slot['average_price_gbp']
         self.average_price_label.set_text(f"£{average_price:.2f}/kWh")
@@ -838,8 +850,19 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.best_slot_start_time = best_slot_start_time.astimezone()
         self.best_slot_end_time = best_slot_end_time.astimezone()
-        self.timer_id = GLib.timeout_add_seconds(1, self._update_countdown)
-        self._update_countdown() # Initial update
+
+    def _format_time_window(self, start_time, end_time):
+        start_text = start_time.astimezone().strftime('%H:%M')
+        end_text = end_time.astimezone().strftime('%H:%M')
+        return f"{start_text}-{end_text}"
+
+    def _format_practical_time(self, practical_time, exact_time):
+        practical_text = practical_time.astimezone().strftime('%H:%M')
+        if practical_time == exact_time:
+            return practical_text
+
+        exact_text = exact_time.astimezone().strftime('%H:%M')
+        return f"{practical_text} ({exact_text} exact)"
 
     def _scroll_chart_to_time(self, target_time):
         target_index = self._find_chart_index_for_time(target_time)
@@ -876,33 +899,6 @@ class MainWindow(Adw.ApplicationWindow):
         )
         adjustment.set_value(scroll_value)
         return False
-
-    def _update_countdown(self):
-        if not self.best_slot_start_time or not self.best_slot_end_time:
-            return False
-
-        now = datetime.now().astimezone()
-        start_delta = self.best_slot_start_time - now
-        finish_delta = self.best_slot_end_time - now
-
-        if start_delta.total_seconds() <= 0:
-            self.timer_label.set_text("Now")
-        else:
-            self.timer_label.set_text(self._format_countdown_duration(start_delta))
-
-        if finish_delta.total_seconds() <= 0:
-            self.finish_time_label.set_text("Finished")
-            self.timer_id = None
-            return False # Stop the timer
-
-        self.finish_time_label.set_text(self._format_countdown_duration(finish_delta))
-        self.best_slot_summary_row.set_visible(True)
-        return True # Continue the timer
-
-    def _format_countdown_duration(self, delta):
-        hours, remainder = divmod(delta.total_seconds(), 3600)
-        minutes, _ = divmod(remainder, 60)
-        return f"{int(hours):02}:{int(minutes):02}"
 
     def refresh_price(self, force=False):
         """
