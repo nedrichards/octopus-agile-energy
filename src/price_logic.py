@@ -115,6 +115,8 @@ def build_dual_register_price_windows(
     night_rates,
     period_start,
     period_end,
+    # Octopus documents smart-meter Economy 7 off-peak as 00:30-07:30 UTC.
+    # https://octopus.energy/help-and-faqs/articles/what-is-an-economy-7-meter-and-tariff/
     night_start=time(0, 30),
     night_end=time(7, 30),
 ):
