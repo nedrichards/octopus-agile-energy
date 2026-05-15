@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, time, timedelta, timezone
 
 
 def extract_product_code(selected_tariff_code):
@@ -106,6 +106,69 @@ def _calculate_weighted_average_price(prices, start, end):
         cursor = overlap_end
         if cursor >= end:
             return total_price_seconds / duration_seconds
+
+    return None
+
+
+def build_dual_register_price_windows(
+    day_rates,
+    night_rates,
+    period_start,
+    period_end,
+    # Octopus documents smart-meter Economy 7 off-peak as 00:30-07:30 UTC.
+    # https://octopus.energy/help-and-faqs/articles/what-is-an-economy-7-meter-and-tariff/
+    night_start=time(0, 30),
+    night_end=time(7, 30),
+):
+    """
+    Expands day/night unit-rate records into the half-hour windows used by the chart.
+    The Economy 7 switching times are treated as UTC clock times.
+    """
+    current = _floor_to_half_hour(period_start.astimezone(timezone.utc))
+    period_end = period_end.astimezone(timezone.utc)
+    prices = []
+
+    while current < period_end:
+        next_slot = current + timedelta(minutes=30)
+        source_rates = night_rates if _is_night_slot(current, night_start, night_end) else day_rates
+        rate = _find_active_rate(source_rates, current)
+        if rate:
+            prices.append({
+                'valid_from': current.isoformat().replace("+00:00", "Z"),
+                'valid_to': next_slot.isoformat().replace("+00:00", "Z"),
+                'value_inc_vat': rate['value_inc_vat'],
+            })
+        current = next_slot
+
+    return prices
+
+
+def _floor_to_half_hour(value):
+    minute = 0 if value.minute < 30 else 30
+    return value.replace(minute=minute, second=0, microsecond=0)
+
+
+def _is_night_slot(value, night_start, night_end):
+    slot_time = value.time().replace(tzinfo=None)
+    if night_start <= night_end:
+        return night_start <= slot_time < night_end
+    return slot_time >= night_start or slot_time < night_end
+
+
+def _find_active_rate(rates, target):
+    for rate in rates:
+        try:
+            valid_from = datetime.fromisoformat(rate['valid_from'].replace('Z', '+00:00'))
+            valid_to = (
+                datetime.fromisoformat(rate['valid_to'].replace('Z', '+00:00'))
+                if rate.get('valid_to')
+                else datetime.max.replace(tzinfo=timezone.utc)
+            )
+        except (KeyError, ValueError, TypeError):
+            continue
+
+        if valid_from <= target < valid_to:
+            return rate
 
     return None
 
