@@ -60,6 +60,16 @@
   </screenshots>
 
   <releases>
+    <release version="1.0.13" date="2026-05-16">
+      <description>
+        <p>This release improves cheapest-time planning for appliances with whole-hour timers.</p>
+        <ul>
+          <li>Show the exact cheapest window while keeping appliance-friendly whole-hour start and finish guidance</li>
+          <li>Calculate exact windows from the current system-clock minute instead of snapping them to tariff boundaries</li>
+          <li>Handle equal duration and search windows without incorrectly reporting missing data</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.12" date="2026-05-13">
       <description>
         <p>This release improves cheapest-time planning and chart presentation.</p>

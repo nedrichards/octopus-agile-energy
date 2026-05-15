@@ -248,7 +248,7 @@ class MainWindow(Adw.ApplicationWindow):
             application_name="Agile Rates",
             application_icon="com.nedrichards.octopusagile",
             developer_name="Nick Richards",
-            version="1.0.12",
+            version="1.0.13",
             website="https://www.nedrichards.com/2026/05/agile-rates-after-launch/",
             copyright="© 2026 Nick Richards",
             license_type=Gtk.License.GPL_3_0
