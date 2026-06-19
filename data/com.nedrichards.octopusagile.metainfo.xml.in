@@ -60,6 +60,16 @@
   </screenshots>
 
   <releases>
+    <release version="1.0.15" date="2026-06-19">
+      <description>
+        <p>This release improves tariff compatibility and Flatpak launching.</p>
+        <ul>
+          <li>Handle dual-register day/night electricity tariffs by fetching day and night rates</li>
+          <li>Display dual-register tariffs as a clear two-price half-hour chart</li>
+          <li>Fix the installed D-Bus service launcher path</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.14" date="2026-06-19">
       <description>
         <p>This release makes usage history and appliance planning clearer.</p>
