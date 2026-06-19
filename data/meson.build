@@ -48,6 +48,7 @@ test('Validate schema file',
 
 service_conf = configuration_data()
 service_conf.set('bindir', get_option('prefix') / get_option('bindir'))
+service_conf.set('APP_EXEC', application_id)
 configure_file(
   input: 'com.nedrichards.octopusagile.service.in',
   output: 'com.nedrichards.octopusagile.service',
