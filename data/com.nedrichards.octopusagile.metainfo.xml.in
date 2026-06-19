@@ -60,6 +60,16 @@
   </screenshots>
 
   <releases>
+    <release version="1.0.14" date="2026-06-19">
+      <description>
+        <p>This release makes usage history and appliance planning clearer.</p>
+        <ul>
+          <li>Add setup-style empty states and a loading state for account-backed usage history</li>
+          <li>Add subtle GNOME-style transitions for usage states, chart updates, and cheapest-time results</li>
+          <li>Remember Find Cheapest Time settings and support half-hour appliance durations</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.13" date="2026-05-16">
       <description>
         <p>This release improves cheapest-time planning for appliances with whole-hour timers.</p>

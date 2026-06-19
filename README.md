@@ -5,8 +5,9 @@ This is a modern GNOME application built to track and visualise UK smart electri
 * **Current Price Display:** Shows the real-time electricity price (pence/kWh).
 * **Price Level Indicators:** Visually indicates whether the current price is low, medium, high, or even negative.
 * **Adaptive Price Forecast Chart:** Displays a bar chart of upcoming half-hourly price data, adapting the visible horizon to the available space while keeping small-screen layouts usable.
-* **Find Cheapest Time:** A built-in calculator to find the cheapest time window for a specific duration (e.g., "find the cheapest 3 hours in the next 24 hours").
+* **Find Cheapest Time:** A built-in calculator to find the cheapest time window for a specific duration, including half-hour appliance runs such as "3h 30m in the next 24 hours".
 * **Region and Tariff Selection:** Allows users to select their region and tariff through a preferences window. Supports Agile, Go, and Intelligent Go tariffs. Intelligent Go needs a user-provided API key.
+* **Usage History:** Shows recent smart meter usage and estimated spend when an API key and account number are configured, with clear setup and loading states when account access is not available yet.
 * **Adaptive GTK Interface:** The main window and preferences window now adapt more cleanly across narrow and wide GTK layouts.
 
 ![The application interface, showing the current price and a graph of future prices](data/octopus-agile-screenshot.png "Application screenshot")
@@ -105,7 +106,9 @@ flatpak run com.nedrichards.octopusagile
 
 ## Usage
 
-Upon first launch, the application opens the Preferences window so you can choose the correct tariff and region before fetching prices.
+Upon first launch, the application opens setup so you can choose the correct tariff and region before fetching prices. You can use manual setup for current and upcoming prices, then add an Octopus API key and account number later to enable usage history and spend estimates.
+
+The Find Cheapest Time section remembers the last duration and search window you used. Durations can be adjusted in 30-minute steps for appliances that do not run in whole hours.
 
 ### Configuration
 
