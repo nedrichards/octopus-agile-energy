@@ -31,7 +31,6 @@ def fetch_recent_usage_samples(account_data):
                 continue
 
             mpan = meter_point.get("mpan")
-            _log_meter_point_probe(meter_point)
             best_samples = []
             for meter in meter_point.get("meters", []):
                 serial_number = meter.get("serial_number")
@@ -56,7 +55,6 @@ def fetch_recent_usage_samples(account_data):
                     logger.debug("Usage fetch failed for meter %s/%s: %s", mpan, serial_number, e)
                     continue
 
-                _log_usage_sample_probe(mpan, serial_number, samples)
                 if samples and len(samples) > len(best_samples):
                     best_samples = samples
 
@@ -124,11 +122,6 @@ def fetch_historical_unit_rates(product_code, tariff_code, period_start, period_
         if "day and night rates" not in str(exc).lower():
             raise
 
-    logger.warning(
-        "Historical usage costs for %s are using provisional dual-register expansion "
-        "with night window 00:30-07:30 UTC.",
-        tariff_code,
-    )
     day_rates = fetch_historical_tariff_records(
         product_code,
         tariff_code,
@@ -181,96 +174,6 @@ def fetch_all_tariff_pages(initial_url):
 
 def _format_octopus_datetime(value):
     return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def _log_meter_point_probe(meter_point):
-    mpan = meter_point.get("mpan")
-    meters = meter_point.get("meters", [])
-    agreements = meter_point.get("agreements", [])
-    active_tariff_codes = [agreement.get("tariff_code", "") for agreement in agreements]
-    register_fields = {
-        key: value
-        for key, value in meter_point.items()
-        if "register" in key.lower() or "profile" in key.lower() or "meter" in key.lower()
-    }
-    dual_register_tariffs = [
-        tariff_code
-        for tariff_code in active_tariff_codes
-        if isinstance(tariff_code, str) and "-2R-" in tariff_code.upper()
-    ]
-    logger.warning(
-        "Octopus account probe: active electricity meter point mpan=%s meters=%d agreements=%d keys=%s",
-        mpan,
-        len(meters),
-        len(agreements),
-        sorted(meter_point.keys()),
-    )
-    if dual_register_tariffs:
-        logger.warning(
-            "Octopus account probe: dual-register tariff agreement(s) detected for mpan=%s: %s",
-            mpan,
-            dual_register_tariffs,
-        )
-    if register_fields:
-        logger.warning("Octopus account probe: meter/register fields for mpan=%s: %s", mpan, register_fields)
-    else:
-        logger.warning(
-            "Octopus account probe: no obvious register/profile fields found directly on meter point mpan=%s.",
-            mpan,
-        )
-    for agreement in agreements:
-        logger.warning(
-            "Octopus account probe: agreement tariff_code=%s valid_from=%s valid_to=%s",
-            agreement.get("tariff_code"),
-            agreement.get("valid_from"),
-            agreement.get("valid_to"),
-        )
-    for meter in meters:
-        logger.warning(
-            "Octopus account probe: meter serial=%s keys=%s details=%s",
-            meter.get("serial_number"),
-            sorted(meter.keys()),
-            {
-                key: value
-                for key, value in meter.items()
-                if "register" in key.lower() or "profile" in key.lower() or "meter" in key.lower()
-            },
-        )
-        registers = meter.get("registers")
-        if registers is not None:
-            logger.warning(
-                "Octopus account probe: meter serial=%s registers=%s",
-                meter.get("serial_number"),
-                registers,
-            )
-        else:
-            logger.warning(
-                "Octopus account probe: meter serial=%s has no registers field in account payload.",
-                meter.get("serial_number"),
-            )
-
-
-def _log_usage_sample_probe(mpan, serial_number, samples):
-    logger.warning(
-        "Octopus usage probe: meter %s/%s returned %d consumption sample(s).",
-        mpan,
-        serial_number,
-        len(samples),
-    )
-    for sample in samples[:6]:
-        register_fields = {
-            key: value
-            for key, value in sample.items()
-            if "register" in key.lower() or "rate" in key.lower() or "cost" in key.lower()
-        }
-        logger.warning(
-            "Octopus usage probe: sample interval_start=%s interval_end=%s consumption=%s keys=%s register/rate/cost fields=%s",
-            sample.get("interval_start"),
-            sample.get("interval_end"),
-            sample.get("consumption"),
-            sorted(sample.keys()),
-            register_fields,
-        )
 
 
 def _has_active_agreement(meter_point, now):

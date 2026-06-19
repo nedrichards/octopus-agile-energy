@@ -197,9 +197,9 @@ class PriceLogicTests(unittest.TestCase):
         self.assertEqual(prices[15]['valid_from'], '2026-05-13T07:30:00Z')
         self.assertEqual(prices[15]['value_inc_vat'], 30.0)
 
-    def test_build_dual_register_price_windows_uses_rate_valid_at_slot(self):
+    def test_build_dual_register_price_windows_uses_one_price_per_register(self):
         period_start = datetime(2026, 4, 1, 0, 0, tzinfo=timezone.utc)
-        period_end = datetime(2026, 4, 1, 1, 0, tzinfo=timezone.utc)
+        period_end = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
         day_rates = [{
             'valid_from': '2026-01-01T00:00:00Z',
             'valid_to': None,
@@ -220,7 +220,8 @@ class PriceLogicTests(unittest.TestCase):
 
         prices = build_dual_register_price_windows(day_rates, night_rates, period_start, period_end)
 
-        self.assertEqual([price['value_inc_vat'] for price in prices], [30.0, 9.0])
+        self.assertEqual([price['value_inc_vat'] for price in prices], [30.0, 12.0, 12.0, 12.0])
+        self.assertEqual(sorted({price['value_inc_vat'] for price in prices}), [12.0, 30.0])
 
     def test_build_region_to_tariffs_map_prefers_direct_debit(self):
         product_data = {

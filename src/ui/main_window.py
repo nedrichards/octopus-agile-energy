@@ -1080,16 +1080,8 @@ class MainWindow(Adw.ApplicationWindow):
         return sorted(filtered_rates_dict.values(), key=lambda x: x['valid_from'])
 
     def _fetch_dual_register_rates(self, product_code, tariff_code, now, auth):
-        logger.warning(
-            "Dual-register tariff detected for %s. Using provisional night window 00:30-07:30 UTC "
-            "while probing Octopus day/night endpoints for timestamp-specific behaviour.",
-            tariff_code,
-        )
         day_rates = self._fetch_tariff_endpoint(product_code, tariff_code, "day-unit-rates", auth)
         night_rates = self._fetch_tariff_endpoint(product_code, tariff_code, "night-unit-rates", auth)
-        self._log_dual_register_rate_summary("day-unit-rates", day_rates)
-        self._log_dual_register_rate_summary("night-unit-rates", night_rates)
-        self._probe_dual_register_specific_times(product_code, tariff_code, now, auth)
         return build_dual_register_price_windows(
             day_rates,
             night_rates,
@@ -1112,78 +1104,6 @@ class MainWindow(Adw.ApplicationWindow):
     @staticmethod
     def _format_octopus_datetime(value):
         return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    @staticmethod
-    def _log_dual_register_rate_summary(endpoint, rates):
-        logger.warning("Octopus %s returned %d record(s).", endpoint, len(rates))
-        for rate in rates[:3]:
-            logger.warning(
-                "Octopus %s record: value_inc_vat=%s valid_from=%s valid_to=%s payment_method=%s",
-                endpoint,
-                rate.get("value_inc_vat"),
-                rate.get("valid_from"),
-                rate.get("valid_to"),
-                rate.get("payment_method"),
-            )
-
-    def _probe_dual_register_specific_times(self, product_code, tariff_code, now, auth):
-        probe_day = now.astimezone(timezone.utc).date()
-        probe_times = [
-            time(0, 0),
-            time(0, 30),
-            time(1, 30),
-            time(7, 0),
-            time(7, 30),
-            time(8, 30),
-        ]
-
-        logger.warning("Probing day/night unit-rate endpoints for specific half-hour windows on %s UTC.", probe_day)
-        for probe_time in probe_times:
-            slot_start = datetime.combine(probe_day, probe_time, tzinfo=timezone.utc)
-            slot_end = slot_start + timedelta(minutes=30)
-            try:
-                day_rates = self._fetch_tariff_endpoint(
-                    product_code,
-                    tariff_code,
-                    "day-unit-rates",
-                    auth,
-                    period_from=slot_start,
-                    period_to=slot_end,
-                )
-                night_rates = self._fetch_tariff_endpoint(
-                    product_code,
-                    tariff_code,
-                    "night-unit-rates",
-                    auth,
-                    period_from=slot_start,
-                    period_to=slot_end,
-                )
-            except requests.exceptions.RequestException as exc:
-                logger.warning(
-                    "Octopus dual-register probe failed for %s-%s UTC: %s",
-                    self._format_octopus_datetime(slot_start),
-                    self._format_octopus_datetime(slot_end),
-                    exc,
-                )
-                continue
-
-            logger.warning(
-                "Octopus dual-register probe %s-%s UTC: day=%s night=%s",
-                self._format_octopus_datetime(slot_start),
-                self._format_octopus_datetime(slot_end),
-                self._summarize_probe_rates(day_rates),
-                self._summarize_probe_rates(night_rates),
-            )
-
-    @staticmethod
-    def _summarize_probe_rates(rates):
-        if not rates:
-            return "no records"
-        rate = rates[0]
-        return (
-            f"{len(rates)} record(s), first value_inc_vat={rate.get('value_inc_vat')}, "
-            f"valid_from={rate.get('valid_from')}, valid_to={rate.get('valid_to')}"
-        )
 
     def _get_price_setup_issue(self):
         tariff_code = self.settings.get_string("selected-tariff-code")

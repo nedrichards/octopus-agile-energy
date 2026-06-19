@@ -126,12 +126,13 @@ def build_dual_register_price_windows(
     """
     current = _floor_to_half_hour(period_start.astimezone(timezone.utc))
     period_end = period_end.astimezone(timezone.utc)
+    day_rate = _representative_register_rate(day_rates, current, period_end)
+    night_rate = _representative_register_rate(night_rates, current, period_end)
     prices = []
 
     while current < period_end:
         next_slot = current + timedelta(minutes=30)
-        source_rates = night_rates if _is_night_slot(current, night_start, night_end) else day_rates
-        rate = _find_active_rate(source_rates, current)
+        rate = night_rate if _is_night_slot(current, night_start, night_end) else day_rate
         if rate:
             prices.append({
                 'valid_from': current.isoformat().replace("+00:00", "Z"),
@@ -155,22 +156,42 @@ def _is_night_slot(value, night_start, night_end):
     return slot_time >= night_start or slot_time < night_end
 
 
-def _find_active_rate(rates, target):
+def _representative_register_rate(rates, period_start, period_end):
+    parsed_rates = []
     for rate in rates:
-        try:
-            valid_from = datetime.fromisoformat(rate['valid_from'].replace('Z', '+00:00'))
-            valid_to = (
-                datetime.fromisoformat(rate['valid_to'].replace('Z', '+00:00'))
-                if rate.get('valid_to')
-                else datetime.max.replace(tzinfo=timezone.utc)
-            )
-        except (KeyError, ValueError, TypeError):
+        parsed = _parse_rate_window(rate)
+        if not parsed:
             continue
 
-        if valid_from <= target < valid_to:
-            return rate
+        valid_from, valid_to = parsed
+        if valid_from < period_end and period_start < valid_to:
+            parsed_rates.append((rate, valid_from, valid_to))
 
-    return None
+    if not parsed_rates:
+        return None
+
+    current_rate = next(
+        (rate for rate, valid_from, valid_to in parsed_rates if valid_from <= period_start < valid_to),
+        None,
+    )
+    if current_rate:
+        return current_rate
+
+    return min(parsed_rates, key=lambda item: item[1])[0]
+
+
+def _parse_rate_window(rate):
+    try:
+        valid_from = datetime.fromisoformat(rate['valid_from'].replace('Z', '+00:00'))
+        valid_to = (
+            datetime.fromisoformat(rate['valid_to'].replace('Z', '+00:00'))
+            if rate.get('valid_to')
+            else datetime.max.replace(tzinfo=timezone.utc)
+        )
+    except (KeyError, ValueError, TypeError):
+        return None
+
+    return valid_from, valid_to
 
 
 def build_region_to_tariffs_map(product_data, region_code_to_name):
