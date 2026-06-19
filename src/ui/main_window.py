@@ -37,6 +37,8 @@ from .setup_window import SetupWindow
 
 logger = logging.getLogger(__name__)
 USAGE_BACKGROUND_REFRESH_INTERVAL_SECONDS = 6 * 60 * 60
+SUBTLE_ANIMATION_DURATION_MS = 180
+SUBTLE_ANIMATION_FRAME_MS = 16
 
 class MainWindow(Adw.ApplicationWindow):
     """
@@ -80,6 +82,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.usage_refresh_in_progress = False
         self.usage_refresh_attempted = False
         self.usage_graph_mode = "kwh"
+        self._fade_animation_sources = {}
+        self._price_chart_signature = None
+        self._usage_chart_signature = None
 
         self.connect("notify::visible", self.on_visibility_change)
         self.connect("notify::width", self.on_window_width_changed)
@@ -91,6 +96,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.create_actions()
         self.setup_ui()
+        self._update_usage_insights()
         if self._needs_setup():
             GLib.idle_add(self.on_first_run)
         else:
@@ -417,6 +423,14 @@ class MainWindow(Adw.ApplicationWindow):
         usage_scroll.set_vexpand(True)
         usage_scroll.set_child(usage_page_box)
 
+        self.usage_state_stack = Gtk.Stack.new()
+        self.usage_state_stack.set_vexpand(True)
+        self.usage_state_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        self.usage_state_stack.set_transition_duration(200)
+        self.usage_state_stack.add_named(self._build_usage_empty_page(), "empty")
+        self.usage_state_stack.add_named(self._build_usage_loading_page(), "loading")
+        self.usage_state_stack.add_named(usage_scroll, "content")
+
         usage_chart_box = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         usage_chart_box.add_css_class("chart-background")
         self.usage_chart_box = usage_chart_box
@@ -539,7 +553,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.main_view_stack = Adw.ViewStack.new()
         self.main_view_stack.add_titled_with_icon(scrolled_content, "prices", "Prices", "view-list-symbolic")
-        self.main_view_stack.add_titled_with_icon(usage_scroll, "usage", "Usage", "preferences-system-symbolic")
+        self.main_view_stack.add_titled_with_icon(self.usage_state_stack, "usage", "Usage", "preferences-system-symbolic")
         self.main_view_stack.connect("notify::visible-child-name", self.on_visible_tab_changed)
 
         view_switcher = Adw.ViewSwitcher.new()
@@ -555,6 +569,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.price_card_stack = Gtk.Stack.new()
         self.price_card_stack.set_hhomogeneous(False)
         self.price_card_stack.set_vhomogeneous(False)
+        self.price_card_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        self.price_card_stack.set_transition_duration(200)
 
         self.price_card = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.price_card.set_halign(Gtk.Align.CENTER)
@@ -693,6 +709,112 @@ class MainWindow(Adw.ApplicationWindow):
         self.set_content(self.toast_overlay) # Set the toast overlay as the main window content.
         GLib.idle_add(self._refresh_adaptive_layout)
 
+    def _animations_enabled(self):
+        settings = Gtk.Settings.get_default()
+        return not settings or settings.get_property("gtk-enable-animations")
+
+    def _fade_widget_in(self, widget, start_opacity=0.82, duration_ms=SUBTLE_ANIMATION_DURATION_MS):
+        if not self._animations_enabled():
+            widget.set_opacity(1.0)
+            return
+
+        widget_id = id(widget)
+        source_id = self._fade_animation_sources.pop(widget_id, None)
+        if source_id:
+            GLib.source_remove(source_id)
+
+        widget.set_opacity(start_opacity)
+        start_time = time.monotonic()
+        duration_seconds = duration_ms / 1000.0
+
+        def tick():
+            elapsed = time.monotonic() - start_time
+            progress = min(1.0, elapsed / duration_seconds)
+            eased_progress = 1 - ((1 - progress) * (1 - progress))
+            opacity = start_opacity + ((1.0 - start_opacity) * eased_progress)
+            widget.set_opacity(opacity)
+
+            if progress >= 1.0:
+                widget.set_opacity(1.0)
+                self._fade_animation_sources.pop(widget_id, None)
+                return False
+
+            return True
+
+        self._fade_animation_sources[widget_id] = GLib.timeout_add(SUBTLE_ANIMATION_FRAME_MS, tick)
+
+    def _build_usage_empty_page(self):
+        clamp = Adw.Clamp.new()
+        box = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=18)
+        box.set_margin_top(24)
+        box.set_margin_bottom(24)
+        box.set_margin_start(24)
+        box.set_margin_end(24)
+        clamp.set_child(box)
+
+        artwork = Gtk.Picture.new_for_resource("/com/nedrichards/octopusagile/assets/setup-tour-illustration.png")
+        artwork.set_hexpand(True)
+        artwork.set_size_request(-1, 190)
+        artwork.set_content_fit(Gtk.ContentFit.CONTAIN)
+        box.append(artwork)
+
+        self.usage_empty_title = Gtk.Label.new("Usage history needs account access")
+        self.usage_empty_title.add_css_class("title-1")
+        self.usage_empty_title.set_wrap(True)
+        self.usage_empty_title.set_xalign(0)
+        box.append(self.usage_empty_title)
+
+        self.usage_empty_description = Gtk.Label.new(
+            "Add your Octopus API key and account number in Preferences to show usage history and spend. "
+            "Manual tariff setup still works for prices."
+        )
+        self.usage_empty_description.add_css_class("body")
+        self.usage_empty_description.add_css_class("dim-label")
+        self.usage_empty_description.set_wrap(True)
+        self.usage_empty_description.set_xalign(0)
+        box.append(self.usage_empty_description)
+
+        usage_empty_button = Gtk.Button.new_with_label("Open Preferences")
+        usage_empty_button.add_css_class("suggested-action")
+        usage_empty_button.set_halign(Gtk.Align.START)
+        usage_empty_button.set_action_name("app.preferences")
+        box.append(usage_empty_button)
+
+        return clamp
+
+    def _build_usage_loading_page(self):
+        clamp = Adw.Clamp.new()
+        box = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        box.set_valign(Gtk.Align.CENTER)
+        box.set_margin_top(24)
+        box.set_margin_bottom(24)
+        box.set_margin_start(24)
+        box.set_margin_end(24)
+        clamp.set_child(box)
+
+        self.usage_loading_spinner = Gtk.Spinner.new()
+        self.usage_loading_spinner.set_size_request(48, 48)
+        self.usage_loading_spinner.set_halign(Gtk.Align.CENTER)
+        box.append(self.usage_loading_spinner)
+
+        self.usage_loading_title = Gtk.Label.new("Loading usage history")
+        self.usage_loading_title.add_css_class("title-2")
+        self.usage_loading_title.set_justify(Gtk.Justification.CENTER)
+        self.usage_loading_title.set_wrap(True)
+        box.append(self.usage_loading_title)
+
+        self.usage_loading_description = Gtk.Label.new(
+            "Fetching recent smart meter readings and matching them to your tariff. "
+            "This can take a moment after the app has been closed for a while."
+        )
+        self.usage_loading_description.add_css_class("body")
+        self.usage_loading_description.add_css_class("dim-label")
+        self.usage_loading_description.set_justify(Gtk.Justification.CENTER)
+        self.usage_loading_description.set_wrap(True)
+        box.append(self.usage_loading_description)
+
+        return clamp
+
     def on_window_width_changed(self, widget, _pspec):
         self._refresh_adaptive_layout()
 
@@ -812,14 +934,18 @@ class MainWindow(Adw.ApplicationWindow):
         practical_slot = whole_hour_cheapest_slot or cheapest_slot
 
         if not cheapest_slot:
+            was_visible = self.best_slot_summary_row.get_visible()
             self.best_slot_start_time = None
             self.best_slot_end_time = None
             self.best_slot_message_label.set_text("Not enough data to find the cheapest time.")
             self.best_slot_message_label.set_visible(True)
             self.best_slot_summary_grid.set_visible(False)
             self.best_slot_summary_row.set_visible(True)
+            if not was_visible:
+                self._fade_widget_in(self.best_slot_summary_row, start_opacity=0.88)
             return
 
+        was_visible = self.best_slot_summary_row.get_visible()
         best_slot_start_time = cheapest_slot['start']
         best_slot_end_time = cheapest_slot['end']
         practical_slot_start_time = practical_slot['start']
@@ -847,6 +973,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.best_slot_message_label.set_visible(False)
         self.best_slot_summary_grid.set_visible(True)
         self.best_slot_summary_row.set_visible(True)
+        if not was_visible:
+            self._fade_widget_in(self.best_slot_summary_row, start_opacity=0.88)
 
         self.best_slot_start_time = best_slot_start_time.astimezone()
         self.best_slot_end_time = best_slot_end_time.astimezone()
@@ -1183,6 +1311,13 @@ class MainWindow(Adw.ApplicationWindow):
             len(chart_prices),
         )
         self.price_chart.set_prices(chart_prices, current_index)
+        chart_signature = tuple(
+            (price["valid_from"], price["price_gbp"])
+            for price in chart_prices
+        )
+        if chart_signature != self._price_chart_signature:
+            self._fade_widget_in(self.chart_scroller)
+            self._price_chart_signature = chart_signature
         self.status_label.set_text("")
         self._update_usage_insights()
         self.header_refresh_button.set_sensitive(True)
@@ -1208,13 +1343,13 @@ class MainWindow(Adw.ApplicationWindow):
             compact_description if compact_description is not None else description
         )
         self.price_summary_css_class = css_class
-        self._render_price_summary()
+        self._render_price_summary(animate=True)
 
     def _set_price_summary_mode(self, mode):
         self.price_summary_mode = mode
         self._render_price_summary()
 
-    def _render_price_summary(self):
+    def _render_price_summary(self, animate=False):
         self.price_card_title.set_text(self.price_summary_title)
         self.price_card_description.set_text(self.price_summary_description)
         self.price_card_description.set_visible(bool(self.price_summary_description))
@@ -1229,19 +1364,46 @@ class MainWindow(Adw.ApplicationWindow):
         self._apply_price_summary_classes()
         self.price_card_stack.set_visible_child_name(self.price_summary_mode)
         self._queue_price_summary_refresh()
+        if animate:
+            self._fade_widget_in(self.price_card_stack)
 
     def _update_usage_insights(self):
         account_number = self.settings.get_string("octopus-account-number").strip()
+        api_key = get_api_key()
+        if not api_key:
+            self._set_usage_empty_state(
+                "Usage history needs an API key",
+                "Add your Octopus API key and account number in Preferences to show usage history and spend. "
+                "Manual tariff setup still works for prices.",
+            )
+            self._set_usage_metric_placeholders()
+            self._set_usage_updated_label(None)
+            return
+
         if not account_number:
+            self._set_usage_empty_state(
+                "Usage history needs your account number",
+                "Add your Octopus account number in Preferences to show usage history and spend. "
+                "Manual tariff setup still works for prices.",
+            )
             self.usage_insights_row.set_subtitle("Add your account number in Preferences to enable these insights.")
             self._set_usage_metric_placeholders()
             self._set_usage_updated_label(None)
             return
 
+        self._set_usage_content_state()
         cache_key = f"octopus_usage_{account_number}"
         cached_data, _cache_mtime = self.cache_manager.get(cache_key)
         if not cached_data or "samples" not in cached_data:
-            self.usage_insights_row.set_subtitle("No cached usage history found. Usage will refresh in the background when an API key is available.")
+            if self.usage_refresh_in_progress or not self.usage_refresh_attempted:
+                self._set_usage_loading_state()
+            else:
+                self._set_usage_empty_state(
+                    "Usage history could not load",
+                    "The app could not load recent usage history. Check your API key and account number in Preferences, "
+                    "then refresh usage history again.",
+                )
+            self.usage_insights_row.set_subtitle("No cached usage history found.")
             self._set_usage_metric_placeholders()
             self._set_usage_updated_label(None)
             return
@@ -1270,6 +1432,28 @@ class MainWindow(Adw.ApplicationWindow):
         self.usage_chart_unit = chart_unit
         self._set_usage_chart_layout(self.get_width() or self.settings.get_int("window-width"))
         self.usage_chart_area.queue_draw()
+        chart_signature = (
+            self.usage_graph_mode,
+            tuple(chart_dates),
+            tuple(chart_points),
+        )
+        if chart_signature != self._usage_chart_signature:
+            self._fade_widget_in(self.usage_chart_scroller)
+            self._usage_chart_signature = chart_signature
+
+    def _set_usage_empty_state(self, title, description):
+        self.usage_loading_spinner.stop()
+        self.usage_empty_title.set_text(title)
+        self.usage_empty_description.set_text(description)
+        self.usage_state_stack.set_visible_child_name("empty")
+
+    def _set_usage_content_state(self):
+        self.usage_loading_spinner.stop()
+        self.usage_state_stack.set_visible_child_name("content")
+
+    def _set_usage_loading_state(self):
+        self.usage_loading_spinner.start()
+        self.usage_state_stack.set_visible_child_name("loading")
 
     def _set_usage_updated_label(self, synced_at):
         self._set_last_updated_label(self.usage_updated_label, synced_at)
@@ -1306,6 +1490,10 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.usage_refresh_in_progress = True
         self.usage_refresh_attempted = True
+        cache_key = f"octopus_usage_{account_number}"
+        cached_data, _cache_mtime = self.cache_manager.get(cache_key)
+        if not cached_data or "samples" not in cached_data:
+            self._set_usage_loading_state()
         thread = threading.Thread(target=self._refresh_usage_history_background, args=(account_number,))
         thread.daemon = True
         thread.start()
@@ -1377,6 +1565,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.usage_chart_dates = []
         self.usage_chart_daily_data = []
         self.usage_chart_unit = "kWh"
+        self._usage_chart_signature = None
         self._set_usage_updated_label(None)
         self._set_usage_cost_graph_controls_enabled(False)
         self._set_usage_chart_layout(self.get_width() or self.settings.get_int("window-width"))
