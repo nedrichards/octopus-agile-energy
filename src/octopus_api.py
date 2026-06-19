@@ -45,6 +45,20 @@ def get_json(url: str, *, use_api_key: bool = False, timeout: int = DEFAULT_TIME
         response.raise_for_status()
     except requests.exceptions.HTTPError as exc:
         logger.error("Octopus API HTTP error for URL %s: status=%s", url, response.status_code)
-        raise OctopusApiError(f"API request failed with status {response.status_code}.") from exc
+        detail = _extract_error_detail(response)
+        message = f"API request failed with status {response.status_code}."
+        if detail:
+            message = f"{message} {detail}"
+        raise OctopusApiError(message) from exc
 
     return response.json()
+
+
+def _extract_error_detail(response):
+    try:
+        payload = response.json()
+    except ValueError:
+        return ""
+
+    detail = payload.get("detail")
+    return detail if isinstance(detail, str) else ""

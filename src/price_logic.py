@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, time, timedelta, timezone
 
 
 def extract_product_code(selected_tariff_code):
@@ -108,6 +108,90 @@ def _calculate_weighted_average_price(prices, start, end):
             return total_price_seconds / duration_seconds
 
     return None
+
+
+def build_dual_register_price_windows(
+    day_rates,
+    night_rates,
+    period_start,
+    period_end,
+    # Octopus documents smart-meter Economy 7 off-peak as 00:30-07:30 UTC.
+    # https://octopus.energy/help-and-faqs/articles/what-is-an-economy-7-meter-and-tariff/
+    night_start=time(0, 30),
+    night_end=time(7, 30),
+):
+    """
+    Expands day/night unit-rate records into the half-hour windows used by the chart.
+    The Economy 7 switching times are treated as UTC clock times.
+    """
+    current = _floor_to_half_hour(period_start.astimezone(timezone.utc))
+    period_end = period_end.astimezone(timezone.utc)
+    day_rate = _representative_register_rate(day_rates, current, period_end)
+    night_rate = _representative_register_rate(night_rates, current, period_end)
+    prices = []
+
+    while current < period_end:
+        next_slot = current + timedelta(minutes=30)
+        rate = night_rate if _is_night_slot(current, night_start, night_end) else day_rate
+        if rate:
+            prices.append({
+                'valid_from': current.isoformat().replace("+00:00", "Z"),
+                'valid_to': next_slot.isoformat().replace("+00:00", "Z"),
+                'value_inc_vat': rate['value_inc_vat'],
+            })
+        current = next_slot
+
+    return prices
+
+
+def _floor_to_half_hour(value):
+    minute = 0 if value.minute < 30 else 30
+    return value.replace(minute=minute, second=0, microsecond=0)
+
+
+def _is_night_slot(value, night_start, night_end):
+    slot_time = value.time().replace(tzinfo=None)
+    if night_start <= night_end:
+        return night_start <= slot_time < night_end
+    return slot_time >= night_start or slot_time < night_end
+
+
+def _representative_register_rate(rates, period_start, period_end):
+    parsed_rates = []
+    for rate in rates:
+        parsed = _parse_rate_window(rate)
+        if not parsed:
+            continue
+
+        valid_from, valid_to = parsed
+        if valid_from < period_end and period_start < valid_to:
+            parsed_rates.append((rate, valid_from, valid_to))
+
+    if not parsed_rates:
+        return None
+
+    current_rate = next(
+        (rate for rate, valid_from, valid_to in parsed_rates if valid_from <= period_start < valid_to),
+        None,
+    )
+    if current_rate:
+        return current_rate
+
+    return min(parsed_rates, key=lambda item: item[1])[0]
+
+
+def _parse_rate_window(rate):
+    try:
+        valid_from = datetime.fromisoformat(rate['valid_from'].replace('Z', '+00:00'))
+        valid_to = (
+            datetime.fromisoformat(rate['valid_to'].replace('Z', '+00:00'))
+            if rate.get('valid_to')
+            else datetime.max.replace(tzinfo=timezone.utc)
+        )
+    except (KeyError, ValueError, TypeError):
+        return None
+
+    return valid_from, valid_to
 
 
 def build_region_to_tariffs_map(product_data, region_code_to_name):

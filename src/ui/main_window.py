@@ -13,7 +13,7 @@ import requests
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
 from ..octopus_api import OctopusApiError
-from ..price_logic import extract_product_code
+from ..price_logic import build_dual_register_price_windows, extract_product_code
 from ..price_logic import find_cheapest_slot as calculate_cheapest_slot
 from ..secrets_manager import get_api_key
 from ..usage_history import build_historical_usage_costs, fetch_recent_usage_samples, get_account_data
@@ -1161,37 +1161,15 @@ class MainWindow(Adw.ApplicationWindow):
                     auth = HTTPBasicAuth(api_key, '')
 
                 response = requests.get(rates_url, params={'page_size': 1500}, timeout=10, auth=auth)
-                if response.status_code == 401:
-                    GLib.idle_add(
-                        self._show_error_if_current,
-                        "The API key was rejected. Check the key in setup or Preferences.",
-                        request_id,
-                    )
+                if self._handle_tariff_fetch_error(response, request_id):
                     return
-                if response.status_code == 403:
-                    GLib.idle_add(
-                        self._show_error_if_current,
-                        "This tariff requires account access. Check your API key or choose another tariff.",
-                        request_id,
-                    )
-                    return
-                if response.status_code == 404:
-                    GLib.idle_add(
-                        self._show_error_if_current,
-                        "The selected tariff code was not found. Choose your tariff again in setup.",
-                        request_id,
-                    )
-                    return
-                response.raise_for_status()
-                data = response.json()
 
-                filtered_rates_dict = {
-                    rate['valid_from']: rate
-                    for rate in data.get('results', [])
-                    if (datetime.fromisoformat(rate['valid_to'].replace('Z', '+00:00')) -
-                        datetime.fromisoformat(rate['valid_from'].replace('Z', '+00:00'))) == timedelta(minutes=30)
-                }
-                raw_rates = sorted(filtered_rates_dict.values(), key=lambda x: x['valid_from'])
+                if self._is_dual_register_response(response):
+                    raw_rates = self._fetch_dual_register_rates(product_code, selected_tariff_code, now, auth)
+                else:
+                    response.raise_for_status()
+                    data = response.json()
+                    raw_rates = self._filter_half_hour_rates(data.get('results', []))
                 self.cache_manager.set(rates_cache_key, raw_rates)
 
             if not self._is_current_fetch(request_id):
@@ -1208,6 +1186,91 @@ class MainWindow(Adw.ApplicationWindow):
             import traceback
             traceback.print_exc()
             GLib.idle_add(self._show_error_if_current, f"An unexpected error occurred: {e}", request_id)
+
+    def _handle_tariff_fetch_error(self, response, request_id):
+        if response.status_code == 400 and self._is_dual_register_response(response):
+            return False
+        if response.status_code == 400:
+            detail = self._get_response_detail(response)
+            GLib.idle_add(
+                self._show_error_if_current,
+                detail or "The tariff API rejected the price data request.",
+                request_id,
+            )
+            return True
+        if response.status_code == 401:
+            GLib.idle_add(
+                self._show_error_if_current,
+                "The API key was rejected. Check the key in setup or Preferences.",
+                request_id,
+            )
+            return True
+        if response.status_code == 403:
+            GLib.idle_add(
+                self._show_error_if_current,
+                "This tariff requires account access. Check your API key or choose another tariff.",
+                request_id,
+            )
+            return True
+        if response.status_code == 404:
+            GLib.idle_add(
+                self._show_error_if_current,
+                "The selected tariff code was not found. Choose your tariff again in setup.",
+                request_id,
+            )
+            return True
+        return False
+
+    @staticmethod
+    def _is_dual_register_response(response):
+        if response.status_code != 400:
+            return False
+        detail = MainWindow._get_response_detail(response)
+        return "day and night rates" in detail.lower()
+
+    @staticmethod
+    def _get_response_detail(response):
+        try:
+            detail = response.json().get("detail", "")
+        except ValueError:
+            return ""
+        return detail if isinstance(detail, str) else ""
+
+    @staticmethod
+    def _filter_half_hour_rates(rates):
+        filtered_rates_dict = {
+            rate['valid_from']: rate
+            for rate in rates
+            if (datetime.fromisoformat(rate['valid_to'].replace('Z', '+00:00')) -
+                datetime.fromisoformat(rate['valid_from'].replace('Z', '+00:00'))) == timedelta(minutes=30)
+        }
+        return sorted(filtered_rates_dict.values(), key=lambda x: x['valid_from'])
+
+    def _fetch_dual_register_rates(self, product_code, tariff_code, now, auth):
+        day_rates = self._fetch_tariff_endpoint(product_code, tariff_code, "day-unit-rates", auth)
+        night_rates = self._fetch_tariff_endpoint(product_code, tariff_code, "night-unit-rates", auth)
+        return build_dual_register_price_windows(
+            day_rates,
+            night_rates,
+            now - timedelta(days=1),
+            now + timedelta(days=4),
+        )
+
+    @staticmethod
+    def _fetch_tariff_endpoint(product_code, tariff_code, endpoint, auth, period_from=None, period_to=None):
+        url = f"https://api.octopus.energy/v1/products/{product_code}/electricity-tariffs/{tariff_code}/{endpoint}/"
+        params = {'page_size': 1500}
+        if period_from:
+            params['period_from'] = MainWindow._format_octopus_datetime(period_from)
+        if period_to:
+            params['period_to'] = MainWindow._format_octopus_datetime(period_to)
+        response = requests.get(url, params=params, timeout=10, auth=auth)
+        response.raise_for_status()
+        return response.json().get('results', [])
+
+    @staticmethod
+    def _format_octopus_datetime(value):
+        return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def _get_price_setup_issue(self):
         tariff_code = self.settings.get_string("selected-tariff-code")

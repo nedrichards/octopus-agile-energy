@@ -4,7 +4,7 @@ from urllib.parse import urlencode
 
 from .historical_costs import build_daily_costs, build_tariff_periods, get_usage_period
 from .octopus_api import OctopusApiError, get_json
-from .price_logic import extract_product_code
+from .price_logic import build_dual_register_price_windows, extract_product_code
 
 logger = logging.getLogger(__name__)
 
@@ -92,10 +92,9 @@ def build_historical_usage_costs(account_data, usage_samples):
     standing_charges_by_tariff = {}
     for tariff_code in {period["tariff_code"] for period in tariff_periods}:
         product_code = extract_product_code(tariff_code)
-        rates_by_tariff[tariff_code] = fetch_historical_tariff_records(
+        rates_by_tariff[tariff_code] = fetch_historical_unit_rates(
             product_code,
             tariff_code,
-            "standard-unit-rates",
             period_start,
             period_end,
         )
@@ -108,6 +107,36 @@ def build_historical_usage_costs(account_data, usage_samples):
         )
 
     return build_daily_costs(usage_samples, tariff_periods, rates_by_tariff, standing_charges_by_tariff)
+
+
+def fetch_historical_unit_rates(product_code, tariff_code, period_start, period_end):
+    try:
+        return fetch_historical_tariff_records(
+            product_code,
+            tariff_code,
+            "standard-unit-rates",
+            period_start,
+            period_end,
+        )
+    except OctopusApiError as exc:
+        if "day and night rates" not in str(exc).lower():
+            raise
+
+    day_rates = fetch_historical_tariff_records(
+        product_code,
+        tariff_code,
+        "day-unit-rates",
+        period_start,
+        period_end,
+    )
+    night_rates = fetch_historical_tariff_records(
+        product_code,
+        tariff_code,
+        "night-unit-rates",
+        period_start,
+        period_end,
+    )
+    return build_dual_register_price_windows(day_rates, night_rates, period_start, period_end)
 
 
 def fetch_historical_tariff_records(product_code, tariff_code, endpoint, period_start, period_end):
