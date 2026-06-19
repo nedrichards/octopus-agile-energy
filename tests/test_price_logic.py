@@ -59,6 +59,25 @@ class PriceLogicTests(unittest.TestCase):
         self.assertEqual(whole_hour_slot['start'], now + timedelta(hours=2))
         self.assertAlmostEqual(whole_hour_slot['average_price_gbp'], 0.05)
 
+    def test_find_cheapest_slot_supports_half_hour_durations(self):
+        now = datetime(2026, 3, 21, 12, 0, tzinfo=timezone.utc)
+        prices = []
+        values = [0.40, 0.30, 0.20, 0.04, 0.03, 0.02, 0.50, 0.60]
+        for i, value in enumerate(values):
+            start = now + timedelta(minutes=30 * i)
+            prices.append({
+                'valid_from': start,
+                'valid_to': start + timedelta(minutes=30),
+                'price_gbp': value,
+            })
+
+        slot = find_cheapest_slot(prices, now, duration_hours=1.5, start_within_hours=4)
+
+        self.assertIsNotNone(slot)
+        self.assertEqual(slot['start'], now + timedelta(hours=1, minutes=30))
+        self.assertEqual(slot['end'], now + timedelta(hours=3))
+        self.assertAlmostEqual(slot['average_price_gbp'], 0.03)
+
     def test_find_cheapest_slot_can_use_exact_current_time(self):
         slot_start = datetime(2026, 3, 21, 12, 0, tzinfo=timezone.utc)
         now = datetime(2026, 3, 21, 12, 17, tzinfo=timezone.utc)

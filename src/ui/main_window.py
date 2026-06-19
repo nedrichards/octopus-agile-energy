@@ -215,6 +215,18 @@ class MainWindow(Adw.ApplicationWindow):
         self.expander_row.set_expanded(True)
         self.duration_spin_button.grab_focus()
 
+    def _clamp_float_setting(self, key, minimum, maximum, default):
+        value = self.settings.get_double(key)
+        if value < minimum or value > maximum:
+            return default
+        return value
+
+    def _clamp_int_setting(self, key, minimum, maximum, default):
+        value = self.settings.get_int(key)
+        if value < minimum or value > maximum:
+            return default
+        return value
+
     def _add_best_slot_summary_item(self, title, row):
         title_label = Gtk.Label.new(title)
         title_label.set_xalign(0)
@@ -641,8 +653,10 @@ class MainWindow(Adw.ApplicationWindow):
         # --- Duration input ---
         self.duration_row = Adw.ActionRow.new()
         self.duration_row.set_title("For how long?")
-        self.duration_spin_button = CustomSpinButton(min_val=1, max_val=24, step=1)
-        self.duration_spin_button.set_value(1)
+        self.duration_spin_button = CustomSpinButton(min_val=0.5, max_val=24, step=0.5)
+        self.duration_spin_button.set_value(
+            self._clamp_float_setting("find-cheapest-duration-hours", 0.5, 24.0, 1.0)
+        )
         self.duration_row.add_suffix(self.duration_spin_button)
         self.duration_spin_button.connect('value-changed', self.on_find_cheapest_slot_triggered)
         self.expander_row.add_row(self.duration_row)
@@ -651,7 +665,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.start_within_row = Adw.ActionRow.new()
         self.start_within_row.set_title("In the next?")
         self.start_within_spin_button = CustomSpinButton(min_val=1, max_val=24, step=1)
-        self.start_within_spin_button.set_value(8)
+        self.start_within_spin_button.set_value(
+            self._clamp_int_setting("find-cheapest-start-within-hours", 1, 24, 8)
+        )
         self.start_within_row.add_suffix(self.start_within_spin_button)
         self.start_within_spin_button.connect('value-changed', self.on_find_cheapest_slot_triggered)
         self.expander_row.add_row(self.start_within_row)
@@ -895,6 +911,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.usage_graph_mode = mode
         self._update_usage_insights()
 
+    def _update_find_cheapest_settings(self):
+        self.settings.set_double("find-cheapest-duration-hours", self.duration_spin_button.get_value())
+        self.settings.set_int("find-cheapest-start-within-hours", self.start_within_spin_button.get_value_as_int())
+
     def on_refresh_clicked(self, *args):
         """
         Handles the refresh button click, initiating data fetch and disabling buttons.
@@ -904,14 +924,26 @@ class MainWindow(Adw.ApplicationWindow):
         self.refresh_price(force=True)
 
     def on_find_cheapest_slot_triggered(self, spin_button):
-        duration_hours = self.duration_spin_button.get_value_as_int()
-        start_within_hours = self.start_within_spin_button.get_value_as_int()
-        self.find_cheapest_slot(duration_hours, start_within_hours)
+        self._update_find_cheapest_settings()
+        if not self.expander_row.get_expanded():
+            return
+
+        self.find_cheapest_slot(
+            self.duration_spin_button.get_value(),
+            self.start_within_spin_button.get_value_as_int(),
+        )
 
     def on_expander_row_activated(self, expander_row, param):
-        if expander_row.get_expanded() and self.is_first_expansion:
+        if not expander_row.get_expanded():
+            return
+
+        if self.is_first_expansion:
             self.is_first_expansion = False
-            self.on_find_cheapest_slot_triggered(self.duration_spin_button)
+
+        self.find_cheapest_slot(
+            self.duration_spin_button.get_value(),
+            self.start_within_spin_button.get_value_as_int(),
+        )
 
     def find_cheapest_slot(self, duration_hours, start_within_hours):
         self.price_chart.set_highlight_range(None, None) # Clear previous highlight
@@ -953,7 +985,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.price_chart.set_highlight_range(
             best_slot_start_time,
             best_slot_end_time,
-            f"Best {duration_hours}h",
+            f"Best {self._format_duration(duration_hours)}",
         )
         self._scroll_chart_to_time(best_slot_start_time)
 
@@ -983,6 +1015,13 @@ class MainWindow(Adw.ApplicationWindow):
         start_text = start_time.astimezone().strftime('%H:%M')
         end_text = end_time.astimezone().strftime('%H:%M')
         return f"{start_text}-{end_text}"
+
+    def _format_duration(self, duration_hours):
+        hours = int(duration_hours)
+        minutes = round((duration_hours - hours) * 60)
+        if minutes == 0:
+            return f"{hours}h"
+        return f"{hours}h {minutes}m"
 
     def _format_practical_time(self, practical_time, exact_time):
         practical_text = practical_time.astimezone().strftime('%H:%M')

@@ -17,7 +17,7 @@ def find_cheapest_slot(
     if continuous_starts:
         return _find_cheapest_continuous_slot(prices, now, duration_hours, start_within_hours)
 
-    num_slots = duration_hours * 2
+    num_slots = round(duration_hours * 2)
     cutoff = now + timedelta(hours=start_within_hours)
     prices_to_search = [p for p in prices if now <= p['valid_from'] < cutoff]
 

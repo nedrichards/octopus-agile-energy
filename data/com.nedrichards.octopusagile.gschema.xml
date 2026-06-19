@@ -41,5 +41,15 @@
       <summary>Window maximized</summary>
       <description>Whether the application window is maximized.</description>
     </key>
+    <key name="find-cheapest-duration-hours" type="d">
+      <default>1.0</default>
+      <summary>Find cheapest duration</summary>
+      <description>The appliance run duration used by the find cheapest time control, in hours.</description>
+    </key>
+    <key name="find-cheapest-start-within-hours" type="i">
+      <default>8</default>
+      <summary>Find cheapest search window</summary>
+      <description>The number of hours ahead to search in the find cheapest time control.</description>
+    </key>
   </schema>
 </schemalist>

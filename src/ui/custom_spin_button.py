@@ -20,7 +20,7 @@ class CustomSpinButton(Gtk.Box):
         self.add_css_class('linked')
 
         self.label = Gtk.Label()
-        self.label.set_width_chars(4)
+        self.label.set_width_chars(6)
         self.label.set_xalign(0.5)
         self.label.set_valign(Gtk.Align.CENTER)
         self.append(self.label)
@@ -41,13 +41,13 @@ class CustomSpinButton(Gtk.Box):
 
     def on_minus_clicked(self, button):
         if self._value > self.min_val:
-            self._value -= self.step
+            self._value = max(self.min_val, self._value - self.step)
             self.update_label()
             self.emit('value-changed')
 
     def on_plus_clicked(self, button):
         if self._value < self.max_val:
-            self._value += self.step
+            self._value = min(self.max_val, self._value + self.step)
             self.update_label()
             self.emit('value-changed')
 
@@ -64,4 +64,9 @@ class CustomSpinButton(Gtk.Box):
             self.emit('value-changed')
 
     def update_label(self):
-        self.label.set_text(str(self._value) + "h")
+        hours = int(self._value)
+        minutes = round((self._value - hours) * 60)
+        if minutes == 0:
+            self.label.set_text(f"{hours}h")
+        else:
+            self.label.set_text(f"{hours}h {minutes}m")
