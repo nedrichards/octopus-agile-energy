@@ -60,6 +60,16 @@
   </screenshots>
 
   <releases>
+    <release version="1.0.16" date="2026-06-29">
+      <description>
+        <p>This release improves appliance planning in the cheapest-time tool.</p>
+        <ul>
+          <li>Add whole-hour start and finish timer recommendations from the current time</li>
+          <li>Show exact timer windows, average prices, and price differences from the cheapest window</li>
+          <li>Group cheapest-window and appliance-timer results into clearer rows</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.15" date="2026-06-19">
       <description>
         <p>This release improves tariff compatibility and Flatpak launching.</p>
