@@ -15,7 +15,9 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 from ..octopus_api import OctopusApiError
 from ..price_logic import build_dual_register_price_windows, extract_product_code
 from ..price_logic import find_cheapest_slot as calculate_cheapest_slot
+from ..price_logic import find_cheapest_timer_slot as calculate_cheapest_timer_slot
 from ..secrets_manager import get_api_key
+from ..time_formatting import format_time_from_now
 from ..usage_history import build_historical_usage_costs, fetch_recent_usage_samples, get_account_data
 from ..usage_insights import build_usage_insight_data
 from ..utils import CacheManager
@@ -227,17 +229,24 @@ class MainWindow(Adw.ApplicationWindow):
             return default
         return value
 
-    def _add_best_slot_summary_item(self, title, row):
-        title_label = Gtk.Label.new(title)
-        title_label.set_xalign(0)
-        title_label.add_css_class("dim-label")
-        self.best_slot_summary_grid.attach(title_label, 0, row, 1, 1)
+    def _create_summary_section_row(self, title):
+        row = Adw.ActionRow.new()
+        row.set_title(title)
+        row.set_selectable(False)
+        row.set_activatable(False)
+        row.add_css_class("heading")
+        return row
 
+    def _create_summary_value_row(self, title):
+        row = Adw.ActionRow.new()
+        row.set_title(title)
+        row.set_selectable(False)
+        row.set_activatable(False)
         value_label = Gtk.Label.new()
         value_label.set_xalign(1)
         value_label.set_hexpand(True)
-        self.best_slot_summary_grid.attach(value_label, 1, row, 1, 1)
-        return value_label
+        row.add_suffix(value_label)
+        return row, value_label
 
     def on_key_pressed(self, controller, keyval, keycode, modifier):
         """
@@ -673,37 +682,38 @@ class MainWindow(Adw.ApplicationWindow):
         self.expander_row.add_row(self.start_within_row)
 
         # --- Result summary ---
-        self.best_slot_summary_row = Gtk.ListBoxRow.new()
-        self.best_slot_summary_row.set_selectable(False)
-        self.best_slot_summary_row.set_activatable(False)
+        self.best_slot_message_row = Adw.ActionRow.new()
+        self.best_slot_message_row.set_title("Not enough data to find the cheapest time.")
+        self.best_slot_message_row.set_selectable(False)
+        self.best_slot_message_row.set_activatable(False)
+        self.best_slot_message_row.add_css_class("dim-label")
+        self.expander_row.add_row(self.best_slot_message_row)
 
-        summary_box = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        summary_box.set_margin_top(12)
-        summary_box.set_margin_bottom(12)
-        summary_box.set_margin_start(12)
-        summary_box.set_margin_end(12)
-        self.best_slot_summary_row.set_child(summary_box)
+        self.cheapest_summary_row = self._create_summary_section_row("Cheapest")
+        self.expander_row.add_row(self.cheapest_summary_row)
+        self.best_slot_result_row, self.best_slot_result_label = self._create_summary_value_row("Best window")
+        self.expander_row.add_row(self.best_slot_result_row)
+        self.average_price_row, self.average_price_label = self._create_summary_value_row("Average price")
+        self.expander_row.add_row(self.average_price_row)
 
-        self.best_slot_message_label = Gtk.Label.new("Not enough data to find the cheapest time.")
-        self.best_slot_message_label.set_xalign(0)
-        self.best_slot_message_label.set_wrap(True)
-        self.best_slot_message_label.add_css_class("dim-label")
-        summary_box.append(self.best_slot_message_label)
+        self.timer_summary_row = self._create_summary_section_row("Appliance timers")
+        self.expander_row.add_row(self.timer_summary_row)
+        self.start_timer_row, self.timer_label = self._create_summary_value_row("Start in")
+        self.expander_row.add_row(self.start_timer_row)
+        self.finish_timer_row, self.finish_time_label = self._create_summary_value_row("Finish in")
+        self.expander_row.add_row(self.finish_timer_row)
 
-        self.best_slot_summary_grid = Gtk.Grid.new()
-        self.best_slot_summary_grid.set_column_spacing(18)
-        self.best_slot_summary_grid.set_row_spacing(6)
-        summary_box.append(self.best_slot_summary_grid)
-
-        self.best_slot_result_label = self._add_best_slot_summary_item("Best window", 0)
-        self.timer_label = self._add_best_slot_summary_item("Start after", 1)
-        self.finish_time_label = self._add_best_slot_summary_item("Finish before", 2)
-        self.average_price_label = self._add_best_slot_summary_item("Average price", 3)
-
-        self.best_slot_summary_row.set_visible(False)
-        self.best_slot_message_label.set_visible(False)
-        self.best_slot_summary_grid.set_visible(False)
-        self.expander_row.add_row(self.best_slot_summary_row)
+        self.best_slot_result_rows = [
+            self.cheapest_summary_row,
+            self.best_slot_result_row,
+            self.average_price_row,
+            self.timer_summary_row,
+            self.start_timer_row,
+            self.finish_timer_row,
+        ]
+        self.best_slot_message_row.set_visible(False)
+        for row in self.best_slot_result_rows:
+            row.set_visible(False)
         # --- End of new section ---
 
         self.time_label = Gtk.Label.new()
@@ -963,25 +973,35 @@ class MainWindow(Adw.ApplicationWindow):
             continuous_starts=True,
         )
         cheapest_slot = exact_cheapest_slot or whole_hour_cheapest_slot
-        practical_slot = whole_hour_cheapest_slot or cheapest_slot
+        start_timer_slot = calculate_cheapest_timer_slot(
+            self.all_prices,
+            now,
+            duration_hours,
+            start_within_hours,
+            "start",
+        )
+        finish_timer_slot = calculate_cheapest_timer_slot(
+            self.all_prices,
+            now,
+            duration_hours,
+            start_within_hours,
+            "finish",
+        )
 
         if not cheapest_slot:
-            was_visible = self.best_slot_summary_row.get_visible()
+            was_visible = self.best_slot_message_row.get_visible()
             self.best_slot_start_time = None
             self.best_slot_end_time = None
-            self.best_slot_message_label.set_text("Not enough data to find the cheapest time.")
-            self.best_slot_message_label.set_visible(True)
-            self.best_slot_summary_grid.set_visible(False)
-            self.best_slot_summary_row.set_visible(True)
+            self.best_slot_message_row.set_visible(True)
+            for row in self.best_slot_result_rows:
+                row.set_visible(False)
             if not was_visible:
-                self._fade_widget_in(self.best_slot_summary_row, start_opacity=0.88)
+                self._fade_widget_in(self.best_slot_message_row, start_opacity=0.88)
             return
 
-        was_visible = self.best_slot_summary_row.get_visible()
+        was_visible = self.best_slot_result_row.get_visible()
         best_slot_start_time = cheapest_slot['start']
         best_slot_end_time = cheapest_slot['end']
-        practical_slot_start_time = practical_slot['start']
-        practical_slot_end_time = practical_slot['end']
         self.price_chart.set_highlight_range(
             best_slot_start_time,
             best_slot_end_time,
@@ -993,20 +1013,26 @@ class MainWindow(Adw.ApplicationWindow):
             self._format_time_window(best_slot_start_time, best_slot_end_time)
         )
         self.timer_label.set_text(
-            self._format_practical_time(practical_slot_start_time, best_slot_start_time)
+            format_time_from_now(start_timer_slot['start'], now)
         )
         self.finish_time_label.set_text(
-            self._format_practical_time(practical_slot_end_time, best_slot_end_time)
+            format_time_from_now(finish_timer_slot['end'], now)
         )
 
         average_price = cheapest_slot['average_price_gbp']
         self.average_price_label.set_text(f"£{average_price:.2f}/kWh")
+        self.start_timer_row.set_subtitle(
+            self._format_timer_slot_detail(start_timer_slot, average_price)
+        )
+        self.finish_timer_row.set_subtitle(
+            self._format_timer_slot_detail(finish_timer_slot, average_price)
+        )
 
-        self.best_slot_message_label.set_visible(False)
-        self.best_slot_summary_grid.set_visible(True)
-        self.best_slot_summary_row.set_visible(True)
+        self.best_slot_message_row.set_visible(False)
+        for row in self.best_slot_result_rows:
+            row.set_visible(True)
         if not was_visible:
-            self._fade_widget_in(self.best_slot_summary_row, start_opacity=0.88)
+            self._fade_widget_in(self.best_slot_result_row, start_opacity=0.88)
 
         self.best_slot_start_time = best_slot_start_time.astimezone()
         self.best_slot_end_time = best_slot_end_time.astimezone()
@@ -1023,13 +1049,20 @@ class MainWindow(Adw.ApplicationWindow):
             return f"{hours}h"
         return f"{hours}h {minutes}m"
 
-    def _format_practical_time(self, practical_time, exact_time):
-        practical_text = practical_time.astimezone().strftime('%H:%M')
-        if practical_time == exact_time:
-            return practical_text
+    def _format_timer_slot_detail(self, slot, best_average_price):
+        detail = f"{self._format_time_window(slot['start'], slot['end'])} · £{slot['average_price_gbp']:.2f}/kWh"
+        price_delta = self._format_price_delta(slot['average_price_gbp'], best_average_price)
+        if price_delta:
+            detail = f"{detail} · {price_delta}"
+        return detail
 
-        exact_text = exact_time.astimezone().strftime('%H:%M')
-        return f"{practical_text} ({exact_text} exact)"
+    def _format_price_delta(self, average_price, best_average_price):
+        delta_pence = max(0, (average_price - best_average_price) * 100)
+        if delta_pence < 0.05:
+            return None
+
+        delta_text = f"{delta_pence:.1f}".rstrip('0').rstrip('.')
+        return f"+{delta_text}p/kWh"
 
     def _scroll_chart_to_time(self, target_time):
         target_index = self._find_chart_index_for_time(target_time)

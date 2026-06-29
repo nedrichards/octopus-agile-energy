@@ -37,6 +37,7 @@ install_data(
     'octopus_api.py',
     'usage_history.py',
     'usage_insights.py',
+    'time_formatting.py',
     'price_logic.py',
   ],
   install_dir: moduledir

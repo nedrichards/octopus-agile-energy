@@ -108,7 +108,7 @@ flatpak run com.nedrichards.octopusagile
 
 Upon first launch, the application opens setup so you can choose the correct tariff and region before fetching prices. You can use manual setup for current and upcoming prices, then add an Octopus API key and account number later to enable usage history and spend estimates.
 
-The Find Cheapest Time section remembers the last duration and search window you used. Durations can be adjusted in 30-minute steps for appliances that do not run in whole hours.
+The Find Cheapest Time section remembers the last duration and search window you used. Durations can be adjusted in 30-minute steps for appliances that do not run in whole hours, with appliance-timer options showing whole-hour start and finish values, exact windows, and price differences from the cheapest window.
 
 ### Configuration
 

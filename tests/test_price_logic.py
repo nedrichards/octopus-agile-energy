@@ -10,6 +10,7 @@ from price_logic import (
     build_region_to_tariffs_map,
     extract_product_code,
     find_cheapest_slot,
+    find_cheapest_timer_slot,
 )
 
 
@@ -190,6 +191,114 @@ class PriceLogicTests(unittest.TestCase):
         }]
 
         self.assertIsNone(find_cheapest_slot(prices, now, duration_hours=1, start_within_hours=1))
+
+    def test_find_cheapest_timer_slot_uses_whole_hour_start_delays_from_now(self):
+        period_start = datetime(2026, 3, 21, 12, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 3, 21, 12, 17, tzinfo=timezone.utc)
+        prices = []
+        values = [1.00, 1.00, 0.80, 0.80, 0.10, 0.10, 0.50, 0.50, 1.00]
+        for i, value in enumerate(values):
+            start = period_start + timedelta(minutes=30 * i)
+            prices.append({
+                'valid_from': start,
+                'valid_to': start + timedelta(minutes=30),
+                'price_gbp': value,
+            })
+
+        slot = find_cheapest_timer_slot(
+            prices,
+            now,
+            duration_hours=1,
+            start_within_hours=4,
+            timer_mode="start",
+        )
+
+        self.assertIsNotNone(slot)
+        self.assertEqual(slot['start'], now + timedelta(hours=2))
+        self.assertEqual(slot['end'], now + timedelta(hours=3))
+
+    def test_find_cheapest_timer_slot_uses_whole_hour_finish_delays_from_now(self):
+        period_start = datetime(2026, 3, 21, 12, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 3, 21, 12, 17, tzinfo=timezone.utc)
+        prices = []
+        values = [1.00, 1.00, 0.80, 0.80, 0.10, 0.10, 0.50, 0.05, 0.05]
+        for i, value in enumerate(values):
+            start = period_start + timedelta(minutes=30 * i)
+            prices.append({
+                'valid_from': start,
+                'valid_to': start + timedelta(minutes=30),
+                'price_gbp': value,
+            })
+
+        slot = find_cheapest_timer_slot(
+            prices,
+            now,
+            duration_hours=1,
+            start_within_hours=4,
+            timer_mode="finish",
+        )
+
+        self.assertIsNotNone(slot)
+        self.assertEqual(slot['start'], now + timedelta(hours=3))
+        self.assertEqual(slot['end'], now + timedelta(hours=4))
+
+    def test_find_cheapest_timer_slots_can_describe_different_start_times(self):
+        period_start = datetime(2026, 3, 21, 12, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 3, 21, 12, 17, tzinfo=timezone.utc)
+        prices = []
+        values = [1.00, 1.00, 1.00, 1.00, 0.01, 0.50, 0.50, 0.01, 0.01]
+        for i, value in enumerate(values):
+            start = period_start + timedelta(minutes=30 * i)
+            prices.append({
+                'valid_from': start,
+                'valid_to': start + timedelta(minutes=30),
+                'price_gbp': value,
+            })
+
+        start_timer_slot = find_cheapest_timer_slot(
+            prices,
+            now,
+            duration_hours=1.5,
+            start_within_hours=4,
+            timer_mode="start",
+        )
+        finish_timer_slot = find_cheapest_timer_slot(
+            prices,
+            now,
+            duration_hours=1.5,
+            start_within_hours=4,
+            timer_mode="finish",
+        )
+
+        self.assertIsNotNone(start_timer_slot)
+        self.assertIsNotNone(finish_timer_slot)
+        self.assertEqual(start_timer_slot['start'], now + timedelta(hours=2))
+        self.assertEqual(finish_timer_slot['start'], now + timedelta(hours=2, minutes=30))
+        self.assertEqual(finish_timer_slot['end'], now + timedelta(hours=4))
+
+    def test_find_cheapest_timer_slot_rejects_windows_past_the_search_cutoff(self):
+        now = datetime(2026, 3, 21, 12, 17, tzinfo=timezone.utc)
+        prices = []
+        values = [0.50, 0.50, 0.50, 0.50, 0.01, 0.01]
+        for i, value in enumerate(values):
+            start = now + timedelta(minutes=30 * i)
+            prices.append({
+                'valid_from': start,
+                'valid_to': start + timedelta(minutes=30),
+                'price_gbp': value,
+            })
+
+        slot = find_cheapest_timer_slot(
+            prices,
+            now,
+            duration_hours=1,
+            start_within_hours=1,
+            timer_mode="start",
+        )
+
+        self.assertIsNotNone(slot)
+        self.assertEqual(slot['start'], now)
+        self.assertEqual(slot['end'], now + timedelta(hours=1))
 
     def test_build_dual_register_price_windows_uses_night_rate_inside_window(self):
         period_start = datetime(2026, 5, 13, 0, 0, tzinfo=timezone.utc)

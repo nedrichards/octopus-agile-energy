@@ -47,6 +47,44 @@ def find_cheapest_slot(
     }
 
 
+def find_cheapest_timer_slot(prices, now, duration_hours, start_within_hours, timer_mode):
+    now = now.replace(second=0, microsecond=0)
+    duration = timedelta(hours=duration_hours)
+    cutoff = now + timedelta(hours=start_within_hours)
+    sorted_prices = sorted(prices, key=lambda price: price['valid_from'])
+
+    best_slot = None
+    best_average_price = float('inf')
+
+    for hours_from_now in range(start_within_hours + 1):
+        timer_time = now + timedelta(hours=hours_from_now)
+        if timer_mode == "start":
+            start = timer_time
+            end = start + duration
+        elif timer_mode == "finish":
+            end = timer_time
+            start = end - duration
+        else:
+            raise ValueError(f"Unsupported timer mode: {timer_mode}")
+
+        if start < now or end > cutoff:
+            continue
+
+        average_price = _calculate_weighted_average_price(sorted_prices, start, end)
+        if average_price is None:
+            continue
+
+        if average_price < best_average_price:
+            best_average_price = average_price
+            best_slot = {
+                'start': start,
+                'end': end,
+                'average_price_gbp': average_price,
+            }
+
+    return best_slot
+
+
 def _find_cheapest_continuous_slot(prices, now, duration_hours, start_within_hours):
     now = now.replace(second=0, microsecond=0)
     duration = timedelta(hours=duration_hours)
