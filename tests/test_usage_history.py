@@ -7,7 +7,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.octopus_api import OctopusApiError
-from src.usage_history import fetch_historical_unit_rates
+from src.usage_history import fetch_all_tariff_pages, fetch_historical_unit_rates
 
 
 class UsageHistoryTests(unittest.TestCase):
@@ -37,6 +37,37 @@ class UsageHistoryTests(unittest.TestCase):
         self.assertEqual([rate["value_inc_vat"] for rate in rates], [30.0, 10.0])
         self.assertEqual(fetch_records.call_args_list[1].args[2], "day-unit-rates")
         self.assertEqual(fetch_records.call_args_list[2].args[2], "night-unit-rates")
+
+    def test_fetch_all_tariff_pages_preserves_paginated_api_order(self):
+        with patch("src.usage_history.get_json") as get_json:
+            get_json.side_effect = [
+                {
+                    "results": [
+                        {"valid_from": "2026-03-20T01:00:00Z", "value_inc_vat": 30.0},
+                        {"valid_from": "2026-03-20T00:30:00Z", "value_inc_vat": 20.0},
+                    ],
+                    "next": "https://example.test/page-2",
+                },
+                {
+                    "results": [
+                        {"valid_from": "2026-03-20T00:00:00Z", "value_inc_vat": 10.0},
+                    ],
+                    "next": None,
+                },
+            ]
+
+            records = fetch_all_tariff_pages("https://example.test/page-1")
+
+        self.assertEqual(
+            [record["valid_from"] for record in records],
+            [
+                "2026-03-20T01:00:00Z",
+                "2026-03-20T00:30:00Z",
+                "2026-03-20T00:00:00Z",
+            ],
+        )
+        self.assertEqual(get_json.call_count, 2)
+        self.assertEqual(get_json.call_args_list[0].kwargs, {"use_api_key": True, "timeout": 10})
 
 
 if __name__ == "__main__":

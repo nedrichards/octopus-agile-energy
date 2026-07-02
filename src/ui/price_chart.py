@@ -6,6 +6,7 @@ import math
 import cairo
 from gi.repository import Gtk
 
+from ..price_formatting import format_gbp, format_unit_price_gbp
 from .adaptive_layout import (
     get_chart_content_width,
     get_chart_height,
@@ -166,7 +167,7 @@ class PriceChartWidget(Gtk.DrawingArea):
             valid_from = price_data['valid_from'].astimezone().strftime('%H:%M')
             valid_to = price_data['valid_to'].astimezone().strftime('%H:%M')
 
-            tooltip.set_markup(f"<b>{valid_from} - {valid_to}</b>\n£{price_gbp:.2f}/kWh")
+            tooltip.set_markup(f"<b>{valid_from} - {valid_to}</b>\n{format_unit_price_gbp(price_gbp)}")
             return True
 
         return False
@@ -229,7 +230,7 @@ class PriceChartWidget(Gtk.DrawingArea):
             cr.stroke()
 
             # Draw label (slightly clearer)
-            label = f"£{current_grid_price:.2f}"
+            label = format_gbp(current_grid_price)
             extents = cr.text_extents(label)
             cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, 0.5)
             # Center vertically on the line

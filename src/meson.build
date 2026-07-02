@@ -7,7 +7,7 @@ python = import('python')
 py_install = python.find_installation('python3')
 
 conf = configuration_data()
-conf.set('PYTHON', py_install.path())
+conf.set('PYTHON', py_install.full_path())
 conf.set('VERSION', meson.project_version())
 conf.set('pkgdatadir', pkgdatadir)
 conf.set('localedir', localedir)
@@ -33,8 +33,10 @@ install_data(
     'main.py',
     'utils.py',
     'secrets_manager.py',
+    'find_cheapest_presentation.py',
     'historical_costs.py',
     'octopus_api.py',
+    'price_formatting.py',
     'usage_history.py',
     'usage_insights.py',
     'time_formatting.py',

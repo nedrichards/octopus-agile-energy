@@ -3,9 +3,15 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from historical_costs import build_daily_costs, build_tariff_periods, get_usage_period
+from price_fixtures import (  # noqa: E402
+    AGILE_REGION_A_2025_04_07_PENCE,
+    AGILE_REGION_A_2025_05_25_PENCE,
+    historical_agile_rate_records,
+)
 
 
 class HistoricalCostsTests(unittest.TestCase):
@@ -102,6 +108,123 @@ class HistoricalCostsTests(unittest.TestCase):
         self.assertAlmostEqual(daily[0]["standing_charge_gbp"], 0.5)
         self.assertAlmostEqual(daily[0]["total_cost_gbp"], 0.75)
         self.assertEqual(daily[0]["missing_rate_count"], 0)
+
+    def test_build_daily_costs_allows_negative_energy_costs_to_offset_standing_charge(self):
+        tariff_code = "E-1R-AGILE-24-10-01-A"
+        day_start = datetime(2025, 5, 25, 0, 0, tzinfo=timezone.utc)
+        samples = [
+            {"interval_start": f"2025-05-25T{hour:02d}:{minute:02d}:00Z", "consumption": 1.0}
+            for hour, minute in [(12, 0), (12, 30), (13, 0), (13, 30), (14, 0), (14, 30)]
+        ]
+        tariff_periods = [{
+            "tariff_code": tariff_code,
+            "valid_from": day_start,
+            "valid_to": datetime(2025, 5, 26, 0, 0, tzinfo=timezone.utc),
+        }]
+        rates = {tariff_code: historical_agile_rate_records(day_start, AGILE_REGION_A_2025_05_25_PENCE)}
+        standing = {
+            tariff_code: [{
+                "valid_from": "2025-01-01T00:00:00Z",
+                "valid_to": None,
+                "value_inc_vat": 50.0,
+            }]
+        }
+
+        daily = build_daily_costs(samples, tariff_periods, rates, standing)
+
+        expected_energy_cost = sum(AGILE_REGION_A_2025_05_25_PENCE[24:30]) / 100
+        self.assertEqual(daily[0]["kwh"], 6.0)
+        self.assertAlmostEqual(daily[0]["energy_cost_gbp"], expected_energy_cost)
+        self.assertLess(daily[0]["energy_cost_gbp"], 0)
+        self.assertAlmostEqual(daily[0]["standing_charge_gbp"], 0.5)
+        self.assertAlmostEqual(daily[0]["total_cost_gbp"], 0.5 + expected_energy_cost)
+
+    def test_build_daily_costs_counts_missing_rates_without_dropping_high_peak_usage(self):
+        tariff_code = "E-1R-AGILE-24-10-01-A"
+        day_start = datetime(2025, 4, 7, 0, 0, tzinfo=timezone.utc)
+        samples = [
+            {"interval_start": "2025-04-07T17:00:00Z", "consumption": 1.0},
+            {"interval_start": "2025-04-07T17:30:00Z", "consumption": 1.0},
+            {"interval_start": "2025-04-07T18:00:00Z", "consumption": 1.0},
+        ]
+        tariff_periods = [{
+            "tariff_code": tariff_code,
+            "valid_from": day_start,
+            "valid_to": datetime(2025, 4, 8, 0, 0, tzinfo=timezone.utc),
+        }]
+        rates = {
+            tariff_code: [
+                record for record in historical_agile_rate_records(day_start, AGILE_REGION_A_2025_04_07_PENCE)
+                if record["valid_from"] != "2025-04-07T18:00:00Z"
+            ]
+        }
+        standing = {
+            tariff_code: [{
+                "valid_from": "2025-01-01T00:00:00Z",
+                "valid_to": None,
+                "value_inc_vat": 50.0,
+            }]
+        }
+
+        daily = build_daily_costs(samples, tariff_periods, rates, standing)
+
+        self.assertEqual(daily[0]["sample_count"], 3)
+        self.assertEqual(daily[0]["missing_rate_count"], 1)
+        self.assertAlmostEqual(
+            daily[0]["energy_cost_gbp"],
+            (39.9105 + 42.0945) / 100,
+        )
+        self.assertAlmostEqual(daily[0]["total_cost_gbp"], 1.32005)
+
+    def test_build_daily_costs_matches_rates_across_tariff_period_boundary(self):
+        old_tariff = "E-1R-AGILE-OLD-A"
+        new_tariff = "E-1R-AGILE-NEW-A"
+        samples = [
+            {"interval_start": "2026-03-20T11:30:00Z", "consumption": 1.0},
+            {"interval_start": "2026-03-20T12:00:00Z", "consumption": 1.0},
+        ]
+        tariff_periods = [
+            {
+                "tariff_code": old_tariff,
+                "valid_from": datetime(2026, 3, 20, 0, 0, tzinfo=timezone.utc),
+                "valid_to": datetime(2026, 3, 20, 12, 0, tzinfo=timezone.utc),
+            },
+            {
+                "tariff_code": new_tariff,
+                "valid_from": datetime(2026, 3, 20, 12, 0, tzinfo=timezone.utc),
+                "valid_to": datetime(2026, 3, 21, 0, 0, tzinfo=timezone.utc),
+            },
+        ]
+        rates = {
+            old_tariff: [{
+                "valid_from": "2026-03-20T00:00:00Z",
+                "valid_to": "2026-03-20T12:00:00Z",
+                "value_inc_vat": 10.0,
+            }],
+            new_tariff: [{
+                "valid_from": "2026-03-20T12:00:00Z",
+                "valid_to": None,
+                "value_inc_vat": 40.0,
+            }],
+        }
+        standing = {
+            old_tariff: [{
+                "valid_from": "2026-03-20T00:00:00Z",
+                "valid_to": "2026-03-20T12:00:00Z",
+                "value_inc_vat": 20.0,
+            }],
+            new_tariff: [{
+                "valid_from": "2026-03-20T12:00:00Z",
+                "valid_to": None,
+                "value_inc_vat": 50.0,
+            }],
+        }
+
+        daily = build_daily_costs(samples, tariff_periods, rates, standing)
+
+        self.assertAlmostEqual(daily[0]["energy_cost_gbp"], 0.5)
+        self.assertAlmostEqual(daily[0]["standing_charge_gbp"], 0.5)
+        self.assertAlmostEqual(daily[0]["total_cost_gbp"], 1.0)
 
 
 if __name__ == "__main__":

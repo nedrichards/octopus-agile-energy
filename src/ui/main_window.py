@@ -12,12 +12,19 @@ import cairo
 import requests
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
+from ..find_cheapest_presentation import (
+    build_find_cheapest_presentation,
+    format_duration,
+    format_price_delta,
+    format_time_window,
+    format_timer_slot_detail,
+)
 from ..octopus_api import OctopusApiError
+from ..price_formatting import format_gbp, format_unit_price_gbp
 from ..price_logic import build_dual_register_price_windows, extract_product_code
 from ..price_logic import find_cheapest_slot as calculate_cheapest_slot
 from ..price_logic import find_cheapest_timer_slot as calculate_cheapest_timer_slot
 from ..secrets_manager import get_api_key
-from ..time_formatting import format_time_from_now
 from ..usage_history import build_historical_usage_costs, fetch_recent_usage_samples, get_account_data
 from ..usage_insights import build_usage_insight_data
 from ..utils import CacheManager
@@ -958,21 +965,12 @@ class MainWindow(Adw.ApplicationWindow):
     def find_cheapest_slot(self, duration_hours, start_within_hours):
         self.price_chart.set_highlight_range(None, None) # Clear previous highlight
         now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
-        whole_hour_cheapest_slot = calculate_cheapest_slot(
+        cheapest_slot = calculate_cheapest_slot(
             self.all_prices,
             now,
             duration_hours,
             start_within_hours,
-            whole_hour_starts_only=True,
         )
-        exact_cheapest_slot = calculate_cheapest_slot(
-            self.all_prices,
-            now,
-            duration_hours,
-            start_within_hours,
-            continuous_starts=True,
-        )
-        cheapest_slot = exact_cheapest_slot or whole_hour_cheapest_slot
         start_timer_slot = calculate_cheapest_timer_slot(
             self.all_prices,
             now,
@@ -987,8 +985,15 @@ class MainWindow(Adw.ApplicationWindow):
             start_within_hours,
             "finish",
         )
+        presentation = build_find_cheapest_presentation(
+            cheapest_slot,
+            start_timer_slot,
+            finish_timer_slot,
+            duration_hours,
+            now,
+        )
 
-        if not cheapest_slot:
+        if not presentation:
             was_visible = self.best_slot_message_row.get_visible()
             self.best_slot_start_time = None
             self.best_slot_end_time = None
@@ -1000,33 +1005,21 @@ class MainWindow(Adw.ApplicationWindow):
             return
 
         was_visible = self.best_slot_result_row.get_visible()
-        best_slot_start_time = cheapest_slot['start']
-        best_slot_end_time = cheapest_slot['end']
+        best_slot_start_time = presentation["highlight_start"]
+        best_slot_end_time = presentation["highlight_end"]
         self.price_chart.set_highlight_range(
             best_slot_start_time,
             best_slot_end_time,
-            f"Best {self._format_duration(duration_hours)}",
+            presentation["highlight_label"],
         )
         self._scroll_chart_to_time(best_slot_start_time)
 
-        self.best_slot_result_label.set_text(
-            self._format_time_window(best_slot_start_time, best_slot_end_time)
-        )
-        self.timer_label.set_text(
-            format_time_from_now(start_timer_slot['start'], now)
-        )
-        self.finish_time_label.set_text(
-            format_time_from_now(finish_timer_slot['end'], now)
-        )
-
-        average_price = cheapest_slot['average_price_gbp']
-        self.average_price_label.set_text(f"£{average_price:.2f}/kWh")
-        self.start_timer_row.set_subtitle(
-            self._format_timer_slot_detail(start_timer_slot, average_price)
-        )
-        self.finish_timer_row.set_subtitle(
-            self._format_timer_slot_detail(finish_timer_slot, average_price)
-        )
+        self.best_slot_result_label.set_text(presentation["best_window_text"])
+        self.timer_label.set_text(presentation["start_timer_text"])
+        self.finish_time_label.set_text(presentation["finish_timer_text"])
+        self.average_price_label.set_text(presentation["average_price_text"])
+        self.start_timer_row.set_subtitle(presentation["start_timer_detail"])
+        self.finish_timer_row.set_subtitle(presentation["finish_timer_detail"])
 
         self.best_slot_message_row.set_visible(False)
         for row in self.best_slot_result_rows:
@@ -1038,31 +1031,16 @@ class MainWindow(Adw.ApplicationWindow):
         self.best_slot_end_time = best_slot_end_time.astimezone()
 
     def _format_time_window(self, start_time, end_time):
-        start_text = start_time.astimezone().strftime('%H:%M')
-        end_text = end_time.astimezone().strftime('%H:%M')
-        return f"{start_text}-{end_text}"
+        return format_time_window(start_time, end_time)
 
     def _format_duration(self, duration_hours):
-        hours = int(duration_hours)
-        minutes = round((duration_hours - hours) * 60)
-        if minutes == 0:
-            return f"{hours}h"
-        return f"{hours}h {minutes}m"
+        return format_duration(duration_hours)
 
     def _format_timer_slot_detail(self, slot, best_average_price):
-        detail = f"{self._format_time_window(slot['start'], slot['end'])} · £{slot['average_price_gbp']:.2f}/kWh"
-        price_delta = self._format_price_delta(slot['average_price_gbp'], best_average_price)
-        if price_delta:
-            detail = f"{detail} · {price_delta}"
-        return detail
+        return format_timer_slot_detail(slot, best_average_price)
 
     def _format_price_delta(self, average_price, best_average_price):
-        delta_pence = max(0, (average_price - best_average_price) * 100)
-        if delta_pence < 0.05:
-            return None
-
-        delta_text = f"{delta_pence:.1f}".rstrip('0').rstrip('.')
-        return f"+{delta_text}p/kWh"
+        return format_price_delta(average_price, best_average_price)
 
     def _scroll_chart_to_time(self, target_time):
         target_index = self._find_chart_index_for_time(target_time)
@@ -1114,7 +1092,7 @@ class MainWindow(Adw.ApplicationWindow):
             return
 
         current_title = (
-            f"£{self.current_price_data['price_gbp']:.2f}/kWh"
+            format_unit_price_gbp(self.current_price_data['price_gbp'])
             if self.current_price_data
             else "Loading..."
         )
@@ -1434,7 +1412,7 @@ class MainWindow(Adw.ApplicationWindow):
             css_class = "price-high"
 
         self._set_price_summary(
-            f"£{price_pounds:.2f}/kWh",
+            format_unit_price_gbp(price_pounds),
             f"The current price is {status}",
             compact_description="",
             css_class=css_class,
@@ -1785,10 +1763,10 @@ class MainWindow(Adw.ApplicationWindow):
                 avg_daily_cost = sum(totals) / len(totals)
                 monthly_cost = avg_daily_cost * 30.0
                 cost_trend_pct = self._get_series_trend_pct(totals)
-                insight["daily_cost_text"] = f"£{avg_daily_energy_cost:.2f}/day"
-                insight["daily_total_cost_text"] = f"£{avg_daily_cost:.2f}/day"
+                insight["daily_cost_text"] = f"{format_gbp(avg_daily_energy_cost)}/day"
+                insight["daily_total_cost_text"] = f"{format_gbp(avg_daily_cost)}/day"
                 insight["cost_trend_text"] = "—" if cost_trend_pct is None else f"{cost_trend_pct:+.1f}%"
-                insight["monthly_cost_text"] = f"£{monthly_cost:.0f}"
+                insight["monthly_cost_text"] = format_gbp(monthly_cost, decimals=0)
                 return insight
 
         avg_unit_price = self._get_average_unit_price_gbp()
@@ -1798,10 +1776,10 @@ class MainWindow(Adw.ApplicationWindow):
         monthly_cost = avg_daily_total_cost * 30.0
         price_trend_pct = self._get_recent_price_trend_pct()
         combined_cost_trend_pct = insight["trend_pct"] + price_trend_pct
-        insight["daily_cost_text"] = "—" if insight["avg_text"] == "—" else f"£{avg_daily_energy_cost:.2f}/day"
-        insight["daily_total_cost_text"] = "—" if insight["avg_text"] == "—" else f"£{avg_daily_total_cost:.2f}/day"
+        insight["daily_cost_text"] = "—" if insight["avg_text"] == "—" else f"{format_gbp(avg_daily_energy_cost)}/day"
+        insight["daily_total_cost_text"] = "—" if insight["avg_text"] == "—" else f"{format_gbp(avg_daily_total_cost)}/day"
         insight["cost_trend_text"] = "—" if insight["trend_text"] == "—" else f"{combined_cost_trend_pct:+.1f}%"
-        insight["monthly_cost_text"] = "—" if insight["monthly_text"] == "—" else f"£{monthly_cost:.0f}"
+        insight["monthly_cost_text"] = "—" if insight["monthly_text"] == "—" else format_gbp(monthly_cost, decimals=0)
         return insight
 
     def _get_usage_chart_series(self, insight, daily_costs):
@@ -1937,11 +1915,11 @@ class MainWindow(Adw.ApplicationWindow):
         total_cost = day.get("total_cost_gbp")
         standing_charge = day.get("standing_charge_gbp")
         if energy_cost is not None:
-            lines.append(f"Energy: £{float(energy_cost):.2f}")
+            lines.append(f"Energy: {format_gbp(energy_cost)}")
         if standing_charge is not None:
-            lines.append(f"Standing charge: £{float(standing_charge):.2f}")
+            lines.append(f"Standing charge: {format_gbp(standing_charge)}")
         if total_cost is not None:
-            lines.append(f"Total: £{float(total_cost):.2f}")
+            lines.append(f"Total: {format_gbp(total_cost)}")
 
         if day.get("missing_rate_count", 0):
             lines.append("Historical rates incomplete")
@@ -2046,7 +2024,11 @@ class MainWindow(Adw.ApplicationWindow):
 
             chart_unit = getattr(self, "usage_chart_unit", "kWh")
             if chart_unit == "£":
-                label = f"£{current_grid_value:.2f}" if current_grid_value < 10 else f"£{current_grid_value:.0f}"
+                label = (
+                    format_gbp(current_grid_value)
+                    if current_grid_value < 10
+                    else format_gbp(current_grid_value, decimals=0)
+                )
             else:
                 label_value = f"{current_grid_value:.0f}" if current_grid_value >= 10 else f"{current_grid_value:.1f}"
                 label = f"{label_value}kWh"

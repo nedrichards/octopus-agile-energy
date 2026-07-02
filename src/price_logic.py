@@ -12,14 +12,11 @@ def find_cheapest_slot(
     duration_hours,
     start_within_hours,
     whole_hour_starts_only=False,
-    continuous_starts=False,
 ):
-    if continuous_starts:
-        return _find_cheapest_continuous_slot(prices, now, duration_hours, start_within_hours)
-
     num_slots = round(duration_hours * 2)
     cutoff = now + timedelta(hours=start_within_hours)
-    prices_to_search = [p for p in prices if now <= p['valid_from'] < cutoff]
+    sorted_prices = sorted(prices, key=lambda price: price['valid_from'])
+    prices_to_search = [p for p in sorted_prices if now < p['valid_to'] and p['valid_from'] < cutoff]
 
     if len(prices_to_search) < num_slots:
         return None
@@ -30,6 +27,8 @@ def find_cheapest_slot(
     for i in range(len(prices_to_search) - num_slots + 1):
         window = prices_to_search[i:i + num_slots]
         if whole_hour_starts_only and window[0]['valid_from'].astimezone().minute != 0:
+            continue
+        if window[-1]['valid_to'] > cutoff or not _has_contiguous_price_coverage(window):
             continue
 
         total_price = sum(p['price_gbp'] for p in window)
@@ -85,38 +84,11 @@ def find_cheapest_timer_slot(prices, now, duration_hours, start_within_hours, ti
     return best_slot
 
 
-def _find_cheapest_continuous_slot(prices, now, duration_hours, start_within_hours):
-    now = now.replace(second=0, microsecond=0)
-    duration = timedelta(hours=duration_hours)
-    cutoff = now + timedelta(hours=start_within_hours)
-    sorted_prices = sorted(prices, key=lambda price: price['valid_from'])
-    candidates = []
-    candidate = now
-    while candidate < cutoff:
-        candidates.append(candidate)
-        candidate += timedelta(minutes=30)
-
-    best_start = None
-    best_average_price = float('inf')
-
-    for start in sorted(candidates):
-        end = start + duration
-        average_price = _calculate_weighted_average_price(sorted_prices, start, end)
-        if average_price is None:
-            continue
-
-        if average_price < best_average_price:
-            best_average_price = average_price
-            best_start = start
-
-    if best_start is None:
-        return None
-
-    return {
-        'start': best_start,
-        'end': best_start + duration,
-        'average_price_gbp': best_average_price,
-    }
+def _has_contiguous_price_coverage(window):
+    return all(
+        current_price['valid_to'] == next_price['valid_from']
+        for current_price, next_price in zip(window, window[1:])
+    )
 
 
 def _calculate_weighted_average_price(prices, start, end):
