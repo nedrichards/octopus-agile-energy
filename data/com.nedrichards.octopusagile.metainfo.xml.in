@@ -60,6 +60,16 @@
   </screenshots>
 
   <releases>
+    <release version="1.0.17" date="2026-07-03">
+      <description>
+        <p>This release makes cheapest-time planning more reliable.</p>
+        <ul>
+          <li>Keep the best window aligned to tariff half-hour boundaries while leaving appliance timers time-relative</li>
+          <li>Handle missing or unordered price data more defensively</li>
+          <li>Show negative prices with clearer currency formatting</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.16" date="2026-06-29">
       <description>
         <p>This release improves appliance planning in the cheapest-time tool.</p>
