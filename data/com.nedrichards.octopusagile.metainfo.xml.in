@@ -60,6 +60,16 @@
   </screenshots>
 
   <releases>
+    <release version="1.0.18" date="2026-07-04">
+      <description>
+        <p>This release refreshes the upcoming price chart.</p>
+        <ul>
+          <li>Use a refined line chart with coloured price segments, feature markers, and clearer selected-slot details</li>
+          <li>Make chart interaction more accessible with keyboard navigation, Pango-rendered text, and screen-reader value descriptions</li>
+          <li>Keep the full forecast horizon available on small windows through horizontal scrolling</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.17" date="2026-07-03">
       <description>
         <p>This release makes cheapest-time planning more reliable.</p>
