@@ -5,11 +5,10 @@ COMPACT_PRICE_WIDTH_THRESHOLD = 480
 COMPACT_PRICE_HEIGHT_THRESHOLD = 560
 REGULAR_PRICE_WIDTH_THRESHOLD = 640
 DEFAULT_CHART_SLOTS = 48
-MIN_CHART_SLOTS = 24
 MAX_CHART_SLOTS = 96
-COMPACT_CHART_BAR_WIDTH = 18
-REGULAR_CHART_BAR_WIDTH = 14
-WIDE_CHART_BAR_WIDTH = 16
+COMPACT_CHART_SLOT_WIDTH = 18
+REGULAR_CHART_SLOT_WIDTH = 14
+WIDE_CHART_SLOT_WIDTH = 16
 
 
 def is_compact_width(width):
@@ -36,15 +35,7 @@ def get_chart_slot_count(width):
     if width <= 0:
         return DEFAULT_CHART_SLOTS
 
-    usable_width = max(width - 96, 240)
-    slot_count = usable_width // 14
-    slot_count = max(MIN_CHART_SLOTS, min(MAX_CHART_SLOTS, slot_count))
-
-    remainder = slot_count % 4
-    if remainder:
-        slot_count -= remainder
-
-    return max(MIN_CHART_SLOTS, slot_count)
+    return MAX_CHART_SLOTS
 
 
 def get_chart_content_width(width, slot_count):
@@ -52,14 +43,14 @@ def get_chart_content_width(width, slot_count):
         slot_count = DEFAULT_CHART_SLOTS
 
     if width >= 1100:
-        bar_width = WIDE_CHART_BAR_WIDTH
+        slot_width = WIDE_CHART_SLOT_WIDTH
     elif is_compact_width(width):
-        bar_width = COMPACT_CHART_BAR_WIDTH
+        slot_width = COMPACT_CHART_SLOT_WIDTH
     else:
-        bar_width = REGULAR_CHART_BAR_WIDTH
+        slot_width = REGULAR_CHART_SLOT_WIDTH
 
     viewport_width = max(width - 16, 240) if width > 0 else 240
-    content_width = slot_count * bar_width + 64
+    content_width = slot_count * slot_width + 64
     return max(viewport_width, content_width)
 
 

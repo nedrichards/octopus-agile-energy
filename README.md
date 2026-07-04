@@ -4,7 +4,7 @@ This is a modern GNOME application built to track and visualise UK smart electri
 
 * **Current Price Display:** Shows the real-time electricity price (pence/kWh).
 * **Price Level Indicators:** Visually indicates whether the current price is low, medium, high, or even negative.
-* **Adaptive Price Forecast Chart:** Displays a bar chart of upcoming half-hourly price data, adapting the visible horizon to the available space while keeping small-screen layouts usable.
+* **Adaptive Price Forecast Chart:** Displays upcoming half-hourly price data in a horizontally scrollable chart while keeping small-screen layouts usable.
 * **Find Cheapest Time:** A built-in calculator to find the cheapest time window for a specific duration, including half-hour appliance runs such as "3h 30m in the next 24 hours".
 * **Region and Tariff Selection:** Allows users to select their region and tariff through a preferences window. Supports Agile, Go, Intelligent Go, and dual-register day/night tariffs. Intelligent Go needs a user-provided API key.
 * **Usage History:** Shows recent smart meter usage and estimated spend when an API key and account number are configured, with clear setup and loading states when account access is not available yet.

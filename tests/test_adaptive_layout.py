@@ -32,21 +32,21 @@ class AdaptiveLayoutTests(unittest.TestCase):
         self.assertEqual(get_chart_height(800), 220)
         self.assertEqual(get_chart_height(1280), 260)
 
-    def test_chart_slot_count_scales_with_window_width(self):
+    def test_chart_slot_count_keeps_forecast_horizon_across_widths(self):
         self.assertEqual(get_chart_slot_count(0), 48)
-        self.assertEqual(get_chart_slot_count(360), 24)
-        self.assertEqual(get_chart_slot_count(700), 40)
-        self.assertEqual(get_chart_slot_count(1280), 84)
+        self.assertEqual(get_chart_slot_count(360), 96)
+        self.assertEqual(get_chart_slot_count(700), 96)
+        self.assertEqual(get_chart_slot_count(1280), 96)
 
-    def test_chart_content_width_preserves_legible_bar_width(self):
-        self.assertEqual(get_chart_content_width(360, 24), 496)
-        self.assertEqual(get_chart_content_width(700, 40), 684)
-        self.assertEqual(get_chart_content_width(1280, 84), 1408)
+    def test_chart_content_width_preserves_legible_slot_width(self):
+        self.assertEqual(get_chart_content_width(360, 96), 1792)
+        self.assertEqual(get_chart_content_width(700, 96), 1408)
+        self.assertEqual(get_chart_content_width(1280, 96), 1600)
 
     def test_time_label_interval_varies_by_density(self):
-        self.assertEqual(get_time_label_interval(420, 24), 6)
-        self.assertEqual(get_time_label_interval(800, 40), 8)
-        self.assertEqual(get_time_label_interval(1280, 84), 12)
+        self.assertEqual(get_time_label_interval(420, 96), 24)
+        self.assertEqual(get_time_label_interval(800, 96), 16)
+        self.assertEqual(get_time_label_interval(1280, 96), 12)
 
     def test_chart_scroll_value_keeps_target_visible(self):
         self.assertEqual(get_chart_scroll_value(0, 300, 280, 100), 0)
