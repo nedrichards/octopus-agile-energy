@@ -151,6 +151,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
         self.auto_detect_status.set_xalign(0)
         self.auto_detect_status.add_css_class("dim-label")
         self.auto_detect_status.set_wrap(True)
+        self.auto_detect_status.set_accessible_role(Gtk.AccessibleRole.STATUS)
         api_group.add(self.auto_detect_status)
 
         self.refresh_usage_button = Gtk.Button.new_with_label("Refresh usage history")
@@ -162,6 +163,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
         self.usage_status.set_xalign(0)
         self.usage_status.add_css_class("dim-label")
         self.usage_status.set_wrap(True)
+        self.usage_status.set_accessible_role(Gtk.AccessibleRole.STATUS)
         api_group.add(self.usage_status)
 
         self.present()

@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from usage_insights import build_usage_insight_data
+from usage_insights import build_rolling_average, build_usage_insight_data, build_usage_pattern_insights
 
 
 class UsageInsightsTests(unittest.TestCase):
@@ -20,7 +20,66 @@ class UsageInsightsTests(unittest.TestCase):
         self.assertIn("kWh/day", result["avg_text"])
         self.assertIn("%", result["trend_text"])
         self.assertGreater(len(result["chart_points"]), 0)
+        self.assertEqual(len(result["chart_rolling_average"]), len(result["chart_points"]))
         self.assertNotIn("Data coverage:", result["summary"])
+
+    def test_builds_trailing_rolling_average(self):
+        result = build_rolling_average([1, 2, 3, 4], window_size=3)
+
+        self.assertEqual(result, [1, 1.5, 2, 3])
+
+    def test_rolling_average_rejects_invalid_window_size(self):
+        with self.assertRaises(ValueError):
+            build_rolling_average([1, 2, 3], window_size=0)
+
+    def test_builds_usage_pattern_insights(self):
+        samples = self._daily_samples(7, lambda _day: 4.8)
+        daily_costs = [{
+            "date": f"2026-03-{day+1:02d}",
+            "sample_count": 48,
+            "missing_rate_count": 0,
+            "matched_kwh": 10.0,
+            "cheap_kwh": 4.0,
+            "negative_kwh": 1.0,
+            "high_kwh": 2.0,
+            "energy_cost_gbp": 1.25,
+        } for day in range(7)]
+
+        result = build_usage_pattern_insights(samples, daily_costs)
+
+        self.assertEqual(result["baseline_text"], "~200 W")
+        self.assertEqual(result["cheap_rate_text"], "40%")
+        self.assertEqual(result["average_unit_text"], "12.5p/kWh")
+        self.assertIn("negative prices", result["cheap_rate_detail"])
+
+    def test_rate_capture_handles_old_cached_daily_costs_without_price_bands(self):
+        result = build_usage_pattern_insights([], [{
+            "date": "2026-03-01",
+            "sample_count": 48,
+            "missing_rate_count": 0,
+            "kwh": 10.0,
+            "energy_cost_gbp": 1.25,
+        }])
+
+        self.assertEqual(result["cheap_rate_text"], "—")
+        self.assertEqual(result["average_unit_text"], "12.5p/kWh")
+        self.assertIn("Refresh usage history", result["cheap_rate_detail"])
+
+    def test_peak_pattern_identifies_largest_usage_band(self):
+        samples = []
+        for slot in range(48):
+            hour = slot // 2
+            minute = "30" if slot % 2 else "00"
+            consumption = 2.0 if hour == 18 else 0.1
+            samples.append({
+                "interval_start": f"2026-03-01T{hour:02d}:{minute}:00Z",
+                "consumption": consumption,
+            })
+
+        result = build_usage_pattern_insights(samples, [])
+
+        self.assertIn("Evening", result["peak_text"])
+        self.assertIn("18:00-18:30", result["peak_detail"])
 
     def test_includes_low_data_coverage_only_when_history_is_short(self):
         samples = self._daily_samples(10, lambda _day: 10)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from bisect import bisect_right
 from datetime import datetime, timedelta, timezone
 
 
@@ -58,6 +59,15 @@ def get_usage_period(samples):
 
 def build_daily_costs(samples, tariff_periods, rates_by_tariff, standing_charges_by_tariff):
     daily = {}
+    tariff_lookup = _prepare_tariff_lookup(tariff_periods)
+    rates_lookup = {
+        tariff_code: _prepare_record_lookup(records)
+        for tariff_code, records in rates_by_tariff.items()
+    }
+    standing_charge_lookup = {
+        tariff_code: _prepare_record_lookup(records)
+        for tariff_code, records in standing_charges_by_tariff.items()
+    }
 
     for sample in samples:
         start = parse_octopus_datetime(sample.get("interval_start"))
@@ -78,6 +88,10 @@ def build_daily_costs(samples, tariff_periods, rates_by_tariff, standing_charges
                 "energy_cost_gbp": 0.0,
                 "standing_charge_gbp": 0.0,
                 "total_cost_gbp": 0.0,
+                "matched_kwh": 0.0,
+                "cheap_kwh": 0.0,
+                "negative_kwh": 0.0,
+                "high_kwh": 0.0,
                 "missing_rate_count": 0,
                 "sample_count": 0,
             },
@@ -85,19 +99,27 @@ def build_daily_costs(samples, tariff_periods, rates_by_tariff, standing_charges
         day["kwh"] += consumption
         day["sample_count"] += 1
 
-        tariff_code = _find_tariff_code(tariff_periods, start)
-        rate = _find_record(rates_by_tariff.get(tariff_code, []), start) if tariff_code else None
+        tariff_code = _find_tariff_code(tariff_lookup, start)
+        rate = _find_record(rates_lookup.get(tariff_code, []), start) if tariff_code else None
         if not rate:
             day["missing_rate_count"] += 1
             continue
 
-        day["energy_cost_gbp"] += consumption * (float(rate.get("value_inc_vat", 0.0)) / 100.0)
+        unit_rate_gbp = float(rate.get("value_inc_vat", 0.0)) / 100.0
+        day["matched_kwh"] += consumption
+        if unit_rate_gbp < 0:
+            day["negative_kwh"] += consumption
+        if unit_rate_gbp < 0.15:
+            day["cheap_kwh"] += consumption
+        if unit_rate_gbp >= 0.25:
+            day["high_kwh"] += consumption
+        day["energy_cost_gbp"] += consumption * unit_rate_gbp
 
     for day_key, day in daily.items():
         midday = datetime.fromisoformat(day_key).replace(hour=12, tzinfo=timezone.utc)
-        tariff_code = _find_tariff_code(tariff_periods, midday)
+        tariff_code = _find_tariff_code(tariff_lookup, midday)
         standing_charge = (
-            _find_record(standing_charges_by_tariff.get(tariff_code, []), midday)
+            _find_record(standing_charge_lookup.get(tariff_code, []), midday)
             if tariff_code
             else None
         )
@@ -108,17 +130,47 @@ def build_daily_costs(samples, tariff_periods, rates_by_tariff, standing_charges
     return [daily[key] for key in sorted(daily)]
 
 
-def _find_tariff_code(tariff_periods, target):
+def _prepare_tariff_lookup(tariff_periods):
+    prepared = []
     for period in tariff_periods:
-        if period["valid_from"] <= target < period["valid_to"]:
-            return period["tariff_code"]
-    return None
+        valid_from = period.get("valid_from")
+        valid_to = period.get("valid_to") or datetime.max.replace(tzinfo=timezone.utc)
+        tariff_code = period.get("tariff_code")
+        if valid_from and tariff_code:
+            prepared.append((valid_from, valid_to, tariff_code))
+    ranges = sorted(prepared, key=lambda item: item[0])
+    return [record[0] for record in ranges], ranges
 
 
-def _find_record(records, target):
+def _prepare_record_lookup(records):
+    prepared = []
     for record in records:
         valid_from = parse_octopus_datetime(record.get("valid_from"))
         valid_to = parse_octopus_datetime(record.get("valid_to")) or datetime.max.replace(tzinfo=timezone.utc)
-        if valid_from and valid_from <= target < valid_to:
-            return record
+        if valid_from:
+            prepared.append((valid_from, valid_to, record))
+    ranges = sorted(prepared, key=lambda item: item[0])
+    return [record[0] for record in ranges], ranges
+
+
+def _find_tariff_code(tariff_periods, target):
+    return _find_range_value(tariff_periods, target)
+
+
+def _find_record(records, target):
+    return _find_range_value(records, target)
+
+
+def _find_range_value(records, target):
+    if not records or not records[0]:
+        return None
+
+    starts, ranges = records
+    index = bisect_right(starts, target) - 1
+    if index < 0:
+        return None
+
+    valid_from, valid_to, value = ranges[index]
+    if valid_from <= target < valid_to:
+        return value
     return None

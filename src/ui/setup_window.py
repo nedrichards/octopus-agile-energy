@@ -134,6 +134,7 @@ class SetupWindow(Adw.Window):
         artwork.set_hexpand(True)
         artwork.set_size_request(-1, height)
         artwork.set_content_fit(Gtk.ContentFit.CONTAIN)
+        artwork.set_accessible_role(Gtk.AccessibleRole.PRESENTATION)
         return artwork
 
     def _build_account_page(self):
@@ -193,6 +194,7 @@ class SetupWindow(Adw.Window):
         self.account_status.set_xalign(0)
         self.account_status.set_wrap(True)
         self.account_status.add_css_class("dim-label")
+        self.account_status.set_accessible_role(Gtk.AccessibleRole.STATUS)
         box.append(self.account_status)
 
         button_box = Gtk.Box.new(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
