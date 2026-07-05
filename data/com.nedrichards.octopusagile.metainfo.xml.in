@@ -60,6 +60,17 @@
   </screenshots>
 
   <releases>
+    <release version="1.0.19" date="2026-07-05">
+      <description>
+        <p>This release makes usage history more useful and responsive.</p>
+        <ul>
+          <li>Add richer usage insights for always-on load, peak usage periods, cheap-rate capture, and effective unit rates</li>
+          <li>Refresh the usage chart with selected-day details, rolling averages, stacked spend bars, and clearer incomplete-data styling</li>
+          <li>Improve keyboard and screen-reader access for usage charts, status updates, and custom duration controls</li>
+          <li>Make toolbar refresh bypass cached data for the visible tab, including account-backed usage history</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.18" date="2026-07-04">
       <description>
         <p>This release refreshes the upcoming price chart.</p>
