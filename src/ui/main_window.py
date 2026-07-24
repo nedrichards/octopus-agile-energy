@@ -607,7 +607,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.cheap_rate_row = Adw.ActionRow.new()
         self.cheap_rate_row.set_title("Cheap-rate usage")
         self.cheap_rate_row.set_subtitle("Waiting for matched historical rates.")
-        self.cheap_rate_row.add_prefix(Gtk.Image.new_from_icon_name("emblem-favorite-symbolic"))
+        self.cheap_rate_row.add_prefix(Gtk.Image.new_from_icon_name("starred-symbolic"))
         self.cheap_rate_label = Gtk.Label.new("—")
         self.cheap_rate_row.add_suffix(self.cheap_rate_label)
         usage_patterns_group.add(self.cheap_rate_row)
@@ -1679,7 +1679,7 @@ class MainWindow(Adw.ApplicationWindow):
             if selected_date in self.usage_chart_dates:
                 self.usage_chart_selected_index = self.usage_chart_dates.index(selected_date)
             else:
-                self.usage_chart_selected_index = len(self.usage_chart_dates) - 1
+                self.usage_chart_selected_index = 0
         else:
             self.usage_chart_selected_index = -1
         self.usage_chart_hovered_index = -1
@@ -2040,11 +2040,11 @@ class MainWindow(Adw.ApplicationWindow):
                     "sample_count": day.get("sample_count"),
                 })
             return (
-                insight["chart_points"],
-                insight["chart_dates"],
+                list(reversed(insight["chart_points"])),
+                list(reversed(insight["chart_dates"])),
                 "kWh",
-                daily_data,
-                insight.get("chart_rolling_average", []),
+                list(reversed(daily_data)),
+                list(reversed(insight.get("chart_rolling_average", []))),
             )
 
         points = []
@@ -2058,7 +2058,13 @@ class MainWindow(Adw.ApplicationWindow):
             dates.append(date)
             daily_data.append(day)
 
-        return points, dates, "£", daily_data, build_rolling_average(points)
+        return (
+            list(reversed(points)),
+            list(reversed(dates)),
+            "£",
+            list(reversed(daily_data)),
+            list(reversed(build_rolling_average(points))),
+        )
 
     def _set_usage_chart_selected_index(self, index):
         if not self.usage_chart_points:
@@ -2143,7 +2149,7 @@ class MainWindow(Adw.ApplicationWindow):
                 self._build_accessible_usage_day_summary(index),
             ])
             values[1] = (
-                "Daily usage history. Use the left and right arrow keys "
+                "Daily usage history, newest day first. Use the left and right arrow keys "
                 "to review individual days."
             )
             if 0 <= self.usage_chart_selected_index < len(self.usage_chart_points):
