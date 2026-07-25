@@ -24,8 +24,8 @@ class CacheManager:
 
     def _get_cache_filepath(self, key):
         """Generates a unique file path for a given cache key."""
-        # Use MD5 hash of the key for the filename
-        hashed_key = hashlib.md5(key.encode('utf-8')).hexdigest()
+        # Use a stable hash to make the key safe for use as a filename.
+        hashed_key = hashlib.sha256(key.encode('utf-8')).hexdigest()
         return os.path.join(self.cache_dir, hashed_key + ".json")
 
     def get(self, key: str) -> tuple[dict | None, float | None]:
