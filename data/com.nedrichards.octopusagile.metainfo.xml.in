@@ -46,20 +46,37 @@
 
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/nedrichards/octopus-agile-energy/3399f48bf479f2ecf63baa66fa052a5dd4505451/data/octopus-agile-screenshot.png</image>
+      <image>https://raw.githubusercontent.com/nedrichards/octopus-agile-energy/d69f51d5882a1608aa1d70f93a655278951f22b4/data/octopus-agile-screenshot.png</image>
       <caption>View current and upcoming prices</caption>
     </screenshot>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/nedrichards/octopus-agile-energy/3399f48bf479f2ecf63baa66fa052a5dd4505451/data/octopus-agile-screenshot-find.png</image>
+      <image>https://raw.githubusercontent.com/nedrichards/octopus-agile-energy/d69f51d5882a1608aa1d70f93a655278951f22b4/data/octopus-agile-screenshot-find.png</image>
       <caption>Find the cheapest time</caption>
     </screenshot>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/nedrichards/octopus-agile-energy/3399f48bf479f2ecf63baa66fa052a5dd4505451/data/octopus-agile-screenshot-small.png</image>
+      <image>https://raw.githubusercontent.com/nedrichards/octopus-agile-energy/d69f51d5882a1608aa1d70f93a655278951f22b4/data/octopus-agile-screenshot-small.png</image>
       <caption>Scale to any screen size</caption>
+    </screenshot>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/nedrichards/octopus-agile-energy/d69f51d5882a1608aa1d70f93a655278951f22b4/data/octopus-agile-screenshot-dark.png</image>
+      <caption>Follow the price forecast in dark mode</caption>
+    </screenshot>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/nedrichards/octopus-agile-energy/d69f51d5882a1608aa1d70f93a655278951f22b4/data/octopus-agile-screenshot-usage.png</image>
+      <caption>Review daily electricity use and trends</caption>
     </screenshot>
   </screenshots>
 
   <releases>
+    <release version="1.0.20" date="2026-07-25">
+      <description>
+        <p>This release refreshes the AppStream listing to reflect the latest interface.</p>
+        <ul>
+          <li>Update price, cheapest-time, and adaptive-layout screenshots</li>
+          <li>Add screenshots for the dark price forecast and usage insights</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.19" date="2026-07-05">
       <description>
         <p>This release makes usage history more useful and responsive.</p>
