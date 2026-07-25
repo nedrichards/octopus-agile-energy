@@ -68,6 +68,17 @@
   </screenshots>
 
   <releases>
+    <release version="1.0.21" date="2026-07-25">
+      <description>
+        <p>This release makes price levels and chart interaction clearer.</p>
+        <ul>
+          <li>Extend hovered and selected slot highlighting across the full chart while keeping price areas anchored to zero</li>
+          <li>Keep zero visible for negative forecasts, strengthen the zero baseline, preserve selections during refresh, and label every visible day boundary</li>
+          <li>Recalibrate and version low and high price bands against current Flexible Octopus rates, with matching usage insights and cache refresh behaviour</li>
+          <li>Fix command-line launches of the development Flatpak</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.20" date="2026-07-25">
       <description>
         <p>This release refreshes the AppStream listing to reflect the latest interface.</p>
