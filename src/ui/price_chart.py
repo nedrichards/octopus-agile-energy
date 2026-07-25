@@ -10,6 +10,18 @@ import time
 import cairo
 from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo
 
+from ..price_bands import (
+    PRICE_BAND_HIGH,
+    PRICE_BAND_LOW,
+    PRICE_BAND_MEDIUM,
+    PRICE_BAND_NEGATIVE,
+    get_price_band,
+)
+from ..price_chart_presentation import (
+    find_price_index_by_start,
+    get_day_transition_markers,
+    get_price_axis_bounds,
+)
 from ..price_formatting import format_gbp, format_unit_price_gbp
 from .adaptive_layout import (
     get_chart_content_width,
@@ -82,11 +94,26 @@ class PriceChartWidget(Gtk.DrawingArea):
         Updates the price data and current price index for the chart.
         Queues a redraw to reflect the new data.
         """
+        previous_times = [price['valid_from'] for price in self.prices]
+        selected_time = (
+            self.prices[self.selected_index]['valid_from']
+            if 0 <= self.selected_index < len(self.prices)
+            else None
+        )
         self.prices = prices
         self.current_price_index = current_index
-        self._ensure_slot_energies()
-        if self.selected_index >= len(self.prices):
-            self.selected_index = -1
+        current_times = [price['valid_from'] for price in self.prices]
+
+        if current_times != previous_times:
+            self.selected_index = find_price_index_by_start(self.prices, selected_time)
+            self.hovered_index = -1
+            self.hover_started_at = None
+            self.slot_energies = [0.0] * len(self.prices)
+        else:
+            self._ensure_slot_energies()
+            if self.selected_index >= len(self.prices):
+                self.selected_index = -1
+
         self._update_accessible_summary()
         self.queue_draw()
 
@@ -413,12 +440,9 @@ class PriceChartWidget(Gtk.DrawingArea):
         prices_gbp = [p['price_gbp'] for p in self.prices]
         min_price = min(prices_gbp)
         max_price = max(prices_gbp)
-        display_min_price = 0 if min_price >= 0 else min_price
-        price_range = max_price - display_min_price
-        if price_range <= 0:
-            price_range = 0.01
-
-        chart_zero_y = self.margin_top + chart_height * (max_price / price_range) if display_min_price < 0 else self.margin_top + chart_height
+        display_min_price, display_max_price = get_price_axis_bounds(prices_gbp)
+        price_range = display_max_price - display_min_price
+        chart_zero_y = self.margin_top + chart_height * (display_max_price / price_range)
 
         # Fetch style context once
         style_context = self.get_style_context()
@@ -444,12 +468,14 @@ class PriceChartWidget(Gtk.DrawingArea):
         # Calculate where to start drawing lines
         current_grid_price = math.ceil(display_min_price / step) * step
 
-        while current_grid_price <= max_price + 0.0001:
+        while current_grid_price <= display_max_price + 0.0001:
             line_y = chart_zero_y - (current_grid_price / price_range) * chart_height
+            is_zero_line = abs(current_grid_price) < max(0.0001, step / 1000)
 
-            # Draw line (subtle)
-            cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, 0.1)
-            cr.set_line_width(1.0)
+            # Zero is the semantic boundary between paying and being paid.
+            line_alpha = 0.2 if is_zero_line else 0.1
+            cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, line_alpha)
+            cr.set_line_width(1.25 if is_zero_line else 1.0)
             cr.move_to(self.margin_left, round(line_y) + 0.5)
             cr.line_to(self.margin_left + chart_width, round(line_y) + 0.5)
             cr.stroke()
@@ -458,7 +484,8 @@ class PriceChartWidget(Gtk.DrawingArea):
             label = format_gbp(current_grid_price)
             label_layout = self._create_text_layout(label, scale=0.9)
             label_width, label_height = self._layout_size(label_layout)
-            cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, 0.5)
+            label_alpha = 0.65 if is_zero_line else 0.5
+            cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, label_alpha)
             # Center vertically on the line
             label_y = line_y - label_height / 2
             self._draw_layout(cr, label_layout, self.margin_left - label_width - 5, label_y)
@@ -466,8 +493,6 @@ class PriceChartWidget(Gtk.DrawingArea):
             current_grid_price += step
 
         # --- Draw Chart ---
-        last_date = None
-        day_transition_x = None
         highlight_x_start = None
         highlight_x_end = None
         highlighted_indices = []
@@ -486,12 +511,6 @@ class PriceChartWidget(Gtk.DrawingArea):
             points.append((point_x, point_y))
             slot_bounds.append((bar_x_start, bar_x_start + bar_width - 1))
 
-            # Check for day transition
-            current_date = price_data['valid_from'].astimezone().date()
-            if last_date and current_date != last_date:
-                day_transition_x = bar_x_start
-            last_date = current_date
-
             # Highlight the best slot
             if self.highlight_start_time and self.highlight_end_time:
                 if self.highlight_start_time <= price_data['valid_from'] < self.highlight_end_time:
@@ -506,6 +525,13 @@ class PriceChartWidget(Gtk.DrawingArea):
                         if highlight_x_end is None
                         else max(highlight_x_end, bar_x_start + bar_width - 1)
                     )
+
+        day_transitions = [
+            (slot_bounds[index][0], label)
+            for index, label in get_day_transition_markers(
+                [price['valid_from'] for price in self.prices]
+            )
+        ]
 
         self._draw_highlight_range(
             cr,
@@ -525,6 +551,16 @@ class PriceChartWidget(Gtk.DrawingArea):
                 energy = self.slot_energies[i] if i < len(self.slot_energies) else 0.0
             else:
                 energy = 1.0 if i == self.hovered_index else 0.65 if i == self.selected_index else 0.0
+
+            if i in (self.hovered_index, self.selected_index):
+                self._draw_active_slot_wash(
+                    cr,
+                    fg_color,
+                    energy,
+                    bar_x_start + 0.5,
+                    bar_x_start + max(1, bar_width - 1),
+                    chart_height,
+                )
 
             fill_alpha = 0.035 + (0.18 * energy)
             if i == self.current_price_index:
@@ -603,21 +639,8 @@ class PriceChartWidget(Gtk.DrawingArea):
 
         self._draw_highlight_label(cr, fg_color, highlight_x_start, highlight_x_end, width)
 
-        active_index = self.hovered_index if self.hovered_index != -1 else self.selected_index
-        if 0 <= active_index < len(points):
-            self._draw_slot_flyout(
-                cr,
-                fg_color,
-                active_index,
-                points[active_index],
-                min_index,
-                max_index,
-                chart_width,
-                width,
-            )
-
         # --- Draw Day Transition Indicator ---
-        if day_transition_x:
+        for day_transition_x, day_label in day_transitions:
             cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, 0.2)
             cr.set_line_width(1.0)
             cr.set_dash([4.0, 4.0])
@@ -627,9 +650,9 @@ class PriceChartWidget(Gtk.DrawingArea):
             cr.set_dash([]) # Reset dash
 
             # Day label
-            tomorrow_layout = self._create_text_layout("Tomorrow", scale=0.9)
+            day_layout = self._create_text_layout(day_label, scale=0.9)
             cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, 0.5)
-            self._draw_layout(cr, tomorrow_layout, day_transition_x + 5, self.margin_top + 4)
+            self._draw_layout(cr, day_layout, day_transition_x + 5, self.margin_top + 4)
 
         # --- Draw Time Labels ---
         cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, 0.5)
@@ -644,6 +667,20 @@ class PriceChartWidget(Gtk.DrawingArea):
                 text_x = round(bar_x_center - time_width / 2)
                 text_y = height - time_height - 4
                 self._draw_layout(cr, time_layout, text_x, text_y)
+
+        # Keep the active detail surface above every chart decoration.
+        active_index = self.hovered_index if self.hovered_index != -1 else self.selected_index
+        if 0 <= active_index < len(points):
+            self._draw_slot_flyout(
+                cr,
+                fg_color,
+                active_index,
+                points[active_index],
+                min_index,
+                max_index,
+                chart_width,
+                width,
+            )
 
     def _draw_highlight_label(self, cr, fg_color, highlight_x_start, highlight_x_end, width):
         if not self.highlight_label or highlight_x_start is None or highlight_x_end is None:
@@ -704,6 +741,23 @@ class PriceChartWidget(Gtk.DrawingArea):
         cr.line_to(highlight_x_end, self.margin_top + chart_height - 1.5)
         cr.set_line_width(1.0)
         cr.stroke()
+        cr.restore()
+
+    def _draw_active_slot_wash(self, cr, fg_color, energy, left_x, right_x, chart_height):
+        """Draw interaction state across the plot without changing price-area semantics."""
+        if energy <= 0.001:
+            return
+
+        cr.save()
+        cr.rectangle(
+            left_x,
+            self.margin_top + 2,
+            max(1, right_x - left_x),
+            max(1, chart_height - 4),
+        )
+        alpha = 0.025 + 0.045 * energy
+        cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, alpha)
+        cr.fill()
         cr.restore()
 
     def _draw_highlight_line_ribbon(self, cr, points, highlighted_indices):
@@ -795,16 +849,18 @@ class PriceChartWidget(Gtk.DrawingArea):
         return (current_y + next_y) / 2
 
     def _get_price_color(self, style_context, price):
-        if price < 0:
+        price_band = get_price_band(price)
+        if price_band == PRICE_BAND_NEGATIVE:
             success, color = style_context.lookup_color("blue_4")
             return (color.red, color.green, color.blue) if success else (0.2, 0.4, 0.8)
-        if price < 0.15:
+        if price_band == PRICE_BAND_LOW:
             success, color = style_context.lookup_color("green_4")
             return (color.red, color.green, color.blue) if success else (0.2, 0.8, 0.2)
-        if price < 0.25:
+        if price_band == PRICE_BAND_MEDIUM:
             success, color = style_context.lookup_color("orange_3")
             return (color.red, color.green, color.blue) if success else (1.0, 0.6, 0.0)
 
+        assert price_band == PRICE_BAND_HIGH
         success, color = style_context.lookup_color("red_4")
         return (color.red, color.green, color.blue) if success else (0.8, 0.2, 0.2)
 
@@ -936,13 +992,7 @@ class PriceChartWidget(Gtk.DrawingArea):
             return "Peak visible price"
         if in_highlight:
             return self.highlight_label or "Cheapest window"
-        if price < 0:
-            return "Negative price"
-        if price < 0.15:
-            return "Low price"
-        if price < 0.25:
-            return "Medium price"
-        return "High price"
+        return f"{get_price_band(price).title()} price"
 
     def _rounded_rectangle(self, cr, x, y, width, height, radius):
         radius = min(radius, width / 2, height / 2)

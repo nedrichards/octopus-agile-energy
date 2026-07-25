@@ -20,6 +20,7 @@ from ..find_cheapest_presentation import (
     format_timer_slot_detail,
 )
 from ..octopus_api import OctopusApiError
+from ..price_bands import PRICE_BAND_NEGATIVE, PRICE_BAND_VERSION, get_price_band
 from ..price_formatting import format_gbp, format_unit_price_gbp
 from ..price_logic import build_dual_register_price_windows, extract_product_code
 from ..price_logic import find_cheapest_slot as calculate_cheapest_slot
@@ -1504,19 +1505,13 @@ class MainWindow(Adw.ApplicationWindow):
         """
         self.current_price_data = current_rate
         price_pounds = current_rate['price_gbp']
+        price_band = get_price_band(price_pounds)
 
-        if price_pounds < 0:
+        if price_band == PRICE_BAND_NEGATIVE:
             status = "Negative (you get paid to use electricity!)"
-            css_class = "price-negative"
-        elif price_pounds < 0.15:
-            status = "Low"
-            css_class = "price-low"
-        elif price_pounds < 0.25:
-            status = "Medium"
-            css_class = "price-medium"
         else:
-            status = "High"
-            css_class = "price-high"
+            status = price_band.title()
+        css_class = f"price-{price_band}"
 
         self._set_price_summary(
             format_unit_price_gbp(price_pounds),
@@ -1706,6 +1701,7 @@ class MainWindow(Adw.ApplicationWindow):
             account_number,
             self.usage_graph_mode,
             cached_data.get("synced_at"),
+            cached_data.get("price_band_version"),
             len(samples),
             sample_edges,
             len(daily_costs),
@@ -1834,7 +1830,13 @@ class MainWindow(Adw.ApplicationWindow):
     def _usage_cache_is_fresh(self, account_number):
         cache_key = f"octopus_usage_{account_number}"
         cached_data, cache_mtime = self.cache_manager.get(cache_key)
-        if not cached_data or "samples" not in cached_data or "daily_costs" not in cached_data or not cache_mtime:
+        if (
+            not cached_data
+            or "samples" not in cached_data
+            or "daily_costs" not in cached_data
+            or cached_data.get("price_band_version") != PRICE_BAND_VERSION
+            or not cache_mtime
+        ):
             return False
 
         return (time.time() - cache_mtime) < USAGE_BACKGROUND_REFRESH_INTERVAL_SECONDS
@@ -1851,6 +1853,7 @@ class MainWindow(Adw.ApplicationWindow):
                     {
                         "samples": usage_samples,
                         "daily_costs": daily_costs,
+                        "price_band_version": PRICE_BAND_VERSION,
                         "synced_at": datetime.now(timezone.utc).isoformat(),
                     },
                 )

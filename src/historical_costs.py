@@ -3,6 +3,14 @@ from __future__ import annotations
 from bisect import bisect_right
 from datetime import datetime, timedelta, timezone
 
+from .price_bands import (
+    PRICE_BAND_HIGH,
+    PRICE_BAND_LOW,
+    PRICE_BAND_NEGATIVE,
+    PRICE_BAND_VERSION,
+    get_price_band,
+)
+
 
 def parse_octopus_datetime(value):
     if not value:
@@ -92,6 +100,7 @@ def build_daily_costs(samples, tariff_periods, rates_by_tariff, standing_charges
                 "cheap_kwh": 0.0,
                 "negative_kwh": 0.0,
                 "high_kwh": 0.0,
+                "price_band_version": PRICE_BAND_VERSION,
                 "missing_rate_count": 0,
                 "sample_count": 0,
             },
@@ -106,12 +115,13 @@ def build_daily_costs(samples, tariff_periods, rates_by_tariff, standing_charges
             continue
 
         unit_rate_gbp = float(rate.get("value_inc_vat", 0.0)) / 100.0
+        price_band = get_price_band(unit_rate_gbp)
         day["matched_kwh"] += consumption
-        if unit_rate_gbp < 0:
+        if price_band == PRICE_BAND_NEGATIVE:
             day["negative_kwh"] += consumption
-        if unit_rate_gbp < 0.15:
+        if price_band in (PRICE_BAND_NEGATIVE, PRICE_BAND_LOW):
             day["cheap_kwh"] += consumption
-        if unit_rate_gbp >= 0.25:
+        if price_band == PRICE_BAND_HIGH:
             day["high_kwh"] += consumption
         day["energy_cost_gbp"] += consumption * unit_rate_gbp
 

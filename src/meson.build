@@ -36,6 +36,8 @@ install_data(
     'find_cheapest_presentation.py',
     'historical_costs.py',
     'octopus_api.py',
+    'price_bands.py',
+    'price_chart_presentation.py',
     'price_formatting.py',
     'usage_history.py',
     'usage_insights.py',

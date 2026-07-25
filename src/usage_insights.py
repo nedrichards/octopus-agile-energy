@@ -2,9 +2,14 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+from .price_bands import (
+    HIGH_PRICE_THRESHOLD_GBP,
+    LOW_PRICE_THRESHOLD_GBP,
+    PRICE_BAND_VERSION,
+    format_price_threshold,
+)
+
 SAMPLES_PER_COMPLETE_DAY = 48
-CHEAP_RATE_GBP = 0.15
-HIGH_RATE_GBP = 0.25
 USAGE_BANDS = (
     ("Overnight", 0, 6),
     ("Morning", 6, 12),
@@ -174,7 +179,11 @@ def _build_rate_capture(daily_costs: list[dict]):
         }
 
     has_price_band_data = all(
-        "matched_kwh" in day and "cheap_kwh" in day and "high_kwh" in day and "negative_kwh" in day
+        day.get("price_band_version") == PRICE_BAND_VERSION
+        and "matched_kwh" in day
+        and "cheap_kwh" in day
+        and "high_kwh" in day
+        and "negative_kwh" in day
         for day in complete_days
     )
     cheap_kwh = sum(float(day.get("cheap_kwh", 0.0) or 0.0) for day in complete_days)
@@ -201,12 +210,14 @@ def _build_rate_capture(daily_costs: list[dict]):
     return {
         "cheap_rate_text": f"{cheap_share:.0f}%",
         "cheap_rate_detail": (
-            f"{cheap_kwh:.1f} of {matched_kwh:.1f} kWh landed below {CHEAP_RATE_GBP * 100:.0f}p/kWh."
+            f"{cheap_kwh:.1f} of {matched_kwh:.1f} kWh landed below "
+            f"{format_price_threshold(LOW_PRICE_THRESHOLD_GBP)}."
             f"{negative_detail}"
         ),
         "average_unit_text": f"{average_unit_pence:.1f}p/kWh",
         "average_unit_detail": (
-            f"Effective energy rate across matched days; {high_share:.0f}% of usage was at {HIGH_RATE_GBP * 100:.0f}p/kWh or above."
+            f"Effective energy rate across matched days; {high_share:.0f}% of usage was at "
+            f"{format_price_threshold(HIGH_PRICE_THRESHOLD_GBP)} or above."
         ),
     }
 

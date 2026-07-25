@@ -4,9 +4,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from historical_costs import build_daily_costs, build_tariff_periods, get_usage_period
+from src.historical_costs import build_daily_costs, build_tariff_periods, get_usage_period
+from src.price_bands import PRICE_BAND_VERSION
+
 from price_fixtures import (  # noqa: E402
     AGILE_REGION_A_2025_04_07_PENCE,
     AGILE_REGION_A_2025_05_25_PENCE,
@@ -112,6 +114,7 @@ class HistoricalCostsTests(unittest.TestCase):
         self.assertAlmostEqual(daily[0]["cheap_kwh"], 1.5)
         self.assertAlmostEqual(daily[0]["negative_kwh"], 0.0)
         self.assertAlmostEqual(daily[0]["high_kwh"], 0.0)
+        self.assertEqual(daily[0]["price_band_version"], PRICE_BAND_VERSION)
 
     def test_build_daily_costs_matches_unsorted_rate_records(self):
         tariff_code = "E-1R-AGILE-FLEX-22-11-25-C"
@@ -190,6 +193,36 @@ class HistoricalCostsTests(unittest.TestCase):
         self.assertAlmostEqual(daily[0]["negative_kwh"], 1.0)
         self.assertAlmostEqual(daily[0]["cheap_kwh"], 3.0)
         self.assertAlmostEqual(daily[0]["high_kwh"], 3.0)
+
+    def test_build_daily_costs_uses_exact_price_band_boundaries(self):
+        tariff_code = "E-1R-AGILE-24-10-01-C"
+        samples = [
+            {
+                "interval_start": f"2026-07-25T{slot // 2:02d}:{'30' if slot % 2 else '00'}:00Z",
+                "consumption": 1.0,
+            }
+            for slot in range(4)
+        ]
+        tariff_periods = [{
+            "tariff_code": tariff_code,
+            "valid_from": datetime(2026, 7, 25, tzinfo=timezone.utc),
+            "valid_to": datetime(2026, 7, 26, tzinfo=timezone.utc),
+        }]
+        rates = {
+            tariff_code: [
+                {
+                    "valid_from": sample["interval_start"],
+                    "valid_to": None,
+                    "value_inc_vat": price_pence,
+                }
+                for sample, price_pence in zip(samples, (19.99, 20.0, 26.49, 26.5))
+            ]
+        }
+
+        daily = build_daily_costs(samples, tariff_periods, rates, {})
+
+        self.assertAlmostEqual(daily[0]["cheap_kwh"], 1.0)
+        self.assertAlmostEqual(daily[0]["high_kwh"], 1.0)
 
     def test_build_daily_costs_allows_negative_energy_costs_to_offset_standing_charge(self):
         tariff_code = "E-1R-AGILE-24-10-01-A"

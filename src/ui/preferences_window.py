@@ -11,6 +11,7 @@ import requests
 from gi.repository import Adw, GLib, Gtk
 
 from ..octopus_api import OctopusApiError, get_json
+from ..price_bands import PRICE_BAND_VERSION
 from ..price_logic import build_region_to_tariffs_map
 from ..secrets_manager import clear_api_key, get_api_key, store_api_key
 from ..usage_history import (
@@ -311,6 +312,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
                 {
                     "samples": usage_samples,
                     "daily_costs": daily_costs,
+                    "price_band_version": PRICE_BAND_VERSION,
                     "synced_at": datetime.now(timezone.utc).isoformat(),
                 },
             )

@@ -2,9 +2,10 @@ import sys
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from usage_insights import build_rolling_average, build_usage_insight_data, build_usage_pattern_insights
+from src.price_bands import PRICE_BAND_VERSION
+from src.usage_insights import build_rolling_average, build_usage_insight_data, build_usage_pattern_insights
 
 
 class UsageInsightsTests(unittest.TestCase):
@@ -42,6 +43,7 @@ class UsageInsightsTests(unittest.TestCase):
             "cheap_kwh": 4.0,
             "negative_kwh": 1.0,
             "high_kwh": 2.0,
+            "price_band_version": PRICE_BAND_VERSION,
             "energy_cost_gbp": 1.25,
         } for day in range(7)]
 
@@ -51,6 +53,8 @@ class UsageInsightsTests(unittest.TestCase):
         self.assertEqual(result["cheap_rate_text"], "40%")
         self.assertEqual(result["average_unit_text"], "12.5p/kWh")
         self.assertIn("negative prices", result["cheap_rate_detail"])
+        self.assertIn("below 20p/kWh", result["cheap_rate_detail"])
+        self.assertIn("at 26.5p/kWh or above", result["average_unit_detail"])
 
     def test_rate_capture_handles_old_cached_daily_costs_without_price_bands(self):
         result = build_usage_pattern_insights([], [{
@@ -63,6 +67,22 @@ class UsageInsightsTests(unittest.TestCase):
 
         self.assertEqual(result["cheap_rate_text"], "—")
         self.assertEqual(result["average_unit_text"], "12.5p/kWh")
+        self.assertIn("Refresh usage history", result["cheap_rate_detail"])
+
+    def test_rate_capture_rejects_an_older_price_band_version(self):
+        result = build_usage_pattern_insights([], [{
+            "date": "2026-03-01",
+            "sample_count": 48,
+            "missing_rate_count": 0,
+            "matched_kwh": 10.0,
+            "cheap_kwh": 4.0,
+            "negative_kwh": 1.0,
+            "high_kwh": 2.0,
+            "price_band_version": PRICE_BAND_VERSION - 1,
+            "energy_cost_gbp": 1.25,
+        }])
+
+        self.assertEqual(result["cheap_rate_text"], "—")
         self.assertIn("Refresh usage history", result["cheap_rate_detail"])
 
     def test_peak_pattern_identifies_largest_usage_band(self):
