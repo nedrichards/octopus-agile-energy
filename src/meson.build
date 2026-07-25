@@ -30,6 +30,7 @@ gnome.compile_resources('octopusagile',
 install_data(
   [
     '__init__.py',
+    'application_id.py',
     'main.py',
     'utils.py',
     'secrets_manager.py',

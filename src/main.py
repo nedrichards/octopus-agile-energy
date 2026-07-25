@@ -26,13 +26,14 @@ import sys
 
 from gi.repository import Adw, Gdk, Gtk
 
+from .application_id import get_application_id
 from .ui.main_window import MainWindow
 from .ui.styles import get_css
 
 
 class OctopusAgileApp(Adw.Application):
     def __init__(self):
-        super().__init__(application_id='com.nedrichards.octopusagile')
+        super().__init__(application_id=get_application_id())
         self.connect("activate", self.on_activate)
 
     def on_activate(self, app):
