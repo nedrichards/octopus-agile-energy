@@ -26,7 +26,7 @@ import sys
 
 from gi.repository import Adw, Gdk, Gtk
 
-from .application_id import get_application_id
+from .application_id import get_application_id, is_development_build
 from .ui.main_window import MainWindow
 from .ui.styles import get_css
 
@@ -51,7 +51,7 @@ def main(*args):
     Loads custom CSS for styling.
     """
     logging.basicConfig(
-        level=logging.DEBUG,
+        level=logging.DEBUG if is_development_build() else logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         stream=sys.stdout
     )
