@@ -11,7 +11,6 @@ import requests
 from gi.repository import Adw, GLib, Gtk
 
 from ..octopus_api import OctopusApiError, get_json
-from ..price_bands import PRICE_BAND_VERSION
 from ..price_logic import build_region_to_tariffs_map
 from ..secrets_manager import clear_api_key, get_api_key, store_api_key
 from ..usage_history import (
@@ -19,6 +18,8 @@ from ..usage_history import (
     fetch_all_consumption_pages,
     fetch_recent_usage_samples,
     get_account_data,
+    get_usage_refresh_start,
+    merge_usage_history,
 )
 from ..utils import CacheManager
 
@@ -299,24 +300,32 @@ class PreferencesWindow(Adw.PreferencesWindow):
     def _refresh_usage_history(self):
         try:
             account_data = self._get_account_data()
-            usage_samples = self._fetch_recent_usage_samples(account_data)
-            if not usage_samples:
+            account_number = self.settings.get_string("octopus-account-number").strip()
+            cache_key = f"octopus_usage_{account_number}"
+            cached_data, _cache_mtime = self.cache_manager.get(cache_key)
+            refresh_started_at = datetime.now(timezone.utc)
+            refresh_start = get_usage_refresh_start(cached_data, refresh_started_at)
+            fresh_samples = self._fetch_recent_usage_samples(
+                account_data,
+                period_from=refresh_start,
+                now=refresh_started_at,
+            )
+            if not fresh_samples:
                 GLib.idle_add(self._set_usage_status, "No recent usage data found for this account.")
                 return
 
-            account_number = self.settings.get_string("octopus-account-number").strip()
-            cache_key = f"octopus_usage_{account_number}"
-            daily_costs = self._build_historical_usage_costs_for_cache(account_data, usage_samples)
-            self.cache_manager.set(
-                cache_key,
-                {
-                    "samples": usage_samples,
-                    "daily_costs": daily_costs,
-                    "price_band_version": PRICE_BAND_VERSION,
-                    "synced_at": datetime.now(timezone.utc).isoformat(),
-                },
+            fresh_daily_costs = self._build_historical_usage_costs_for_cache(account_data, fresh_samples)
+            refreshed_data = merge_usage_history(
+                cached_data,
+                fresh_samples,
+                fresh_daily_costs,
+                now=datetime.now(timezone.utc),
             )
-            GLib.idle_add(self._set_usage_status, f"Usage history refreshed ({len(usage_samples)} records).")
+            self.cache_manager.set(cache_key, refreshed_data)
+            GLib.idle_add(
+                self._set_usage_status,
+                f"Usage history refreshed ({len(refreshed_data['samples'])} records).",
+            )
         except OctopusApiError as e:
             GLib.idle_add(self._set_usage_status, f"{e} Could not refresh usage history.")
         except requests.exceptions.RequestException as e:
@@ -335,10 +344,10 @@ class PreferencesWindow(Adw.PreferencesWindow):
             logger.debug("Historical usage cost network error: %s", e)
         except Exception as e:
             logger.debug("Unexpected historical usage cost error: %s", e)
-        return []
+        return None
 
-    def _fetch_recent_usage_samples(self, account_data):
-        return fetch_recent_usage_samples(account_data)
+    def _fetch_recent_usage_samples(self, account_data, period_from=None, now=None):
+        return fetch_recent_usage_samples(account_data, period_from=period_from, now=now)
 
     def _fetch_all_consumption_pages(self, initial_url):
         return fetch_all_consumption_pages(initial_url)

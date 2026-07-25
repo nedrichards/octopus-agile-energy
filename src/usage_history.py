@@ -4,9 +4,12 @@ from urllib.parse import urlencode
 
 from .historical_costs import build_daily_costs, build_tariff_periods, get_usage_period
 from .octopus_api import OctopusApiError, get_json
+from .price_bands import PRICE_BAND_VERSION
 from .price_logic import build_dual_register_price_windows, extract_product_code
 
 logger = logging.getLogger(__name__)
+USAGE_HISTORY_DAYS = 120
+USAGE_REFRESH_OVERLAP_DAYS = 7
 
 
 def get_account_data(account_number):
@@ -21,9 +24,11 @@ def get_account_data(account_number):
     )
 
 
-def fetch_recent_usage_samples(account_data):
-    now = datetime.now(timezone.utc)
-    period_from = (now - timedelta(days=120)).strftime("%Y-%m-%dT%H:%M:%SZ")
+def fetch_recent_usage_samples(account_data, period_from=None, now=None):
+    now = now or datetime.now(timezone.utc)
+    if period_from is None:
+        period_from = now - timedelta(days=USAGE_HISTORY_DAYS)
+    period_from_text = _format_octopus_datetime(period_from)
 
     for property_data in account_data.get("properties", []):
         for meter_point in property_data.get("electricity_meter_points", []):
@@ -42,7 +47,7 @@ def fetch_recent_usage_samples(account_data):
                     f"/meters/{serial_number}/consumption/?"
                     + urlencode(
                         {
-                            "period_from": period_from,
+                            "period_from": period_from_text,
                             "order_by": "period",
                             "page_size": 250,
                         }
@@ -62,6 +67,94 @@ def fetch_recent_usage_samples(account_data):
                 return best_samples
 
     return []
+
+
+def get_usage_refresh_start(cached_data, now=None):
+    """Return the bounded start time for a full or incremental usage refresh."""
+    now = now or datetime.now(timezone.utc)
+    history_start = now - timedelta(days=USAGE_HISTORY_DAYS)
+    cached_data = _compatible_usage_cache(cached_data)
+    if not cached_data:
+        return history_start
+
+    cached_sample_starts = [
+        sample_start
+        for sample in cached_data.get("samples", [])
+        if (sample_start := _parse_sample_start(sample)) is not None
+    ]
+    latest_sample_start = max(cached_sample_starts, default=None)
+    if latest_sample_start is None:
+        return history_start
+
+    overlap_start = (min(latest_sample_start, now) - timedelta(days=USAGE_REFRESH_OVERLAP_DAYS)).replace(
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    return max(history_start, overlap_start)
+
+
+def merge_usage_history(cached_data, fresh_samples, fresh_daily_costs, now=None):
+    """Merge refreshed overlap data into a bounded, current usage cache payload."""
+    now = now or datetime.now(timezone.utc)
+    history_start = now - timedelta(days=USAGE_HISTORY_DAYS)
+    cached_data = _compatible_usage_cache(cached_data) or {}
+
+    samples_by_start = {}
+    for sample in cached_data.get("samples", []):
+        sample_start = _parse_sample_start(sample)
+        if sample_start is not None and sample_start >= history_start:
+            samples_by_start[sample_start] = sample
+    for sample in fresh_samples:
+        sample_start = _parse_sample_start(sample)
+        if sample_start is not None and sample_start >= history_start:
+            samples_by_start[sample_start] = sample
+
+    merged_samples = [samples_by_start[sample_start] for sample_start in sorted(samples_by_start)]
+    retained_dates = {sample_start.date().isoformat() for sample_start in samples_by_start}
+
+    daily_costs_by_date = {
+        day.get("date"): day
+        for day in cached_data.get("daily_costs", [])
+        if day.get("date") in retained_dates
+    }
+    if fresh_daily_costs is not None:
+        for day in fresh_daily_costs:
+            day_key = day.get("date")
+            if day_key in retained_dates:
+                daily_costs_by_date[day_key] = day
+
+    return {
+        "samples": merged_samples,
+        "daily_costs": [daily_costs_by_date[day] for day in sorted(daily_costs_by_date)],
+        "price_band_version": PRICE_BAND_VERSION,
+        "synced_at": now.isoformat(),
+    }
+
+
+def _compatible_usage_cache(cached_data):
+    if (
+        not cached_data
+        or cached_data.get("price_band_version") != PRICE_BAND_VERSION
+        or not isinstance(cached_data.get("samples"), list)
+        or not isinstance(cached_data.get("daily_costs"), list)
+    ):
+        return None
+    return cached_data
+
+
+def _parse_sample_start(sample):
+    value = sample.get("interval_start")
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def fetch_all_consumption_pages(initial_url):

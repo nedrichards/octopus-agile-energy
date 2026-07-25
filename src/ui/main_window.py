@@ -26,7 +26,13 @@ from ..price_logic import build_dual_register_price_windows, extract_product_cod
 from ..price_logic import find_cheapest_slot as calculate_cheapest_slot
 from ..price_logic import find_cheapest_timer_slot as calculate_cheapest_timer_slot
 from ..secrets_manager import get_api_key
-from ..usage_history import build_historical_usage_costs, fetch_recent_usage_samples, get_account_data
+from ..usage_history import (
+    build_historical_usage_costs,
+    fetch_recent_usage_samples,
+    get_account_data,
+    get_usage_refresh_start,
+    merge_usage_history,
+)
 from ..usage_insights import build_rolling_average, build_usage_insight_data, build_usage_pattern_insights
 from ..utils import CacheManager
 from .adaptive_layout import (
@@ -1849,7 +1855,10 @@ class MainWindow(Adw.ApplicationWindow):
             self._set_usage_loading_state()
         elif force:
             self._set_usage_refreshing_label()
-        thread = threading.Thread(target=self._refresh_usage_history_background, args=(account_number,))
+        thread = threading.Thread(
+            target=self._refresh_usage_history_background,
+            args=(account_number, cached_data),
+        )
         thread.daemon = True
         thread.start()
         return True
@@ -1868,22 +1877,26 @@ class MainWindow(Adw.ApplicationWindow):
 
         return (time.time() - cache_mtime) < USAGE_BACKGROUND_REFRESH_INTERVAL_SECONDS
 
-    def _refresh_usage_history_background(self, account_number):
+    def _refresh_usage_history_background(self, account_number, cached_data):
         try:
             account_data = get_account_data(account_number)
-            usage_samples = fetch_recent_usage_samples(account_data)
-            if usage_samples:
-                daily_costs = self._build_historical_usage_costs_for_cache(account_data, usage_samples)
-                cache_key = f"octopus_usage_{account_number}"
-                self.cache_manager.set(
-                    cache_key,
-                    {
-                        "samples": usage_samples,
-                        "daily_costs": daily_costs,
-                        "price_band_version": PRICE_BAND_VERSION,
-                        "synced_at": datetime.now(timezone.utc).isoformat(),
-                    },
+            refresh_started_at = datetime.now(timezone.utc)
+            refresh_start = get_usage_refresh_start(cached_data, refresh_started_at)
+            fresh_samples = fetch_recent_usage_samples(
+                account_data,
+                period_from=refresh_start,
+                now=refresh_started_at,
+            )
+            if fresh_samples:
+                fresh_daily_costs = self._build_historical_usage_costs_for_cache(account_data, fresh_samples)
+                refreshed_data = merge_usage_history(
+                    cached_data,
+                    fresh_samples,
+                    fresh_daily_costs,
+                    now=datetime.now(timezone.utc),
                 )
+                cache_key = f"octopus_usage_{account_number}"
+                self.cache_manager.set(cache_key, refreshed_data)
                 GLib.idle_add(self._finish_usage_history_background_refresh, True)
             else:
                 GLib.idle_add(self._finish_usage_history_background_refresh, False)
@@ -1906,7 +1919,7 @@ class MainWindow(Adw.ApplicationWindow):
             logger.debug("Historical usage cost network error: %s", e)
         except Exception as e:
             logger.debug("Unexpected historical usage cost error: %s", e)
-        return []
+        return None
 
     def _finish_usage_history_background_refresh(self, updated):
         self.usage_refresh_in_progress = False
