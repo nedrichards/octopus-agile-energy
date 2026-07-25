@@ -38,9 +38,11 @@ class OctopusAgileApp(Adw.Application):
 
     def on_activate(self, app):
         """
-        Activates the application, creating and presenting the main window.
+        Activates the application, creating the main window only when needed.
         """
-        self.window = MainWindow(application=app)
+        self.window = app.get_active_window()
+        if self.window is None:
+            self.window = MainWindow(application=app)
         self.window.present()
 
 def main(*args):

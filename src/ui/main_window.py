@@ -84,6 +84,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.best_slot_end_time = None
         self.is_first_expansion = True
         self._fetch_generation = 0
+        self.price_refresh_in_progress = False
+        self._price_refresh_queued = False
+        self._queued_price_refresh_force = False
         self.price_summary_mode = "regular"
         self.price_summary_title = "Loading..."
         self.price_summary_description = "Fetching current electricity price"
@@ -1190,13 +1193,22 @@ class MainWindow(Adw.ApplicationWindow):
         Initiates the price data fetching process in a separate thread.
         Sets the UI to a loading state.
         """
-        self._fetch_generation += 1
-        request_id = self._fetch_generation
         setup_issue = self._get_price_setup_issue()
         if setup_issue:
             title, description = setup_issue
             self._show_price_setup_issue(title, description)
-            return
+            return False
+
+        if self.price_refresh_in_progress:
+            if force:
+                self._fetch_generation += 1
+                self._price_refresh_queued = True
+                self._queued_price_refresh_force = True
+            return False
+
+        self._fetch_generation += 1
+        request_id = self._fetch_generation
+        self.price_refresh_in_progress = True
 
         current_title = (
             format_unit_price_gbp(self.current_price_data['price_gbp'])
@@ -1216,6 +1228,18 @@ class MainWindow(Adw.ApplicationWindow):
         )
         thread.daemon = True
         thread.start()
+        return True
+
+    def _finish_price_refresh(self, _request_id):
+        self.price_refresh_in_progress = False
+        if not self._price_refresh_queued:
+            return False
+
+        force = self._queued_price_refresh_force
+        self._price_refresh_queued = False
+        self._queued_price_refresh_force = False
+        self.refresh_price(force=force)
+        return False
 
     def _is_current_fetch(self, request_id):
         return request_id == self._fetch_generation
@@ -1243,6 +1267,7 @@ class MainWindow(Adw.ApplicationWindow):
         if setup_issue:
             title, description = setup_issue
             GLib.idle_add(self._show_price_setup_issue, title, description)
+            GLib.idle_add(self._finish_price_refresh, request_id)
             return
 
         try:
@@ -1305,6 +1330,8 @@ class MainWindow(Adw.ApplicationWindow):
             import traceback
             traceback.print_exc()
             GLib.idle_add(self._show_error_if_current, f"An unexpected error occurred: {e}", request_id)
+        finally:
+            GLib.idle_add(self._finish_price_refresh, request_id)
 
     def _handle_tariff_fetch_error(self, response, request_id):
         if response.status_code == 400 and self._is_dual_register_response(response):
