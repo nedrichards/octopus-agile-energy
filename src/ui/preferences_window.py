@@ -6,6 +6,7 @@ import logging
 import threading
 import time
 from datetime import datetime, timezone
+from typing import ClassVar
 
 import requests
 from gi.repository import Adw, GLib, Gtk
@@ -26,11 +27,15 @@ from ..utils import CacheManager
 logger = logging.getLogger(__name__)
 
 class PreferencesWindow(Adw.PreferencesWindow):
-    TARIFF_TYPES = ["Agile", "Go", "Intelligent Go"]
-    TARIFF_TYPE_CODES = {"Agile": "AGILE", "Go": "GO", "Intelligent Go": "INTELLIGENT"}
-    TARIFF_CODE_TO_NAME = {v: k for k, v in TARIFF_TYPE_CODES.items()}
+    TARIFF_TYPES: ClassVar[list[str]] = ["Agile", "Go", "Intelligent Go"]
+    TARIFF_TYPE_CODES: ClassVar[dict[str, str]] = {
+        "Agile": "AGILE",
+        "Go": "GO",
+        "Intelligent Go": "INTELLIGENT",
+    }
+    TARIFF_CODE_TO_NAME: ClassVar[dict[str, str]] = {v: k for k, v in TARIFF_TYPE_CODES.items()}
     # Hardcoded common UK electricity region suffixes and their full names
-    REGION_CODE_TO_NAME = {
+    REGION_CODE_TO_NAME: ClassVar[dict[str, str]] = {
         "_A": "Eastern England",
         "_B": "East Midlands",
         "_C": "London",
@@ -47,7 +52,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
         "_P": "North Scotland"
     }
     # Create a reverse mapping for looking up codes by name
-    REGION_NAME_TO_CODE = {name: code for code, name in REGION_CODE_TO_NAME.items()}
+    REGION_NAME_TO_CODE: ClassVar[dict[str, str]] = {name: code for code, name in REGION_CODE_TO_NAME.items()}
 
     @staticmethod
     def _contains_token(value, token):
@@ -65,7 +70,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
         self.settings = settings
         self.cache_manager = CacheManager()
         # self.all_regions now stores full names for display in dropdown
-        self.all_regions = sorted(list(self.REGION_CODE_TO_NAME.values()))
+        self.all_regions = sorted(self.REGION_CODE_TO_NAME.values())
         self.region_to_tariffs = {} # To be populated by API data for these regions
         self._load_generation = 0
 
@@ -259,7 +264,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
             GLib.idle_add(self._show_load_error, f"Network error: {e}. Could not auto-detect tariff.")
             GLib.idle_add(self._set_auto_detect_status, "Network error while auto-detecting tariff. Please retry.")
             GLib.idle_add(self._set_auto_detect_button_state, True)
-        except Exception as e:
+        except Exception as e:  # ruff: ignore[BLE001] Background task boundary reports unexpected failures.
             GLib.idle_add(self._show_load_error, f"Error detecting tariff: {e}.")
             GLib.idle_add(self._set_auto_detect_status, "Unexpected error while auto-detecting tariff.")
             GLib.idle_add(self._set_auto_detect_button_state, True)
@@ -330,7 +335,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
             GLib.idle_add(self._set_usage_status, f"{e} Could not refresh usage history.")
         except requests.exceptions.RequestException as e:
             GLib.idle_add(self._set_usage_status, f"Network error: {e}. Could not refresh usage history.")
-        except Exception as e:
+        except Exception as e:  # ruff: ignore[BLE001] Background task boundary reports unexpected failures.
             GLib.idle_add(self._set_usage_status, f"Error refreshing usage history: {e}.")
         finally:
             GLib.idle_add(self._set_refresh_usage_button_state, True)
@@ -342,7 +347,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
             logger.debug("Historical usage cost refresh failed: %s", e)
         except requests.exceptions.RequestException as e:
             logger.debug("Historical usage cost network error: %s", e)
-        except Exception as e:
+        except Exception as e:  # ruff: ignore[BLE001] Optional cost enrichment must not fail the refresh.
             logger.debug("Unexpected historical usage cost error: %s", e)
         return None
 
@@ -407,7 +412,6 @@ class PreferencesWindow(Adw.PreferencesWindow):
             target_product = None
             for product in data.get('results', []):
                 # Filter by tariff type
-                is_match = False
                 code = product['code'].upper()
                 name = product.get('full_name', '').upper()
                 is_go_product = self._contains_token(code, "GO") or self._contains_token(name, "GO")
@@ -424,12 +428,11 @@ class PreferencesWindow(Adw.PreferencesWindow):
                     or self._contains_token(name, "EXPORT")
                 )
 
-                if tariff_type == 'AGILE' and 'AGILE' in code and not is_export_product:
-                    is_match = True
-                elif tariff_type == 'GO' and is_go_product and not is_intelligent_product:
-                    is_match = True
-                elif tariff_type == 'INTELLIGENT' and is_intelligent_product:
-                    is_match = True
+                is_match = (
+                    tariff_type == 'AGILE' and 'AGILE' in code and not is_export_product
+                    or tariff_type == 'GO' and is_go_product and not is_intelligent_product
+                    or tariff_type == 'INTELLIGENT' and is_intelligent_product
+                )
 
                 if is_match and product.get('available_from') and not product.get('available_to'):
                     target_product = product
@@ -461,7 +464,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
             GLib.idle_add(self._show_load_error_if_current, f"{e} Cannot load tariffs.", request_id)
         except requests.exceptions.RequestException as e:
             GLib.idle_add(self._show_load_error_if_current, f"Network error: {e}. Cannot load tariffs.", request_id)
-        except Exception as e:
+        except Exception as e:  # ruff: ignore[BLE001] Background task boundary reports unexpected failures.
             GLib.idle_add(self._show_load_error_if_current, f"Error processing data: {e}.", request_id)
 
     def _process_agile_tariffs(self, product_data, request_id):

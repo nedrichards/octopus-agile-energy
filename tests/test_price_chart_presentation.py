@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from price_chart_presentation import (  # noqa: E402
+from price_chart_presentation import (
     find_price_index_by_start,
     get_day_transition_markers,
     get_price_axis_bounds,

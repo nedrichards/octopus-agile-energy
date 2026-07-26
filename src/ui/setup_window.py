@@ -329,9 +329,7 @@ class SetupWindow(Adw.Window):
 
     def on_back_clicked(self, _button):
         current = self.stack.get_visible_child_name()
-        if current in ("account", "manual"):
-            self.stack.set_visible_child_name("welcome")
-        elif current == "complete":
+        if current in ("account", "manual", "complete"):
             self.stack.set_visible_child_name("welcome")
 
     def on_tariff_type_selected(self, _row, _pspec):
@@ -409,7 +407,7 @@ class SetupWindow(Adw.Window):
             GLib.idle_add(self._account_validation_failed, f"{e} Check your API key and account number.")
         except requests.exceptions.RequestException as e:
             GLib.idle_add(self._account_validation_failed, f"Network error: {e}.")
-        except Exception as e:
+        except Exception as e:  # ruff: ignore[BLE001] Background task boundary reports unexpected failures.
             GLib.idle_add(self._account_validation_failed, f"Could not validate account: {e}.")
 
     def _account_validation_complete(self, tariff_code):
@@ -518,7 +516,7 @@ class SetupWindow(Adw.Window):
             GLib.idle_add(self._show_manual_error, f"{e} Cannot load tariffs.")
         except requests.exceptions.RequestException as e:
             GLib.idle_add(self._show_manual_error, f"Network error: {e}. Cannot load tariffs.")
-        except Exception as e:
+        except Exception as e:  # ruff: ignore[BLE001] Background task boundary reports unexpected failures.
             GLib.idle_add(self._show_manual_error, f"Error loading tariffs: {e}.")
 
     def _apply_tariff_data(self, region_to_tariffs):

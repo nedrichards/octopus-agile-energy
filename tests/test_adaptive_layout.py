@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from ui.adaptive_layout import (  # noqa: E402
+from ui.adaptive_layout import (
     get_chart_content_width,
     get_chart_height,
     get_chart_scroll_value,

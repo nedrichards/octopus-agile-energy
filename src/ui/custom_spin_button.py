@@ -1,3 +1,5 @@
+from typing import ClassVar
+
 import gi
 
 gi.require_version('Gtk', '4.0')
@@ -5,7 +7,7 @@ from gi.repository import Gdk, GObject, Gtk
 
 
 class CustomSpinButton(Gtk.Box):
-    __gsignals__ = {
+    __gsignals__: ClassVar[dict[str, tuple]] = {
         'value-changed': (GObject.SignalFlags.RUN_FIRST, None, ())
     }
 

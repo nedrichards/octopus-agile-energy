@@ -126,7 +126,7 @@ def _build_always_on_baseline(samples: list[dict]):
         return _insight_empty("Needs complete half-hour usage data.")
 
     typical_half_hour_kwh = _median(daily_minimums)
-    watts = int(round(typical_half_hour_kwh * 2 * 1000))
+    watts = round(typical_half_hour_kwh * 2 * 1000)
     daily_kwh = typical_half_hour_kwh * 48
     return {
         "text": f"~{watts} W",
@@ -261,7 +261,7 @@ def _band_for_hour(hour: int):
 
 
 def _format_half_hour_end(start_text: str):
-    start = datetime.strptime(start_text, "%H:%M")
+    start = datetime.strptime(start_text, "%H:%M").replace(tzinfo=timezone.utc)
     return (start + timedelta(minutes=30)).strftime("%H:%M")
 
 

@@ -131,7 +131,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.schedule_next_data_fetch()
 
     def schedule_next_ui_update(self):
-        now = datetime.now()
+        now = datetime.now().astimezone()
         if now.minute < 30:
             next_update = now.replace(minute=30, second=0, microsecond=0)
         else:
@@ -146,7 +146,7 @@ class MainWindow(Adw.ApplicationWindow):
         return False
 
     def schedule_next_data_fetch(self):
-        now = datetime.now()
+        now = datetime.now().astimezone()
         next_fetch = now.replace(hour=16, minute=1, second=0, microsecond=0)
         if now > next_fetch:
             next_fetch += timedelta(days=1)
@@ -1023,7 +1023,6 @@ class MainWindow(Adw.ApplicationWindow):
         """
         Handles chart bar clicks. Currently mirrors hover logic but can be expanded.
         """
-        pass
 
     def on_visible_tab_changed(self, stack, _pspec):
         if stack.get_visible_child_name() == "usage":
@@ -1332,7 +1331,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         except requests.exceptions.RequestException as e:
             GLib.idle_add(self._show_error_if_current, f"Network error: {type(e).__name__}", request_id)
-        except Exception as e:
+        except Exception as e:  # ruff: ignore[BLE001] Background task boundary reports unexpected failures.
             import traceback
             traceback.print_exc()
             GLib.idle_add(self._show_error_if_current, f"An unexpected error occurred: {e}", request_id)
@@ -1906,7 +1905,7 @@ class MainWindow(Adw.ApplicationWindow):
         except requests.exceptions.RequestException as e:
             logger.debug("Background usage refresh network error: %s", e)
             GLib.idle_add(self._finish_usage_history_background_refresh, False)
-        except Exception as e:
+        except Exception as e:  # ruff: ignore[BLE001] Background task boundary reports unexpected failures.
             logger.debug("Unexpected background usage refresh error: %s", e)
             GLib.idle_add(self._finish_usage_history_background_refresh, False)
 
@@ -1917,7 +1916,7 @@ class MainWindow(Adw.ApplicationWindow):
             logger.debug("Historical usage cost refresh failed: %s", e)
         except requests.exceptions.RequestException as e:
             logger.debug("Historical usage cost network error: %s", e)
-        except Exception as e:
+        except Exception as e:  # ruff: ignore[BLE001] Optional cost enrichment must not fail the refresh.
             logger.debug("Unexpected historical usage cost error: %s", e)
         return None
 
@@ -2475,7 +2474,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         min_value = min(range_values) if range_values else 0.0
         max_value = max(range_values) if range_values else 1.0
-        display_min_value = 0 if min_value >= 0 else min_value
+        display_min_value = min(0, min_value)
         value_range = max_value - display_min_value
         if value_range <= 0:
             value_range = 0.01

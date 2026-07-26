@@ -1,4 +1,5 @@
 from datetime import datetime, time, timedelta, timezone
+from itertools import pairwise
 
 
 def extract_product_code(selected_tariff_code):
@@ -87,7 +88,7 @@ def find_cheapest_timer_slot(prices, now, duration_hours, start_within_hours, ti
 def _has_contiguous_price_coverage(window):
     return all(
         current_price['valid_to'] == next_price['valid_from']
-        for current_price, next_price in zip(window, window[1:])
+        for current_price, next_price in pairwise(window)
     )
 
 
@@ -205,7 +206,7 @@ def _parse_rate_window(rate):
 
 
 def build_region_to_tariffs_map(product_data, region_code_to_name):
-    region_to_tariffs_map = {code: [] for code in region_code_to_name.keys()}
+    region_to_tariffs_map = {code: [] for code in region_code_to_name}
     product_name = product_data.get('full_name', 'Agile Tariff')
     tariffs = product_data.get('single_register_electricity_tariffs', {})
 

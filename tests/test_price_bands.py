@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.price_bands import (  # noqa: E402
+from src.price_bands import (
     HIGH_PRICE_THRESHOLD_GBP,
     LOW_PRICE_THRESHOLD_GBP,
     PRICE_BAND_HIGH,

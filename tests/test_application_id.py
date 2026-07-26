@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.application_id import DEFAULT_APPLICATION_ID, get_application_id, is_development_build  # noqa: E402
+from src.application_id import DEFAULT_APPLICATION_ID, get_application_id, is_development_build
 
 
 class ApplicationIdTests(unittest.TestCase):

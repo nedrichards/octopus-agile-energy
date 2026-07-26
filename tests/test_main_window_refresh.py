@@ -6,7 +6,7 @@ from unittest.mock import Mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.ui.main_window import MainWindow  # noqa: E402
+from src.ui.main_window import MainWindow
 
 
 class PriceRefreshCoordinationTests(unittest.TestCase):

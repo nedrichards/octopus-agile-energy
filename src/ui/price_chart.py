@@ -512,19 +512,22 @@ class PriceChartWidget(Gtk.DrawingArea):
             slot_bounds.append((bar_x_start, bar_x_start + bar_width - 1))
 
             # Highlight the best slot
-            if self.highlight_start_time and self.highlight_end_time:
-                if self.highlight_start_time <= price_data['valid_from'] < self.highlight_end_time:
-                    highlighted_indices.append(i)
-                    highlight_x_start = (
-                        bar_x_start
-                        if highlight_x_start is None
-                        else min(highlight_x_start, bar_x_start)
-                    )
-                    highlight_x_end = (
-                        bar_x_start + bar_width - 1
-                        if highlight_x_end is None
-                        else max(highlight_x_end, bar_x_start + bar_width - 1)
-                    )
+            if (
+                self.highlight_start_time
+                and self.highlight_end_time
+                and self.highlight_start_time <= price_data['valid_from'] < self.highlight_end_time
+            ):
+                highlighted_indices.append(i)
+                highlight_x_start = (
+                    bar_x_start
+                    if highlight_x_start is None
+                    else min(highlight_x_start, bar_x_start)
+                )
+                highlight_x_end = (
+                    bar_x_start + bar_width - 1
+                    if highlight_x_end is None
+                    else max(highlight_x_end, bar_x_start + bar_width - 1)
+                )
 
         day_transitions = [
             (slot_bounds[index][0], label)

@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.main import OctopusAgileApp  # noqa: E402
+from src.main import OctopusAgileApp
 
 
 class ApplicationActivationTests(unittest.TestCase):

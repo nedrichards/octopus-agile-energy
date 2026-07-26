@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.historical_costs import build_daily_costs, build_tariff_periods, get_usage_period
 from src.price_bands import PRICE_BAND_VERSION
 
-from price_fixtures import (  # noqa: E402
+from price_fixtures import (
     AGILE_REGION_A_2025_04_07_PENCE,
     AGILE_REGION_A_2025_05_25_PENCE,
     historical_agile_rate_records,

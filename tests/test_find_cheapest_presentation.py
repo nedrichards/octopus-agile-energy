@@ -9,9 +9,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from find_cheapest_presentation import build_find_cheapest_presentation  # noqa: E402
-from price_fixtures import AGILE_REGION_A_2025_05_25_PENCE, historical_agile_prices  # noqa: E402
-from price_logic import find_cheapest_slot, find_cheapest_timer_slot  # noqa: E402
+from find_cheapest_presentation import build_find_cheapest_presentation
+from price_fixtures import AGILE_REGION_A_2025_05_25_PENCE, historical_agile_prices
+from price_logic import find_cheapest_slot, find_cheapest_timer_slot
 
 
 @contextmanager

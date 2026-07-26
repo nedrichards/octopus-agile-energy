@@ -6,13 +6,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from price_fixtures import (  # noqa: E402
+from price_fixtures import (
     AGILE_REGION_A_2025_04_07_PENCE,
     AGILE_REGION_A_2025_05_25_PENCE,
     AGILE_REGION_A_2025_10_26_PENCE,
     historical_agile_prices,
 )
-from price_logic import (  # noqa: E402
+from price_logic import (
     build_dual_register_price_windows,
     build_region_to_tariffs_map,
     extract_product_code,

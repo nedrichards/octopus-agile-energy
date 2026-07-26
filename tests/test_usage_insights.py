@@ -101,6 +101,14 @@ class UsageInsightsTests(unittest.TestCase):
         self.assertIn("Evening", result["peak_text"])
         self.assertIn("18:00-18:30", result["peak_detail"])
 
+    def test_peak_pattern_formats_half_hour_across_midnight(self):
+        result = build_usage_pattern_insights([{
+            "interval_start": "2026-03-01T23:30:00Z",
+            "consumption": 1.0,
+        }], [])
+
+        self.assertIn("23:30-00:00", result["peak_detail"])
+
     def test_includes_low_data_coverage_only_when_history_is_short(self):
         samples = self._daily_samples(10, lambda _day: 10)
 

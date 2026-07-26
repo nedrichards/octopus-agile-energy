@@ -43,7 +43,7 @@ class CacheManager:
             with open(filepath, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             return data, file_mtime
-        except (IOError, json.JSONDecodeError, OSError) as e:
+        except (json.JSONDecodeError, OSError) as e:
             logger.error("Cache read error for key '%s': %s", key, e)
             if os.path.exists(filepath):
                 try:
@@ -71,7 +71,7 @@ class CacheManager:
             # Atomically replace the old file with the new one
             os.replace(temp_filepath, filepath)
             logger.debug("Successfully updated cache for key: %s", key)
-        except (IOError, OSError) as e:
+        except OSError as e:
             logger.error("Cache write error for key '%s': %s", key, e)
             # Cleanup temp file if it exists
             if os.path.exists(temp_filepath):

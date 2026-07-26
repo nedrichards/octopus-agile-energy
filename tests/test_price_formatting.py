@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from price_formatting import format_gbp, format_unit_price_gbp  # noqa: E402
+from price_formatting import format_gbp, format_unit_price_gbp
 
 
 class PriceFormattingTests(unittest.TestCase):
