@@ -44,6 +44,7 @@ install_data(
     'usage_insights.py',
     'time_formatting.py',
     'price_logic.py',
+    'region_location.py',
   ],
   install_dir: moduledir
 )
@@ -65,4 +66,9 @@ install_data(
 install_data(
   'gtk/help-overlay.ui',
   install_dir: moduledir / 'gtk'
+)
+
+install_data(
+  '../data/gb-electricity-regions.geojson',
+  install_dir: pkgdatadir
 )

@@ -304,6 +304,10 @@ class MainWindow(Adw.ApplicationWindow):
             license_type=Gtk.License.GPL_3_0
         )
         about_dialog.add_link("Source Code", "https://github.com/nedrichards/octopus-agile-energy")
+        about_dialog.add_link(
+            "GB electricity-region boundaries",
+            "https://northernpowergrid.opendatasoft.com/p/opendatalicence/",
+        )
         about_dialog.present()
 
     def on_visibility_change(self, *args):

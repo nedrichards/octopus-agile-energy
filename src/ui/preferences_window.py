@@ -13,6 +13,7 @@ from gi.repository import Adw, GLib, Gtk
 
 from ..octopus_api import OctopusApiError, get_json
 from ..price_logic import build_region_to_tariffs_map
+from ..region_location import LocationPortal
 from ..secrets_manager import clear_api_key, get_api_key, store_api_key
 from ..usage_history import (
     build_historical_usage_costs,
@@ -81,6 +82,8 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
     def setup_ui(self):
         page = Adw.PreferencesPage.new()
+        page.set_margin_top(28)
+        page.set_margin_bottom(18)
         self.add(page)
 
         group = Adw.PreferencesGroup.new()
@@ -110,6 +113,21 @@ class PreferencesWindow(Adw.PreferencesWindow):
         self.region_row.set_model(self.region_model)
         group.add(self.region_row)
         self.region_handler_id = self.region_row.connect("notify::selected", self.on_region_selected)
+
+        self.location_button = Gtk.Button.new_with_label("Suggest region from my location")
+        self.location_button.set_margin_top(12)
+        self.location_button.set_tooltip_text("Ask the desktop location portal for a one-time region suggestion")
+        self.location_button.connect("clicked", self.on_location_suggestion_clicked)
+        group.add(self.location_button)
+
+        self.location_status = Gtk.Label.new(
+            "Only use this as a suggestion. Your electricity account is authoritative, especially near region boundaries."
+        )
+        self.location_status.set_xalign(0)
+        self.location_status.set_wrap(True)
+        self.location_status.set_margin_bottom(12)
+        self.location_status.add_css_class("dim-label")
+        group.add(self.location_status)
 
         # Tariff selection
         self.tariff_model = Gtk.StringList.new(["Loading..."])
@@ -525,6 +543,29 @@ class PreferencesWindow(Adw.PreferencesWindow):
         selected_region_code = self.REGION_NAME_TO_CODE.get(selected_display_name, "")
         self.settings.set_string("selected-region-code", selected_region_code)
         self._update_tariff_dropdown_for_region()
+
+    def on_location_suggestion_clicked(self, _button):
+        self.location_button.set_sensitive(False)
+        self.location_status.set_label("Requesting a location suggestion…")
+        self.location_portal = LocationPortal(self._apply_location_suggestion, self._location_suggestion_failed)
+        self.location_portal.start()
+
+    def _apply_location_suggestion(self, region_code):
+        region_name = self.REGION_CODE_TO_NAME.get(region_code)
+        if not region_name:
+            self._location_suggestion_failed("The location did not match a known electricity region.")
+            return
+        self.settings.set_string("selected-region-code", region_code)
+        if region_name in self.all_regions:
+            self.region_row.set_selected(self.all_regions.index(region_name))
+        self.location_button.set_sensitive(True)
+        self.location_status.set_label(
+            f"Suggested {region_name}. Check this against your electricity account before saving changes."
+        )
+
+    def _location_suggestion_failed(self, message):
+        self.location_button.set_sensitive(True)
+        self.location_status.set_label(message)
 
     def on_tariff_selected(self, dropdown, pspec):
         """
