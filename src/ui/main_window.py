@@ -308,6 +308,13 @@ class MainWindow(Adw.ApplicationWindow):
             "GB electricity-region boundaries",
             "https://northernpowergrid.opendatasoft.com/p/opendatalicence/",
         )
+        about_dialog.add_legal_section(
+            "Data sources",
+            "Supported by Northern Powergrid Open Data",
+            Gtk.License.CUSTOM,
+            "Electricity-region boundary data is separately licensed under the "
+            "Northern Powergrid Open Data Licence v1.0. Northern Powergrid does not endorse this application.",
+        )
         about_dialog.present()
 
     def on_visibility_change(self, *args):

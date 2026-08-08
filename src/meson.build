@@ -69,6 +69,9 @@ install_data(
 )
 
 install_data(
-  '../data/gb-electricity-regions.geojson',
+  [
+    '../data/gb-electricity-regions.geojson',
+    '../data/NORTHERN_POWERGRID_OPEN_DATA_LICENCE_v1.0.txt',
+  ],
   install_dir: pkgdatadir
 )

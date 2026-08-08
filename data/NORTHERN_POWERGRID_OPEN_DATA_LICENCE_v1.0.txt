@@ -1,0 +1,146 @@
+Northern Powergrid Open Data Licence v1.0
+
+Source: https://northernpowergrid.opendatasoft.com/p/opendatalicence/
+Retrieved: 2026-08-08
+
+Open Data Licence
+
+You are encouraged to use and re-use the Information that is available under
+this Licence freely and flexibly, with only a few conditions.
+
+1. Using the Information under this Northern Powergrid Open Data Licence
+
+1.1 Northern Powergrid is the Licensor and the Information Provider for the
+purpose of this Licence.
+
+1.2 The conditions of this Licence are important and if you fail to comply with
+them the rights granted to you under this Licence, or any similar licence
+granted by the Licensor, will end automatically.
+
+2. Using Information under this Licence
+
+2.1 Use of the Information indicates your acceptance of the terms and
+conditions of this Licence.
+
+2.2 The Licensor grants you a worldwide, royalty-free, perpetual,
+non-exclusive licence to use the Information subject to the conditions below.
+
+2.3 This Licence does not affect your freedom under fair dealing or fair use,
+or any other copyright or database right exceptions and limitations set out in
+law.
+
+3. Your rights
+
+You are free to:
+
+3.1 Copy, publish, distribute and transmit the Information.
+
+3.2 Adapt the Information.
+
+3.3 Exploit the Information commercially and non-commercially, for example by
+combining it with other Information, or by including it in your own product or
+application.
+
+4. Your obligations
+
+You must (where you exercise any of your rights set out above):
+
+4.1 Acknowledge Northern Powergrid as the source of the Information by
+including the following attribution statement "Supported by Northern Powergrid
+Open Data", which should be displayed prominently where the Information is
+used. You should, where possible, include a link to this Licence.
+
+4.2 Acknowledge that the Information Provider and/or Licensor's other
+intellectual property rights, including all logos, design rights, patents and
+trade marks, are not covered under this Licence and this Licence will not
+transfer these or any rights in them to You or any third party.
+
+5. Exemptions
+
+This Licence does not cover:
+
+5.1 Any personal data in the Information.
+
+5.2 Information that has not been accessed by way of publication or disclosure
+under information access legislation (including the Freedom of Information Act
+2000 and the Environmental Information Regulations 2002) by or with the
+consent of the Information Provider.
+
+5.3 Departmental or organisational logos.
+
+5.4 Third party rights the Information Provider is not authorised to license.
+
+5.5 Other intellectual property rights, including patents, trade marks and
+design rights.
+
+6. Non-endorsements
+
+6.1 This Licence does not grant you any right to use the Information in a way
+that suggests any official status or that the Information Provider and/or
+Licensor endorse you or your use of the Information.
+
+7. No warranty
+
+7.1 The Information is licensed 'as is' and the Information Provider and/or
+Licensor excludes all representations, warranties, obligations and liabilities
+in relation to the Information to the maximum extent permitted by law.
+
+7.2 The Information Provider and/or Licensor are not liable for any errors or
+omissions in the Information and shall not be liable for any loss, injury or
+damage of any kind caused by its use. The Information Provider does not
+guarantee the continued access to or supply of the Information. The Information
+Provider may change the format in which the Information is provided. Where it
+does so it shall provide reasonable notice of such change but shall ensure such
+replacement format is a widely recognised and accepted format.
+
+8. Governing Law and Jurisdiction
+
+8.1 This Licence is governed by the laws of England and Wales and any dispute
+in respect of this Licence shall be subject to the exclusive jurisdiction of the
+courts of England and Wales.
+
+9. Definitions
+
+9.1 In this Licence, the terms below have the following meanings:
+
+"Information" means information protected by copyright or by database right
+(for example, literary and artistic works, content, data and source code)
+offered for use under the terms of this Licence.
+
+"Information Provider" means the person or organisation providing the
+Information under this Licence.
+
+"Licensor" means any Information Provider which has the authority to offer
+Information under the terms of this Licence.
+
+"Northern Powergrid" means the electricity distribution (DNO) business for the
+Northeast, Yorkshire and parts of northern Lincolnshire, operating through its
+two licensed subsidiaries, Northern Powergrid (Northeast) plc whose company
+number is 02906593 and whose registered office is at Lloyds Court, 78 Grey
+Street, Newcastle Upon Tyne, NE1 6AF and Northern Powergrid (Yorkshire) plc
+whose company number is 04112320 and whose registered office is at Lloyds
+Court, 78 Grey Street, Newcastle Upon Tyne, NE1 6AF.
+
+"Use" means doing any act which is restricted by copyright or database right,
+whether in the original medium or in any other medium, and includes without
+limitation distributing, copying, adapting, modifying as may be technically
+necessary to use it in a different mode or format.
+
+"You", "you" and "your" means the natural or legal person, or body of persons
+corporate or incorporate, acquiring rights in the Information (whether the
+Information is obtained directly from the Licensor or otherwise) under this
+Licence.
+
+About this Licence
+
+The Licensor has developed this Licence for the use and re-use of its
+Information under a common open licence. This is version 1.0 of the Licensor's
+Open Data Licence. The Licensor may, from time to time, issue new versions of
+the Open Data Licence. If you are already using Information under a previous
+version of the Licensor's Open Data Licence, the terms of that Licence will
+continue to apply.
+
+This Licence is based on version 3.0 of the Open Government Licence and these
+terms are compatible with the Creative Commons Attribution License 4.0 and the
+Open Data Commons Attribution License, both of which license copyright and
+database rights.

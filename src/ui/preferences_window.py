@@ -13,7 +13,15 @@ from gi.repository import Adw, GLib, Gtk
 
 from ..octopus_api import OctopusApiError, get_json
 from ..price_logic import build_region_to_tariffs_map
-from ..region_location import LocationPortal
+from ..region_location import (
+    REGION_CODE_TO_NAME as SHARED_REGION_CODE_TO_NAME,
+)
+from ..region_location import (
+    REGION_NAME_TO_CODE as SHARED_REGION_NAME_TO_CODE,
+)
+from ..region_location import (
+    LocationPortal,
+)
 from ..secrets_manager import clear_api_key, get_api_key, store_api_key
 from ..usage_history import (
     build_historical_usage_costs,
@@ -35,25 +43,8 @@ class PreferencesWindow(Adw.PreferencesWindow):
         "Intelligent Go": "INTELLIGENT",
     }
     TARIFF_CODE_TO_NAME: ClassVar[dict[str, str]] = {v: k for k, v in TARIFF_TYPE_CODES.items()}
-    # Hardcoded common UK electricity region suffixes and their full names
-    REGION_CODE_TO_NAME: ClassVar[dict[str, str]] = {
-        "_A": "Eastern England",
-        "_B": "East Midlands",
-        "_C": "London",
-        "_D": "Merseyside & North Wales",
-        "_E": "West Midlands",
-        "_F": "North East England",
-        "_G": "North West England",
-        "_H": "Southern England",
-        "_J": "South East England",
-        "_K": "South Wales",
-        "_L": "South Western England",
-        "_M": "Yorkshire",
-        "_N": "South Scotland",
-        "_P": "North Scotland"
-    }
-    # Create a reverse mapping for looking up codes by name
-    REGION_NAME_TO_CODE: ClassVar[dict[str, str]] = {name: code for code, name in REGION_CODE_TO_NAME.items()}
+    REGION_CODE_TO_NAME: ClassVar[dict[str, str]] = SHARED_REGION_CODE_TO_NAME
+    REGION_NAME_TO_CODE: ClassVar[dict[str, str]] = SHARED_REGION_NAME_TO_CODE
 
     @staticmethod
     def _contains_token(value, token):
@@ -74,6 +65,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
         self.all_regions = sorted(self.REGION_CODE_TO_NAME.values())
         self.region_to_tariffs = {} # To be populated by API data for these regions
         self._load_generation = 0
+        self.location_portal = None
 
         self.setup_ui()
         self.load_tariffs_and_regions() # Initiate loading of tariff data
@@ -114,19 +106,20 @@ class PreferencesWindow(Adw.PreferencesWindow):
         group.add(self.region_row)
         self.region_handler_id = self.region_row.connect("notify::selected", self.on_region_selected)
 
-        self.location_button = Gtk.Button.new_with_label("Suggest region from my location")
+        self.location_button = Gtk.Button.new_with_label("Use My Location")
         self.location_button.set_margin_top(12)
-        self.location_button.set_tooltip_text("Ask the desktop location portal for a one-time region suggestion")
+        self.location_button.set_tooltip_text("Find my electricity region")
         self.location_button.connect("clicked", self.on_location_suggestion_clicked)
         group.add(self.location_button)
 
         self.location_status = Gtk.Label.new(
-            "Only use this as a suggestion. Your electricity account is authoritative, especially near region boundaries."
+            "Uses your device location to find your electricity region. It is processed locally and is not stored."
         )
         self.location_status.set_xalign(0)
         self.location_status.set_wrap(True)
         self.location_status.set_margin_bottom(12)
         self.location_status.add_css_class("dim-label")
+        self.location_status.set_accessible_role(Gtk.AccessibleRole.STATUS)
         group.add(self.location_status)
 
         # Tariff selection
@@ -546,7 +539,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
     def on_location_suggestion_clicked(self, _button):
         self.location_button.set_sensitive(False)
-        self.location_status.set_label("Requesting a location suggestion…")
+        self.location_status.set_label("Finding your region…")
         self.location_portal = LocationPortal(self._apply_location_suggestion, self._location_suggestion_failed)
         self.location_portal.start()
 
@@ -558,14 +551,15 @@ class PreferencesWindow(Adw.PreferencesWindow):
         self.settings.set_string("selected-region-code", region_code)
         if region_name in self.all_regions:
             self.region_row.set_selected(self.all_regions.index(region_name))
+        self._update_tariff_dropdown_for_region()
         self.location_button.set_sensitive(True)
-        self.location_status.set_label(
-            f"Suggested {region_name}. Check this against your electricity account before saving changes."
-        )
+        self.location_status.set_label(f"Region detected: {region_name}")
+        self.location_portal = None
 
     def _location_suggestion_failed(self, message):
         self.location_button.set_sensitive(True)
         self.location_status.set_label(message)
+        self.location_portal = None
 
     def on_tariff_selected(self, dropdown, pspec):
         """
@@ -644,5 +638,8 @@ class PreferencesWindow(Adw.PreferencesWindow):
         """
         Handles the close request by hiding the window instead of destroying it.
         """
+        if self.location_portal is not None:
+            self.location_portal.cancel()
+            self.location_portal = None
         self.hide()
         return True

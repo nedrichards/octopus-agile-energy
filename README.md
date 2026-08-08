@@ -6,7 +6,7 @@ This is a modern GNOME application built to track and visualise UK smart electri
 * **Price Level Indicators:** Visually indicates whether the current price is low, medium, high, or even negative.
 * **Adaptive Price Forecast Chart:** Displays upcoming half-hourly price data in a horizontally scrollable chart while keeping small-screen layouts usable.
 * **Find Cheapest Time:** A built-in calculator to find the cheapest time window for a specific duration, including half-hour appliance runs such as "3h 30m in the next 24 hours".
-* **Region and Tariff Selection:** Allows users to select their region and tariff through a preferences window. Supports Agile, Go, Intelligent Go, and dual-register day/night tariffs. Intelligent Go needs a user-provided API key.
+* **Region and Tariff Selection:** Allows users to select their region and tariff through a preferences window. You can choose a region manually, connect an Octopus account to infer its tariff and region, or use device location to identify the region locally. Supports Agile, Go, Intelligent Go, and dual-register day/night tariffs. Intelligent Go needs a user-provided API key.
 * **Usage History:** Shows recent smart meter usage and estimated spend when an API key and account number are configured, with clear setup and loading states when account access is not available yet.
 * **Adaptive GTK Interface:** The main window and preferences window now adapt more cleanly across narrow and wide GTK layouts.
 
@@ -106,7 +106,7 @@ flatpak run com.nedrichards.octopusagile
 
 ## Usage
 
-Upon first launch, the application opens setup so you can choose the correct tariff and region before fetching prices. You can use manual setup for current and upcoming prices, then add an Octopus API key and account number later to enable usage history and spend estimates.
+Upon first launch, the application opens setup so you can choose the correct tariff and region before fetching prices. You can select a region manually, connect an Octopus account to infer its tariff and region, or choose **Use My Location** to ask the desktop location portal to identify your electricity region. Location is requested only when you press that button, is processed against bundled boundaries on your device, is not stored, and is never sent to Octopus Energy, Northern Powergrid, or another network service. You can use manual setup for current and upcoming prices, then add an Octopus API key and account number later to enable usage history and spend estimates.
 
 The Find Cheapest Time section remembers the last duration and search window you used. Durations can be adjusted in 30-minute steps for appliances that do not run in whole hours, with appliance-timer options showing whole-hour start and finish values, exact windows, and price differences from the cheapest window.
 
@@ -125,13 +125,13 @@ This project is licensed under the GNU General Public License v3.0 or later (GPL
 
 ### GB electricity-region boundaries
 
-This directory contains electricity distribution licence-area boundary data obtained from [Northern Powergrid Open Data](https://northernpowergrid.opendatasoft.com/api/explore/v2.1/catalog/datasets/all_dno_boundaries/exports/geojson).
+The app bundles an offline WGS84 GeoJSON snapshot (obtained 2026-08-02) of Northern Powergrid Open Data's [All DNO Licence Area Boundaries](https://northernpowergrid.opendatasoft.com/explore/dataset/all_dno_boundaries/) dataset. Its [GeoJSON export URL](https://northernpowergrid.opendatasoft.com/api/explore/v2.1/catalog/datasets/all_dno_boundaries/exports/geojson) is recorded so the snapshot can be refreshed. No geometry simplification was applied; retained DNO names are explicitly mapped to the application's existing Octopus `_A`–`_P` region codes in `src/region_location.py`.
 
 Data licence: [Northern Powergrid Open Data Licence v1.0](https://northernpowergrid.opendatasoft.com/p/opendatalicence/).
 
 Required attribution: “Supported by Northern Powergrid Open Data”.
 
-The data has been converted or exported to GeoJSON using WGS84 coordinates for use by this application.
+The complete data licence and provenance are in `data/NORTHERN_POWERGRID_OPEN_DATA_LICENCE_v1.0.txt` and `data/README.md`; both are installed with the app. The required attribution appears in the application About window. Northern Powergrid does not endorse this application, and no Northern Powergrid logos are used.
 
 The application source code is licensed under GNU GPL version 3. The GeoJSON data in `data/` remains available under the Northern Powergrid Open Data Licence v1.0 and is not relicensed under GPLv3.
 

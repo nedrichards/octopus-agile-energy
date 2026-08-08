@@ -11,6 +11,7 @@ from gi.repository import Adw, GLib, Gtk
 
 from ..octopus_api import OctopusApiError, get_json
 from ..price_logic import build_region_to_tariffs_map
+from ..region_location import REGION_CODE_TO_NAME as SHARED_REGION_CODE_TO_NAME
 from ..region_location import LocationPortal
 from ..secrets_manager import clear_api_key, get_api_key, store_api_key
 from ..usage_history import get_account_data
@@ -24,7 +25,7 @@ class SetupWindow(Adw.Window):
     TARIFF_TYPES = PreferencesWindow.TARIFF_TYPES
     TARIFF_TYPE_CODES = PreferencesWindow.TARIFF_TYPE_CODES
     TARIFF_CODE_TO_NAME = PreferencesWindow.TARIFF_CODE_TO_NAME
-    REGION_CODE_TO_NAME = PreferencesWindow.REGION_CODE_TO_NAME
+    REGION_CODE_TO_NAME = SHARED_REGION_CODE_TO_NAME
 
     def __init__(self, settings, parent, on_complete=None, **kwargs):
         super().__init__(**kwargs)
@@ -40,9 +41,11 @@ class SetupWindow(Adw.Window):
         self.all_regions = sorted(self.REGION_CODE_TO_NAME.values())
         self.region_to_tariffs = {}
         self._load_generation = 0
+        self.location_portal = None
 
         self.setup_ui()
         self.load_tariffs_and_regions()
+        self.connect("close-request", self.on_close_request)
 
     def setup_ui(self):
         root = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -241,17 +244,18 @@ class SetupWindow(Adw.Window):
         self.region_row.connect("notify::selected", self.on_region_selected)
         group.add(self.region_row)
 
-        self.location_button = Gtk.Button.new_with_label("Suggest region from my location")
-        self.location_button.set_tooltip_text("Ask the desktop location portal for a one-time region suggestion")
+        self.location_button = Gtk.Button.new_with_label("Use My Location")
+        self.location_button.set_tooltip_text("Find my electricity region")
         self.location_button.connect("clicked", self.on_location_suggestion_clicked)
         group.add(self.location_button)
 
         self.location_status = Gtk.Label.new(
-            "This is only a suggestion. Your electricity account is authoritative, and boundary accuracy can vary."
+            "Uses your device location to find your electricity region. It is processed locally and is not stored."
         )
         self.location_status.set_xalign(0)
         self.location_status.set_wrap(True)
         self.location_status.add_css_class("dim-label")
+        self.location_status.set_accessible_role(Gtk.AccessibleRole.STATUS)
         group.add(self.location_status)
 
         self.tariff_model = Gtk.StringList.new(["Loading..."])
@@ -369,7 +373,7 @@ class SetupWindow(Adw.Window):
 
     def on_location_suggestion_clicked(self, _button):
         self.location_button.set_sensitive(False)
-        self.location_status.set_label("Requesting a location suggestion…")
+        self.location_status.set_label("Finding your region…")
         self.location_portal = LocationPortal(self._apply_location_suggestion, self._location_suggestion_failed)
         self.location_portal.start()
 
@@ -381,14 +385,21 @@ class SetupWindow(Adw.Window):
         self.settings.set_string("selected-region-code", region_code)
         if region_name in self.all_regions:
             self.region_row.set_selected(self.all_regions.index(region_name))
+        self._update_tariff_dropdown()
         self.location_button.set_sensitive(True)
-        self.location_status.set_label(
-            f"Suggested {region_name}. Check this against your electricity account before continuing."
-        )
+        self.location_status.set_label(f"Region detected: {region_name}")
+        self.location_portal = None
 
     def _location_suggestion_failed(self, message):
         self.location_button.set_sensitive(True)
         self.location_status.set_label(message)
+        self.location_portal = None
+
+    def on_close_request(self, _window):
+        if self.location_portal is not None:
+            self.location_portal.cancel()
+            self.location_portal = None
+        return False
 
     def on_tariff_selected(self, _row, _pspec):
         selected_region_code = self.settings.get_string("selected-region-code")
