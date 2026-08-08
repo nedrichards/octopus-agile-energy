@@ -68,6 +68,18 @@
   </screenshots>
 
   <releases>
+    <release version="1.0.22" date="2026-08-09">
+      <description>
+        <p>This release makes location-based region setup private, reliable, and clearer.</p>
+        <ul>
+          <li>Find the electricity region from a one-time device-location request in setup and Preferences</li>
+          <li>Match locations against bundled offline licence-area boundaries, including multi-part regions and boundary uncertainty</li>
+          <li>Keep location data on-device, close the portal session after use, and retain only the selected region</li>
+          <li>Show clear guidance when location is unavailable, unsupported, close to a boundary, or clearly outside the UK</li>
+          <li>Add Northern Powergrid Open Data attribution, provenance, and the separately licensed boundary-data notice</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.21" date="2026-07-25">
       <description>
         <p>This release makes price levels and chart interaction clearer.</p>
