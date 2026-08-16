@@ -69,8 +69,8 @@ class AdaptiveLayoutTests(unittest.TestCase):
 
     def test_plan_chart_width_reserves_a_wide_planner_pane(self):
         self.assertEqual(get_plan_chart_width(700, 20), 660)
-        self.assertEqual(get_plan_chart_width(1000, 24), 572)
-        self.assertEqual(get_plan_chart_width(1280, 32), 836)
+        self.assertEqual(get_plan_chart_width(1000, 24), 612)
+        self.assertEqual(get_plan_chart_width(1280, 32), 876)
 
 
 if __name__ == '__main__':

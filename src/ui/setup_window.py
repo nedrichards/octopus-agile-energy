@@ -42,6 +42,7 @@ class SetupWindow(Adw.Window):
         self.region_to_tariffs = {}
         self._load_generation = 0
         self.location_portal = None
+        self._manual_api_key_dirty = False
 
         self.setup_ui()
         self.load_tariffs_and_regions()
@@ -399,6 +400,7 @@ class SetupWindow(Adw.Window):
         if self.location_portal is not None:
             self.location_portal.cancel()
             self.location_portal = None
+        self._save_manual_api_key_entry()
         return False
 
     def on_tariff_selected(self, _row, _pspec):
@@ -409,16 +411,26 @@ class SetupWindow(Adw.Window):
             self.settings.set_string("selected-tariff-code", tariffs[selected_index]["code"])
 
     def on_manual_api_key_changed(self, entry):
-        api_key = entry.get_text().strip()
-        if api_key:
-            store_api_key(api_key)
-            self.manual_api_status.set_label("API key saved. Load Intelligent Go tariffs to continue.")
+        self._manual_api_key_dirty = True
+        if entry.get_text().strip():
+            self.manual_api_status.set_label("API key changed. Load Intelligent Go tariffs to save and continue.")
         else:
-            clear_api_key()
             self.manual_api_status.set_label("Enter an API key to load Intelligent Go tariffs.")
+
+    def _save_manual_api_key_entry(self):
+        if not self._manual_api_key_dirty:
+            return True
+        api_key = self.manual_api_key_entry.get_text().strip()
+        saved = store_api_key(api_key) if api_key else clear_api_key()
+        if saved:
+            self._manual_api_key_dirty = False
         self._update_manual_api_section()
+        return saved
 
     def on_manual_api_reload_clicked(self, _button):
+        if not self._save_manual_api_key_entry():
+            self.manual_api_status.set_label("Could not save the API key to the password store.")
+            return
         self.load_tariffs_and_regions()
 
     def on_validate_account_clicked(self, _button):
@@ -428,7 +440,9 @@ class SetupWindow(Adw.Window):
             self.account_status.set_label("Enter both your API key and account number.")
             return
 
-        store_api_key(api_key)
+        if not store_api_key(api_key):
+            self.account_status.set_label("Could not save the API key to the password store.")
+            return
         self.settings.set_string("octopus-account-number", account_number)
         self.validate_button.set_sensitive(False)
         self.account_status.set_label("Checking account and detecting tariff...")
@@ -446,19 +460,20 @@ class SetupWindow(Adw.Window):
                 return
 
             inferred_region_code = f"_{tariff_code.split('-')[-1]}" if "-" in tariff_code else ""
-            self.settings.set_string("selected-tariff-code", tariff_code)
-            if inferred_region_code in self.REGION_CODE_TO_NAME:
-                self.settings.set_string("selected-region-code", inferred_region_code)
-            self.settings.set_string("selected-tariff-type", self._infer_tariff_type_from_code(tariff_code))
-            GLib.idle_add(self._account_validation_complete, tariff_code)
+            GLib.idle_add(self._account_validation_complete, tariff_code, inferred_region_code)
         except OctopusApiError as e:
             GLib.idle_add(self._account_validation_failed, f"{e} Check your API key and account number.")
-        except requests.exceptions.RequestException as e:
-            GLib.idle_add(self._account_validation_failed, f"Network error: {e}.")
-        except Exception as e:  # ruff: ignore[BLE001] Background task boundary reports unexpected failures.
-            GLib.idle_add(self._account_validation_failed, f"Could not validate account: {e}.")
+        except requests.exceptions.RequestException:
+            GLib.idle_add(self._account_validation_failed, "Network error while validating the account.")
+        except Exception:
+            logger.exception("Unexpected account validation failure")
+            GLib.idle_add(self._account_validation_failed, "An unexpected error occurred while validating the account.")
 
-    def _account_validation_complete(self, tariff_code):
+    def _account_validation_complete(self, tariff_code, inferred_region_code):
+        self.settings.set_string("selected-tariff-code", tariff_code)
+        if inferred_region_code in self.REGION_CODE_TO_NAME:
+            self.settings.set_string("selected-region-code", inferred_region_code)
+        self.settings.set_string("selected-tariff-type", self._infer_tariff_type_from_code(tariff_code))
         self.validate_button.set_sensitive(True)
         self.complete_summary.set_label(
             f"Detected tariff {tariff_code} from your account."
@@ -476,6 +491,9 @@ class SetupWindow(Adw.Window):
         return False
 
     def on_manual_finish_clicked(self, _button):
+        if not self._save_manual_api_key_entry():
+            self.manual_status.set_label("Could not save the API key to the password store.")
+            return
         selected_tariff = self.settings.get_string("selected-tariff-code")
         if not selected_tariff:
             self.manual_status.set_label("Choose a tariff before continuing.")
@@ -562,10 +580,11 @@ class SetupWindow(Adw.Window):
                 GLib.idle_add(self._apply_tariff_data, region_to_tariffs)
         except OctopusApiError as e:
             GLib.idle_add(self._show_manual_error, f"{e} Cannot load tariffs.")
-        except requests.exceptions.RequestException as e:
-            GLib.idle_add(self._show_manual_error, f"Network error: {e}. Cannot load tariffs.")
-        except Exception as e:  # ruff: ignore[BLE001] Background task boundary reports unexpected failures.
-            GLib.idle_add(self._show_manual_error, f"Error loading tariffs: {e}.")
+        except requests.exceptions.RequestException:
+            GLib.idle_add(self._show_manual_error, "Network error. Cannot load tariffs.")
+        except Exception:
+            logger.exception("Unexpected tariff loading failure")
+            GLib.idle_add(self._show_manual_error, "An unexpected error occurred while loading tariffs.")
 
     def _apply_tariff_data(self, region_to_tariffs):
         self.region_to_tariffs = region_to_tariffs

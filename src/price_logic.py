@@ -1,6 +1,11 @@
 from datetime import datetime, time, timedelta, timezone
 from itertools import pairwise
 
+try:
+    from .uk_time import UK_TIMEZONE
+except ImportError:
+    from uk_time import UK_TIMEZONE
+
 
 def extract_product_code(selected_tariff_code):
     parts = selected_tariff_code.split('-')
@@ -27,7 +32,7 @@ def find_cheapest_slot(
 
     for i in range(len(prices_to_search) - num_slots + 1):
         window = prices_to_search[i:i + num_slots]
-        if whole_hour_starts_only and window[0]['valid_from'].astimezone().minute != 0:
+        if whole_hour_starts_only and window[0]['valid_from'].astimezone(UK_TIMEZONE).minute != 0:
             continue
         if window[-1]['valid_to'] > cutoff or not _has_contiguous_price_coverage(window):
             continue

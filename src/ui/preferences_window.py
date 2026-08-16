@@ -25,7 +25,6 @@ from ..region_location import (
 from ..secrets_manager import clear_api_key, get_api_key, store_api_key
 from ..usage_history import (
     build_historical_usage_costs,
-    fetch_all_consumption_pages,
     fetch_recent_usage_samples,
     get_account_data,
     get_usage_refresh_start,
@@ -66,6 +65,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
         self.region_to_tariffs = {} # To be populated by API data for these regions
         self._load_generation = 0
         self.location_portal = None
+        self._api_key_dirty = False
 
         self.setup_ui()
         self.load_tariffs_and_regions() # Initiate loading of tariff data
@@ -187,16 +187,27 @@ class PreferencesWindow(Adw.PreferencesWindow):
         self.present()
 
     def on_api_key_changed(self, entry):
-        text = entry.get_text()
-        if text:
-            store_api_key(text)
-        else:
-            clear_api_key()
+        self._api_key_dirty = True
+        self._set_auto_detect_status("API key changed. It will be saved before the next account action.")
+
+    def _save_api_key_entry(self):
+        if not self._api_key_dirty:
+            return True
+        text = self.api_key_entry.get_text().strip()
+        saved = store_api_key(text) if text else clear_api_key()
+        if saved:
+            self._api_key_dirty = False
+        return saved
 
     def on_tariff_type_selected(self, dropdown, pspec):
+        api_key_saved = self._save_api_key_entry()
         selected_display_name = self._get_selected_string(self.tariff_type_row)
         selected_type_code = self.TARIFF_TYPE_CODES.get(selected_display_name, "AGILE")
         self.settings.set_string("selected-tariff-type", selected_type_code)
+
+        if not api_key_saved and selected_type_code == "INTELLIGENT":
+            self._set_auto_detect_status("Could not save the API key to the password store.")
+            return
 
         # Trigger reload of tariffs
         self.load_tariffs_and_regions()
@@ -205,6 +216,9 @@ class PreferencesWindow(Adw.PreferencesWindow):
         self.settings.set_string("octopus-account-number", entry.get_text().strip())
 
     def on_auto_detect_clicked(self, _button):
+        if not self._save_api_key_entry():
+            self._set_auto_detect_status("Could not save the API key to the password store.")
+            return
         self.auto_detect_button.set_sensitive(False)
         self._set_auto_detect_status("Detecting tariff from account...")
 
@@ -221,6 +235,9 @@ class PreferencesWindow(Adw.PreferencesWindow):
         return False
 
     def on_refresh_usage_clicked(self, _button):
+        if not self._save_api_key_entry():
+            self._set_usage_status("Could not save the API key to the password store.")
+            return
         self.refresh_usage_button.set_sensitive(False)
         self._set_usage_status("Refreshing usage history...")
         thread = threading.Thread(target=self._refresh_usage_history)
@@ -244,11 +261,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
                 GLib.idle_add(self._set_auto_detect_button_state, True)
                 return
 
-            account_data = get_json(
-                f"https://api.octopus.energy/v1/accounts/{account_number}/",
-                use_api_key=True,
-                timeout=10,
-            )
+            account_data = get_account_data(account_number)
             tariff_code = self._extract_active_tariff_code(account_data)
             if not tariff_code:
                 GLib.idle_add(self._show_load_error, "Could not find an active electricity tariff on your account.")
@@ -259,26 +272,35 @@ class PreferencesWindow(Adw.PreferencesWindow):
             inferred_region_code = f"_{tariff_code.split('-')[-1]}" if "-" in tariff_code else ""
             inferred_tariff_type = self._infer_tariff_type_from_code(tariff_code)
 
-            self.settings.set_string("selected-tariff-code", tariff_code)
-            if inferred_region_code in self.REGION_CODE_TO_NAME:
-                self.settings.set_string("selected-region-code", inferred_region_code)
-            self.settings.set_string("selected-tariff-type", inferred_tariff_type)
-
-            GLib.idle_add(self.load_tariffs_and_regions)
-            GLib.idle_add(self._set_auto_detect_status, "Auto-detect complete. Tariff settings were updated.")
-            GLib.idle_add(self._set_auto_detect_button_state, True)
+            GLib.idle_add(
+                self._apply_auto_detected_tariff,
+                tariff_code,
+                inferred_region_code,
+                inferred_tariff_type,
+            )
         except OctopusApiError as e:
             GLib.idle_add(self._show_load_error, f"{e} Could not auto-detect tariff.")
             GLib.idle_add(self._set_auto_detect_status, "Auto-detect failed. Check API key/account number and try again.")
             GLib.idle_add(self._set_auto_detect_button_state, True)
-        except requests.exceptions.RequestException as e:
-            GLib.idle_add(self._show_load_error, f"Network error: {e}. Could not auto-detect tariff.")
+        except requests.exceptions.RequestException:
+            GLib.idle_add(self._show_load_error, "Network error. Could not auto-detect tariff.")
             GLib.idle_add(self._set_auto_detect_status, "Network error while auto-detecting tariff. Please retry.")
             GLib.idle_add(self._set_auto_detect_button_state, True)
-        except Exception as e:  # ruff: ignore[BLE001] Background task boundary reports unexpected failures.
-            GLib.idle_add(self._show_load_error, f"Error detecting tariff: {e}.")
+        except Exception:
+            logger.exception("Unexpected tariff auto-detection failure")
+            GLib.idle_add(self._show_load_error, "An unexpected error occurred while detecting the tariff.")
             GLib.idle_add(self._set_auto_detect_status, "Unexpected error while auto-detecting tariff.")
             GLib.idle_add(self._set_auto_detect_button_state, True)
+
+    def _apply_auto_detected_tariff(self, tariff_code, inferred_region_code, inferred_tariff_type):
+        self.settings.set_string("selected-tariff-code", tariff_code)
+        if inferred_region_code in self.REGION_CODE_TO_NAME:
+            self.settings.set_string("selected-region-code", inferred_region_code)
+        self.settings.set_string("selected-tariff-type", inferred_tariff_type)
+        self.load_tariffs_and_regions()
+        self._set_auto_detect_status("Auto-detect complete. Tariff settings were updated.")
+        self._set_auto_detect_button_state(True)
+        return False
 
     def _infer_tariff_type_from_code(self, tariff_code):
         normalized = tariff_code.upper()
@@ -344,29 +366,27 @@ class PreferencesWindow(Adw.PreferencesWindow):
             )
         except OctopusApiError as e:
             GLib.idle_add(self._set_usage_status, f"{e} Could not refresh usage history.")
-        except requests.exceptions.RequestException as e:
-            GLib.idle_add(self._set_usage_status, f"Network error: {e}. Could not refresh usage history.")
-        except Exception as e:  # ruff: ignore[BLE001] Background task boundary reports unexpected failures.
-            GLib.idle_add(self._set_usage_status, f"Error refreshing usage history: {e}.")
+        except requests.exceptions.RequestException:
+            GLib.idle_add(self._set_usage_status, "Network error. Could not refresh usage history.")
+        except Exception:
+            logger.exception("Unexpected usage-history refresh failure")
+            GLib.idle_add(self._set_usage_status, "An unexpected error occurred while refreshing usage history.")
         finally:
             GLib.idle_add(self._set_refresh_usage_button_state, True)
 
     def _build_historical_usage_costs_for_cache(self, account_data, usage_samples):
         try:
             return build_historical_usage_costs(account_data, usage_samples)
-        except OctopusApiError as e:
-            logger.debug("Historical usage cost refresh failed: %s", e)
-        except requests.exceptions.RequestException as e:
-            logger.debug("Historical usage cost network error: %s", e)
-        except Exception as e:  # ruff: ignore[BLE001] Optional cost enrichment must not fail the refresh.
-            logger.debug("Unexpected historical usage cost error: %s", e)
+        except OctopusApiError as exc:
+            logger.debug("Historical usage cost refresh failed: %s", type(exc).__name__)
+        except requests.exceptions.RequestException as exc:
+            logger.debug("Historical usage cost network error: %s", type(exc).__name__)
+        except Exception as exc:  # ruff: ignore[BLE001] Optional cost enrichment must not fail the refresh.
+            logger.debug("Unexpected historical usage cost error: %s", type(exc).__name__)
         return None
 
     def _fetch_recent_usage_samples(self, account_data, period_from=None, now=None):
         return fetch_recent_usage_samples(account_data, period_from=period_from, now=now)
-
-    def _fetch_all_consumption_pages(self, initial_url):
-        return fetch_all_consumption_pages(initial_url)
 
     def load_tariffs_and_regions(self):
         """
@@ -440,9 +460,9 @@ class PreferencesWindow(Adw.PreferencesWindow):
                 )
 
                 is_match = (
-                    tariff_type == 'AGILE' and 'AGILE' in code and not is_export_product
-                    or tariff_type == 'GO' and is_go_product and not is_intelligent_product
-                    or tariff_type == 'INTELLIGENT' and is_intelligent_product
+                    (tariff_type == 'AGILE' and 'AGILE' in code and not is_export_product)
+                    or (tariff_type == 'GO' and is_go_product and not is_intelligent_product)
+                    or (tariff_type == 'INTELLIGENT' and is_intelligent_product)
                 )
 
                 if is_match and product.get('available_from') and not product.get('available_to'):
@@ -473,10 +493,11 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
         except OctopusApiError as e:
             GLib.idle_add(self._show_load_error_if_current, f"{e} Cannot load tariffs.", request_id)
-        except requests.exceptions.RequestException as e:
-            GLib.idle_add(self._show_load_error_if_current, f"Network error: {e}. Cannot load tariffs.", request_id)
-        except Exception as e:  # ruff: ignore[BLE001] Background task boundary reports unexpected failures.
-            GLib.idle_add(self._show_load_error_if_current, f"Error processing data: {e}.", request_id)
+        except requests.exceptions.RequestException:
+            GLib.idle_add(self._show_load_error_if_current, "Network error. Cannot load tariffs.", request_id)
+        except Exception:
+            logger.exception("Unexpected tariff loading failure")
+            GLib.idle_add(self._show_load_error_if_current, "An unexpected error occurred.", request_id)
 
     def _process_agile_tariffs(self, product_data, request_id):
         """
@@ -641,5 +662,6 @@ class PreferencesWindow(Adw.PreferencesWindow):
         if self.location_portal is not None:
             self.location_portal.cancel()
             self.location_portal = None
+        self._save_api_key_entry()
         self.hide()
         return True

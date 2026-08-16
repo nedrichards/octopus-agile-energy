@@ -35,8 +35,8 @@ def store_api_key(api_key: str) -> bool:
         )
         logger.info("Successfully stored API key in secret service")
         return True
-    except GLib.Error as e:
-        logger.error(f"Failed to store API key in secret service: {e}")
+    except GLib.Error as exc:
+        logger.error("Failed to store API key in secret service: %s", type(exc).__name__)
         return False
 
 def get_api_key() -> str | None:
@@ -50,8 +50,8 @@ def get_api_key() -> str | None:
             None
         )
         return password
-    except GLib.Error as e:
-        logger.error(f"Failed to lookup API key from secret service: {e}")
+    except GLib.Error as exc:
+        logger.error("Failed to lookup API key from secret service: %s", type(exc).__name__)
         return None
 
 def clear_api_key() -> bool:
@@ -66,6 +66,6 @@ def clear_api_key() -> bool:
         )
         logger.info("Successfully cleared API key from secret service")
         return True
-    except GLib.Error as e:
-        logger.error(f"Failed to clear API key from secret service: {e}")
+    except GLib.Error as exc:
+        logger.error("Failed to clear API key from secret service: %s", type(exc).__name__)
         return False

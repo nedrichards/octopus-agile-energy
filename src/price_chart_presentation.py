@@ -1,3 +1,9 @@
+try:
+    from .uk_time import UK_TIMEZONE
+except ImportError:
+    from uk_time import UK_TIMEZONE
+
+
 def get_price_axis_bounds(prices):
     """Return axis bounds that always include the zero-price baseline."""
     if not prices:
@@ -9,6 +15,23 @@ def get_price_axis_bounds(prices):
         upper_bound = lower_bound + 0.01
 
     return lower_bound, upper_bound
+
+
+def get_animation_factors(elapsed_frames, rise_per_frame=0.28, decay_per_frame=0.82):
+    """Return refresh-rate-independent rise and decay factors."""
+    elapsed_frames = max(0.0, elapsed_frames)
+    return (
+        1 - ((1 - rise_per_frame) ** elapsed_frames),
+        decay_per_frame ** elapsed_frames,
+    )
+
+
+def get_composited_overlay_alpha(base_alpha, target_alpha):
+    """Return the overlay alpha needed to preserve a target visual opacity."""
+    if not 0.0 <= base_alpha < 1.0:
+        raise ValueError("base_alpha must be between zero and one")
+    target_alpha = max(base_alpha, min(1.0, target_alpha))
+    return (target_alpha - base_alpha) / (1 - base_alpha)
 
 
 def find_price_index_by_start(prices, target_time):
@@ -48,7 +71,7 @@ def get_flyout_horizontal_position(
     return max(minimum_x, min(preferred_x, maximum_x))
 
 
-def get_day_transition_markers(valid_from_values, local_timezone=None):
+def get_day_transition_markers(valid_from_values, local_timezone=UK_TIMEZONE):
     """Return each visible day boundary as an index and short chart label."""
     if not valid_from_values:
         return []

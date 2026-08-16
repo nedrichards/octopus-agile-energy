@@ -2,7 +2,7 @@ import sys
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -10,9 +10,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.octopus_api import OctopusApiError
 from src.price_bands import PRICE_BAND_VERSION
 from src.usage_history import (
+    USAGE_CACHE_VERSION,
     fetch_all_tariff_pages,
     fetch_historical_unit_rates,
     fetch_recent_usage_samples,
+    get_account_data,
     get_usage_refresh_start,
     merge_usage_history,
 )
@@ -78,29 +80,65 @@ class UsageHistoryTests(unittest.TestCase):
             ],
         )
         self.assertEqual(get_json.call_count, 2)
-        self.assertEqual(get_json.call_args_list[0].kwargs, {"use_api_key": True, "timeout": 10})
+        self.assertEqual(
+            get_json.call_args_list[0].kwargs,
+            {"use_api_key": True, "timeout": 10, "session": ANY},
+        )
+        self.assertIs(
+            get_json.call_args_list[0].kwargs["session"],
+            get_json.call_args_list[1].kwargs["session"],
+        )
 
     def test_incremental_refresh_overlaps_latest_cached_sample_by_seven_days(self):
         cached_data = {
             "samples": [{"interval_start": "2026-07-24T10:30:00Z"}],
             "daily_costs": [],
+            "cache_version": USAGE_CACHE_VERSION,
             "price_band_version": PRICE_BAND_VERSION,
         }
 
         refresh_start = get_usage_refresh_start(cached_data, self.now)
 
-        self.assertEqual(refresh_start, datetime(2026, 7, 17, 0, 0, tzinfo=timezone.utc))
+        self.assertEqual(refresh_start, datetime(2026, 7, 16, 23, 0, tzinfo=timezone.utc))
 
     def test_incompatible_cache_falls_back_to_full_history_window(self):
         cached_data = {
             "samples": [{"interval_start": "2026-07-24T10:30:00Z"}],
             "daily_costs": [],
+            "cache_version": USAGE_CACHE_VERSION,
             "price_band_version": "old",
         }
 
         refresh_start = get_usage_refresh_start(cached_data, self.now)
 
         self.assertEqual(refresh_start, self.now - timedelta(days=120))
+
+    def test_older_cache_schema_falls_back_to_full_history_window(self):
+        cached_data = {
+            "samples": [{"interval_start": "2026-07-24T10:30:00Z"}],
+            "daily_costs": [],
+            "cache_version": USAGE_CACHE_VERSION - 1,
+            "price_band_version": PRICE_BAND_VERSION,
+        }
+
+        self.assertEqual(
+            get_usage_refresh_start(cached_data, self.now),
+            self.now - timedelta(days=120),
+        )
+
+    @patch("src.usage_history.get_json")
+    def test_account_numbers_are_validated_before_authenticated_requests(self, get_json):
+        with self.assertRaisesRegex(OctopusApiError, "format is invalid"):
+            get_account_data("../../products")
+
+        get_json.assert_not_called()
+
+    def test_paginated_fetch_rejects_repeated_urls(self):
+        with patch("src.usage_history.get_json") as get_json:
+            get_json.return_value = {"results": [], "next": "https://api.octopus.energy/repeated"}
+
+            with self.assertRaisesRegex(OctopusApiError, "repeated pagination URL"):
+                fetch_all_tariff_pages("https://api.octopus.energy/repeated")
 
     def test_merge_replaces_overlap_and_prunes_samples_outside_history_window(self):
         cached_data = {
@@ -112,6 +150,7 @@ class UsageHistoryTests(unittest.TestCase):
                 {"date": "2026-03-20", "kwh": 1.0},
                 {"date": "2026-07-24", "kwh": 2.0},
             ],
+            "cache_version": USAGE_CACHE_VERSION,
             "price_band_version": PRICE_BAND_VERSION,
         }
         fresh_samples = [
@@ -130,6 +169,7 @@ class UsageHistoryTests(unittest.TestCase):
             ],
         )
         self.assertEqual(merged["daily_costs"], fresh_daily_costs)
+        self.assertEqual(merged["cache_version"], USAGE_CACHE_VERSION)
         self.assertEqual(merged["price_band_version"], PRICE_BAND_VERSION)
 
     def test_merge_preserves_cached_costs_when_rate_refresh_fails(self):
@@ -137,6 +177,7 @@ class UsageHistoryTests(unittest.TestCase):
         cached_data = {
             "samples": [{"interval_start": "2026-07-24T10:30:00Z", "consumption": 0.2}],
             "daily_costs": cached_daily_costs,
+            "cache_version": USAGE_CACHE_VERSION,
             "price_band_version": PRICE_BAND_VERSION,
         }
 

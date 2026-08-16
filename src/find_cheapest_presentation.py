@@ -1,9 +1,11 @@
 try:
     from .price_formatting import format_unit_price_gbp
     from .time_formatting import format_time_from_now
+    from .uk_time import UK_TIMEZONE
 except ImportError:
     from price_formatting import format_unit_price_gbp
     from time_formatting import format_time_from_now
+    from uk_time import UK_TIMEZONE
 
 MISSING_TIMER_DETAIL = "Not enough price data"
 MISSING_TIMER_TEXT = "—"
@@ -53,8 +55,8 @@ def build_fixed_start_presentation(slot, best_average_price):
 
 
 def format_time_window(start_time, end_time):
-    start_text = start_time.astimezone().strftime('%H:%M')
-    end_text = end_time.astimezone().strftime('%H:%M')
+    start_text = start_time.astimezone(UK_TIMEZONE).strftime('%H:%M')
+    end_text = end_time.astimezone(UK_TIMEZONE).strftime('%H:%M')
     return f"{start_text}-{end_text}"
 
 

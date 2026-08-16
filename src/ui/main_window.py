@@ -15,18 +15,16 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 from ..find_cheapest_presentation import (
     build_find_cheapest_presentation,
     build_fixed_start_presentation,
-    format_duration,
-    format_price_delta,
-    format_time_window,
-    format_timer_slot_detail,
 )
 from ..octopus_api import OctopusApiError
 from ..price_bands import PRICE_BAND_NEGATIVE, PRICE_BAND_VERSION, get_price_band
+from ..price_cache import build_rates_cache_key, is_rates_cache_stale
 from ..price_formatting import format_gbp, format_unit_price_gbp
 from ..price_logic import build_dual_register_price_windows, build_fixed_start_price_window, extract_product_code
 from ..price_logic import find_cheapest_slot as calculate_cheapest_slot
 from ..price_logic import find_cheapest_timer_slot as calculate_cheapest_timer_slot
 from ..secrets_manager import get_api_key
+from ..uk_time import UK_TIMEZONE
 from ..usage_history import (
     build_historical_usage_costs,
     fetch_recent_usage_samples,
@@ -115,6 +113,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._price_chart_signature = None
         self._usage_chart_signature = None
         self._usage_insights_input_signature = None
+        self._adaptive_layout_signature = None
+        self._usage_chart_layout_signature = None
         self._standing_charge_fetches = set()
         self._refresh_button_waiting_for_usage = False
 
@@ -139,7 +139,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.schedule_next_data_fetch()
 
     def schedule_next_ui_update(self):
-        now = datetime.now().astimezone()
+        now = datetime.now(UK_TIMEZONE)
         if now.minute < 30:
             next_update = now.replace(minute=30, second=0, microsecond=0)
         else:
@@ -154,7 +154,7 @@ class MainWindow(Adw.ApplicationWindow):
         return False
 
     def schedule_next_data_fetch(self):
-        now = datetime.now().astimezone()
+        now = datetime.now(UK_TIMEZONE)
         next_fetch = now.replace(hour=16, minute=1, second=0, microsecond=0)
         if now > next_fetch:
             next_fetch += timedelta(days=1)
@@ -168,11 +168,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.schedule_next_data_fetch()
         return False
 
-    def create_headerbar_widget(self): # Renamed to reflect it returns a widget
-        """
-        Configures and returns the application's header bar widget.
-        This method is now called from setup_ui to create a widget to be appended.
-        """
+    def create_headerbar_widget(self):
+        """Create the application's header bar."""
         header_bar = Adw.HeaderBar.new()
         self.header_title_widget = Adw.WindowTitle.new("Agile Rates", "")
         header_bar.set_title_widget(self.header_title_widget)
@@ -190,14 +187,14 @@ class MainWindow(Adw.ApplicationWindow):
         menu_button.set_tooltip_text("Main Menu")
 
         menu_model = Gio.Menu.new()
-        menu_model.append("Preferences", "app.preferences") # New: Preferences action
+        menu_model.append("Preferences", "app.preferences")
         menu_model.append("About", "app.about")
         menu_model.append("Quit", "app.quit")
         menu_button.set_menu_model(menu_model)
         header_bar.pack_end(menu_button)
 
         self.menu_button = menu_button
-        return header_bar # Return the configured header bar widget
+        return header_bar
 
     def create_actions(self):
         """
@@ -491,9 +488,10 @@ class MainWindow(Adw.ApplicationWindow):
         # Planning page. It stacks on compact and regular windows, then becomes
         # a chart-and-controls workspace when enough width is available.
         self.plan_page_box = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        self.plan_content_box = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=PLAN_COLUMN_SPACING)
-        self.plan_content_box.set_valign(Gtk.Align.START)
-        self.plan_page_box.append(self.plan_content_box)
+        self.plan_layout_view = Adw.MultiLayoutView.new()
+        self.plan_layout_view.set_valign(Gtk.Align.START)
+        self.plan_layout_view.set_hexpand(True)
+        self.plan_page_box.append(self.plan_layout_view)
 
         self.plan_chart_column = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         self.plan_chart_column.set_hexpand(True)
@@ -509,7 +507,6 @@ class MainWindow(Adw.ApplicationWindow):
             self.plan_chart_scroller.get_hadjustment()
         )
         self.plan_chart_column.append(self.plan_chart_scroller)
-        self.plan_content_box.append(self.plan_chart_column)
 
         plan_scroll = Gtk.ScrolledWindow.new()
         plan_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -816,7 +813,34 @@ class MainWindow(Adw.ApplicationWindow):
         self.plan_timer_group = Adw.PreferencesGroup()
         self.plan_timer_group.set_title("Appliance timers")
         self.plan_pane.append(self.plan_timer_group)
-        self.plan_content_box.append(self.plan_pane)
+
+        narrow_plan_box = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        narrow_plan_box.set_valign(Gtk.Align.START)
+        narrow_plan_pane_slot = Adw.LayoutSlot.new("plan-pane")
+        narrow_plan_chart_slot = Adw.LayoutSlot.new("plan-chart")
+        narrow_plan_box.append(narrow_plan_pane_slot)
+        narrow_plan_box.append(narrow_plan_chart_slot)
+        narrow_plan_layout = Adw.Layout.new(narrow_plan_box)
+        narrow_plan_layout.set_name("narrow")
+
+        wide_plan_box = Gtk.Box.new(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=PLAN_COLUMN_SPACING,
+        )
+        wide_plan_box.set_valign(Gtk.Align.START)
+        wide_plan_chart_slot = Adw.LayoutSlot.new("plan-chart")
+        wide_plan_chart_slot.set_hexpand(True)
+        wide_plan_pane_slot = Adw.LayoutSlot.new("plan-pane")
+        wide_plan_box.append(wide_plan_chart_slot)
+        wide_plan_box.append(wide_plan_pane_slot)
+        wide_plan_layout = Adw.Layout.new(wide_plan_box)
+        wide_plan_layout.set_name("wide")
+
+        self.plan_layout_view.add_layout(narrow_plan_layout)
+        self.plan_layout_view.add_layout(wide_plan_layout)
+        self.plan_layout_view.set_child("plan-chart", self.plan_chart_column)
+        self.plan_layout_view.set_child("plan-pane", self.plan_pane)
+        self.plan_layout_view.set_layout_name("narrow")
 
         # --- Duration input ---
         self.duration_row = Adw.ActionRow.new()
@@ -1052,8 +1076,33 @@ class MainWindow(Adw.ApplicationWindow):
         compact = is_compact_width(width)
         height = self.get_height() or self.settings.get_int("window-height")
         price_summary_mode = get_price_summary_mode(width, height)
-        self.is_compact_layout = compact
         margin = get_content_margin(width)
+        plan_wide = is_plan_wide_layout(width)
+        chart_slot_count = len(self.chart_prices) if self.chart_prices else DEFAULT_CHART_SLOTS
+        plan_chart_width = get_plan_chart_width(width, margin)
+        usage_slot_count = (
+            len(self.usage_chart_points)
+            if self.usage_chart_points
+            else DEFAULT_CHART_SLOTS
+        )
+        layout_signature = (
+            compact,
+            price_summary_mode,
+            margin,
+            plan_wide,
+            get_chart_content_width(width, chart_slot_count),
+            get_chart_height(width),
+            is_compact_width(plan_chart_width),
+            get_chart_content_width(plan_chart_width, chart_slot_count),
+            get_chart_height(plan_chart_width),
+            get_chart_content_width(width, usage_slot_count),
+            get_chart_height(width),
+        )
+        if layout_signature == self._adaptive_layout_signature:
+            return
+
+        self._adaptive_layout_signature = layout_signature
+        self.is_compact_layout = compact
 
         self.overall_content_box.set_margin_top(margin)
         self.overall_content_box.set_margin_bottom(margin)
@@ -1091,21 +1140,11 @@ class MainWindow(Adw.ApplicationWindow):
         self.usage_updated_label.set_margin_end(0 if compact else 10)
         self.status_label.set_wrap(compact)
 
-        plan_wide = is_plan_wide_layout(width)
-        self.plan_content_box.set_orientation(
-            Gtk.Orientation.HORIZONTAL if plan_wide else Gtk.Orientation.VERTICAL
-        )
-        self.plan_content_box.set_spacing(PLAN_COLUMN_SPACING if plan_wide else 16)
+        self.plan_layout_view.set_layout_name("wide" if plan_wide else "narrow")
         self.plan_pane.set_size_request(PLAN_PANE_WIDTH if plan_wide else -1, -1)
         self.plan_pane.set_hexpand(not plan_wide)
-        self.plan_content_box.reorder_child_after(
-            self.plan_pane,
-            self.plan_chart_column if plan_wide else None,
-        )
 
-        chart_slot_count = len(self.chart_prices) if self.chart_prices else DEFAULT_CHART_SLOTS
         self.price_chart.set_compact_mode(compact, width, chart_slot_count)
-        plan_chart_width = get_plan_chart_width(width, margin)
         self.plan_price_chart.set_compact_mode(
             is_compact_width(plan_chart_width),
             plan_chart_width,
@@ -1263,8 +1302,8 @@ class MainWindow(Adw.ApplicationWindow):
         if not was_visible:
             self._fade_widget_in(self.best_slot_result_row, start_opacity=0.88)
 
-        self.best_slot_start_time = best_slot_start_time.astimezone()
-        self.best_slot_end_time = best_slot_end_time.astimezone()
+        self.best_slot_start_time = best_slot_start_time.astimezone(UK_TIMEZONE)
+        self.best_slot_end_time = best_slot_end_time.astimezone(UK_TIMEZONE)
         self.best_slot_average_price = cheapest_slot['average_price_gbp']
         self._update_plan_comparison()
 
@@ -1303,18 +1342,6 @@ class MainWindow(Adw.ApplicationWindow):
             message = "Select a half-hour on the chart to compare another start time."
         self.comparison_message_row.set_title(message or "")
         self.comparison_message_row.set_visible(bool(message))
-
-    def _format_time_window(self, start_time, end_time):
-        return format_time_window(start_time, end_time)
-
-    def _format_duration(self, duration_hours):
-        return format_duration(duration_hours)
-
-    def _format_timer_slot_detail(self, slot, best_average_price):
-        return format_timer_slot_detail(slot, best_average_price)
-
-    def _format_price_delta(self, average_price, best_average_price):
-        return format_price_delta(average_price, best_average_price)
 
     def _scroll_chart_to_time(self, target_time):
         target_index = self._find_chart_index_for_time(target_time)
@@ -1446,15 +1473,14 @@ class MainWindow(Adw.ApplicationWindow):
             product_code = extract_product_code(selected_tariff_code)
 
             now = datetime.now(timezone.utc)
-            rates_cache_key = f"octopus_rates_{selected_tariff_code}_{now.strftime('%Y-%m-%d')}"
+            rates_cache_key = build_rates_cache_key(selected_tariff_code, now)
 
             raw_rates = None
             if not force:
                 cached_data, cache_mtime_ts = self.cache_manager.get(rates_cache_key)
                 if cached_data and cache_mtime_ts:
                     cache_mtime = datetime.fromtimestamp(cache_mtime_ts, tz=timezone.utc)
-                    release_time = now.replace(hour=16, minute=0, second=0, microsecond=0)
-                    if not (now >= release_time and cache_mtime < release_time):
+                    if not is_rates_cache_stale(cache_mtime, now):
                         logger.debug("Rates data loaded from cache.")
                         raw_rates = cached_data
                     else:
@@ -1496,10 +1522,9 @@ class MainWindow(Adw.ApplicationWindow):
 
         except requests.exceptions.RequestException as e:
             GLib.idle_add(self._show_error_if_current, f"Network error: {type(e).__name__}", request_id)
-        except Exception as e:  # ruff: ignore[BLE001] Background task boundary reports unexpected failures.
-            import traceback
-            traceback.print_exc()
-            GLib.idle_add(self._show_error_if_current, f"An unexpected error occurred: {e}", request_id)
+        except Exception:
+            logger.exception("Unexpected price refresh failure")
+            GLib.idle_add(self._show_error_if_current, "An unexpected error occurred.", request_id)
         finally:
             GLib.idle_add(self._finish_price_refresh, request_id)
 
@@ -1547,19 +1572,25 @@ class MainWindow(Adw.ApplicationWindow):
     @staticmethod
     def _get_response_detail(response):
         try:
-            detail = response.json().get("detail", "")
+            payload = response.json()
         except ValueError:
             return ""
+        if not isinstance(payload, dict):
+            return ""
+        detail = payload.get("detail", "")
         return detail if isinstance(detail, str) else ""
 
     @staticmethod
     def _filter_half_hour_rates(rates):
-        filtered_rates_dict = {
-            rate['valid_from']: rate
-            for rate in rates
-            if (datetime.fromisoformat(rate['valid_to'].replace('Z', '+00:00')) -
-                datetime.fromisoformat(rate['valid_from'].replace('Z', '+00:00'))) == timedelta(minutes=30)
-        }
+        filtered_rates_dict = {}
+        for rate in rates:
+            try:
+                valid_from = datetime.fromisoformat(rate['valid_from'].replace('Z', '+00:00'))
+                valid_to = datetime.fromisoformat(rate['valid_to'].replace('Z', '+00:00'))
+            except (AttributeError, KeyError, TypeError, ValueError):
+                continue
+            if valid_to - valid_from == timedelta(minutes=30):
+                filtered_rates_dict[rate['valid_from']] = rate
         return sorted(filtered_rates_dict.values(), key=lambda x: x['valid_from'])
 
     def _fetch_dual_register_rates(self, product_code, tariff_code, now, auth):
@@ -1658,15 +1689,19 @@ class MainWindow(Adw.ApplicationWindow):
         processed_prices = []
         for rate in raw_rates:
             try:
+                price_gbp = float(rate['value_inc_vat']) / 100.0
+                if not math.isfinite(price_gbp):
+                    raise ValueError("Price must be finite")
                 processed_prices.append({
                     'valid_from': datetime.fromisoformat(rate['valid_from'].replace('Z', '+00:00')),
                     'valid_to': datetime.fromisoformat(rate['valid_to'].replace('Z', '+00:00')),
-                    'price_gbp': rate['value_inc_vat'] / 100.0,
+                    'price_gbp': price_gbp,
                 })
-            except (ValueError, KeyError) as e:
-                logger.warning("Skipping rate due to processing error: %s", e)
+            except (AttributeError, KeyError, TypeError, ValueError) as exc:
+                logger.warning("Skipping an invalid rate: %s", type(exc).__name__)
                 continue
 
+        processed_prices.sort(key=lambda price: price['valid_from'])
         GLib.idle_add(self._apply_processed_prices, processed_prices, request_id)
 
     def update_current_price(self):
@@ -1692,7 +1727,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.chart_prices = [p for p in self.all_prices if display_from <= p['valid_from'] < display_to]
 
             current_index_in_chart = 0 # Current price is always the first in the chart view
-            GLib.idle_add(self.update_display, current_rate, self.chart_prices, current_index_in_chart)
+            self.update_display(current_rate, self.chart_prices, current_index_in_chart)
         else:
             self.show_error("No current price data found. Rates may not be published yet.")
 
@@ -1716,7 +1751,7 @@ class MainWindow(Adw.ApplicationWindow):
             compact_description="",
             css_class=css_class,
         )
-        self._set_last_updated_label(self.time_label, datetime.now().astimezone())
+        self._set_last_updated_label(self.time_label, datetime.now(UK_TIMEZONE))
         self.price_chart.set_compact_mode(
             is_compact_width(self.get_width()),
             self.get_width() or self.settings.get_int("window-width"),
@@ -2010,7 +2045,7 @@ class MainWindow(Adw.ApplicationWindow):
                 updated_at = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
             if updated_at.tzinfo is None:
                 updated_at = updated_at.replace(tzinfo=timezone.utc)
-            local_dt = updated_at.astimezone()
+            local_dt = updated_at.astimezone(UK_TIMEZONE)
             return local_dt.strftime("%d %b %Y, %H:%M")
         except (TypeError, ValueError):
             return "Unknown"
@@ -2079,25 +2114,25 @@ class MainWindow(Adw.ApplicationWindow):
                 GLib.idle_add(self._finish_usage_history_background_refresh, True)
             else:
                 GLib.idle_add(self._finish_usage_history_background_refresh, False)
-        except OctopusApiError as e:
-            logger.debug("Background usage refresh failed: %s", e)
+        except OctopusApiError as exc:
+            logger.debug("Background usage refresh failed: %s", type(exc).__name__)
             GLib.idle_add(self._finish_usage_history_background_refresh, False)
-        except requests.exceptions.RequestException as e:
-            logger.debug("Background usage refresh network error: %s", e)
+        except requests.exceptions.RequestException as exc:
+            logger.debug("Background usage refresh network error: %s", type(exc).__name__)
             GLib.idle_add(self._finish_usage_history_background_refresh, False)
-        except Exception as e:  # ruff: ignore[BLE001] Background task boundary reports unexpected failures.
-            logger.debug("Unexpected background usage refresh error: %s", e)
+        except Exception as exc:  # ruff: ignore[BLE001] Background task boundary reports unexpected failures.
+            logger.debug("Unexpected background usage refresh error: %s", type(exc).__name__)
             GLib.idle_add(self._finish_usage_history_background_refresh, False)
 
     def _build_historical_usage_costs_for_cache(self, account_data, usage_samples):
         try:
             return build_historical_usage_costs(account_data, usage_samples)
-        except OctopusApiError as e:
-            logger.debug("Historical usage cost refresh failed: %s", e)
-        except requests.exceptions.RequestException as e:
-            logger.debug("Historical usage cost network error: %s", e)
-        except Exception as e:  # ruff: ignore[BLE001] Optional cost enrichment must not fail the refresh.
-            logger.debug("Unexpected historical usage cost error: %s", e)
+        except OctopusApiError as exc:
+            logger.debug("Historical usage cost refresh failed: %s", type(exc).__name__)
+        except requests.exceptions.RequestException as exc:
+            logger.debug("Historical usage cost network error: %s", type(exc).__name__)
+        except Exception as exc:  # ruff: ignore[BLE001] Optional cost enrichment must not fail the refresh.
+            logger.debug("Unexpected historical usage cost error: %s", type(exc).__name__)
         return None
 
     def _finish_usage_history_background_refresh(self, updated):
@@ -2189,9 +2224,15 @@ class MainWindow(Adw.ApplicationWindow):
         compact = is_compact_width(width)
         slot_count = len(self.usage_chart_points) if self.usage_chart_points else DEFAULT_CHART_SLOTS
         content_width = get_chart_content_width(width, slot_count)
-        self.usage_chart_area.set_size_request(content_width, get_chart_height(width))
+        content_height = get_chart_height(width)
+        layout_signature = (compact, slot_count, content_width, content_height)
+        if layout_signature == self._usage_chart_layout_signature:
+            return
+
+        self._usage_chart_layout_signature = layout_signature
+        self.usage_chart_area.set_size_request(content_width, content_height)
         self.usage_chart_area.set_content_width(content_width)
-        self.usage_chart_area.set_content_height(get_chart_height(width))
+        self.usage_chart_area.set_content_height(content_height)
         self.usage_chart_margin_left = 38 if compact else 45
         self.usage_chart_margin_right = 10 if compact else 15
         self.usage_chart_margin_top = 16 if compact else 20
@@ -2250,7 +2291,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         if self.usage_graph_mode == "kwh":
             daily_data = []
-            for date, kwh in zip(insight["chart_dates"], insight["chart_points"]):
+            for date, kwh in zip(insight["chart_dates"], insight["chart_points"], strict=True):
                 day = daily_cost_by_date.get(date, {})
                 daily_data.append({
                     "date": date,
@@ -2621,7 +2662,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _mix_colors(self, base_color, tint_color, tint_amount):
         return tuple(
             base_component * (1 - tint_amount) + tint_component * tint_amount
-            for base_component, tint_component in zip(base_color, tint_color)
+            for base_component, tint_component in zip(base_color, tint_color, strict=True)
         )
 
     def _draw_usage_chart(self, _area, cr, width, height):

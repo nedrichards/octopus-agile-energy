@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 
 from .price_bands import (
     HIGH_PRICE_THRESHOLD_GBP,
@@ -8,8 +8,8 @@ from .price_bands import (
     PRICE_BAND_VERSION,
     format_price_threshold,
 )
+from .uk_time import UK_TIMEZONE
 
-SAMPLES_PER_COMPLETE_DAY = 48
 USAGE_BANDS = (
     ("Overnight", 0, 6),
     ("Morning", 6, 12),
@@ -25,18 +25,10 @@ def build_usage_insight_data(samples: list[dict], synced_at: str | None):
 
     daily_totals = {}
     daily_sample_counts = {}
-    for sample in samples:
-        interval_start = sample.get("interval_start")
-        consumption = sample.get("consumption")
-        if interval_start is None or consumption is None:
-            continue
-        try:
-            start_dt = datetime.fromisoformat(interval_start.replace("Z", "+00:00"))
-            day_key = start_dt.date().isoformat()
-            daily_totals[day_key] = daily_totals.get(day_key, 0.0) + float(consumption)
-            daily_sample_counts[day_key] = daily_sample_counts.get(day_key, 0) + 1
-        except (TypeError, ValueError):
-            continue
+    for sample in _parse_samples(samples):
+        day_key = sample["start"].astimezone(UK_TIMEZONE).date().isoformat()
+        daily_totals[day_key] = daily_totals.get(day_key, 0.0) + sample["consumption"]
+        daily_sample_counts[day_key] = daily_sample_counts.get(day_key, 0) + 1
 
     if len(daily_totals) < 7:
         return _empty("Not enough usage data yet (need at least seven days).")
@@ -143,7 +135,7 @@ def _build_peak_usage_pattern(samples: list[dict]):
     slot_totals = {}
     total_kwh = 0.0
     for sample in parsed_samples:
-        local_start = sample["start"].astimezone()
+        local_start = sample["start"].astimezone(UK_TIMEZONE)
         consumption = sample["consumption"]
         total_kwh += consumption
         band_totals[_band_for_hour(local_start.hour)] += consumption
@@ -166,7 +158,8 @@ def _build_peak_usage_pattern(samples: list[dict]):
 def _build_rate_capture(daily_costs: list[dict]):
     complete_days = [
         day for day in daily_costs
-        if day.get("sample_count", 0) >= SAMPLES_PER_COMPLETE_DAY and day.get("missing_rate_count", 0) == 0
+        if day.get("sample_count", 0) >= _expected_samples_for_day_text(day.get("date"))
+        and day.get("missing_rate_count", 0) == 0
     ]
     matched_kwh = sum(float(day.get("matched_kwh", day.get("kwh", 0.0)) or 0.0) for day in complete_days)
     if matched_kwh <= 0:
@@ -225,32 +218,47 @@ def _build_rate_capture(daily_costs: list[dict]):
 def _daily_complete_slots(samples: list[dict]):
     slots_by_day = {}
     for sample in _parse_samples(samples):
-        day_key = sample["start"].astimezone().date().isoformat()
+        day_key = sample["start"].astimezone(UK_TIMEZONE).date().isoformat()
         slots_by_day.setdefault(day_key, []).append(sample)
 
     complete = [
         (day_key, slots)
         for day_key, slots in sorted(slots_by_day.items())
-        if len(slots) >= SAMPLES_PER_COMPLETE_DAY
+        if len(slots) >= _expected_samples_for_day_text(day_key)
     ]
     return complete
 
 
 def _parse_samples(samples: list[dict]):
-    parsed = []
+    parsed_by_start = {}
     for sample in samples:
         interval_start = sample.get("interval_start")
         consumption = sample.get("consumption")
         if interval_start is None or consumption is None:
             continue
         try:
-            parsed.append({
-                "start": datetime.fromisoformat(interval_start.replace("Z", "+00:00")),
+            start = datetime.fromisoformat(interval_start.replace("Z", "+00:00"))
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            parsed_by_start[start.astimezone(timezone.utc)] = {
+                "start": start,
                 "consumption": float(consumption),
-            })
+            }
         except (TypeError, ValueError):
             continue
-    return parsed
+    return [parsed_by_start[start] for start in sorted(parsed_by_start)]
+
+
+def _expected_samples_for_day_text(day_text):
+    try:
+        day = datetime.fromisoformat(day_text).date()
+    except (TypeError, ValueError):
+        return 48
+
+    local_start = datetime.combine(day, time.min, tzinfo=UK_TIMEZONE)
+    local_end = datetime.combine(day + timedelta(days=1), time.min, tzinfo=UK_TIMEZONE)
+    duration = local_end.astimezone(timezone.utc) - local_start.astimezone(timezone.utc)
+    return round(duration.total_seconds() / (30 * 60))
 
 
 def _band_for_hour(hour: int):
@@ -298,7 +306,7 @@ def _get_complete_days(sorted_days, daily_sample_counts, synced_at):
         day_date = datetime.fromisoformat(day_key).date()
         if latest_complete_day and day_date > latest_complete_day:
             continue
-        if daily_sample_counts.get(day_key, 0) >= SAMPLES_PER_COMPLETE_DAY:
+        if daily_sample_counts.get(day_key, 0) >= _expected_samples_for_day_text(day_key):
             complete_days.append((day_key, value))
 
     return complete_days

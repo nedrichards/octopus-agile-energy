@@ -1,6 +1,5 @@
 pkgdatadir = get_option('prefix') / get_option('datadir') / meson.project_name()
 moduledir = pkgdatadir / 'octopusagile'
-localedir = get_option('prefix') / get_option('localedir')
 gnome = import('gnome')
 python = import('python')
 
@@ -10,7 +9,6 @@ conf = configuration_data()
 conf.set('PYTHON', py_install.full_path())
 conf.set('VERSION', meson.project_version())
 conf.set('pkgdatadir', pkgdatadir)
-conf.set('localedir', localedir)
 
 configure_file(
   input: 'octopusagile.in',
@@ -38,11 +36,13 @@ install_data(
     'historical_costs.py',
     'octopus_api.py',
     'price_bands.py',
+    'price_cache.py',
     'price_chart_presentation.py',
     'price_formatting.py',
     'usage_history.py',
     'usage_insights.py',
     'time_formatting.py',
+    'uk_time.py',
     'price_logic.py',
     'region_location.py',
   ],

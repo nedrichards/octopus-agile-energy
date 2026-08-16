@@ -116,6 +116,31 @@ class HistoricalCostsTests(unittest.TestCase):
         self.assertAlmostEqual(daily[0]["high_kwh"], 0.0)
         self.assertEqual(daily[0]["price_band_version"], PRICE_BAND_VERSION)
 
+    def test_build_daily_costs_groups_samples_by_great_britain_calendar_day(self):
+        tariff_code = "E-1R-AGILE-24-10-01-C"
+        samples = [
+            {"interval_start": "2026-07-01T23:00:00Z", "consumption": 1.0},
+            {"interval_start": "2026-07-02T00:00:00Z", "consumption": 2.0},
+        ]
+        tariff_periods = [{
+            "tariff_code": tariff_code,
+            "valid_from": datetime(2026, 7, 1, tzinfo=timezone.utc),
+            "valid_to": datetime(2026, 7, 3, tzinfo=timezone.utc),
+        }]
+        rates = {tariff_code: [
+            {
+                "valid_from": sample["interval_start"],
+                "valid_to": None,
+                "value_inc_vat": 10.0,
+            }
+            for sample in samples
+        ]}
+
+        daily = build_daily_costs(samples, tariff_periods, rates, {})
+
+        self.assertEqual([day["date"] for day in daily], ["2026-07-02"])
+        self.assertEqual(daily[0]["kwh"], 3.0)
+
     def test_build_daily_costs_matches_unsorted_rate_records(self):
         tariff_code = "E-1R-AGILE-FLEX-22-11-25-C"
         samples = [
@@ -215,7 +240,7 @@ class HistoricalCostsTests(unittest.TestCase):
                     "valid_to": None,
                     "value_inc_vat": price_pence,
                 }
-                for sample, price_pence in zip(samples, (19.99, 20.0, 26.49, 26.5))
+                for sample, price_pence in zip(samples, (19.99, 20.0, 26.49, 26.5), strict=True)
             ]
         }
 

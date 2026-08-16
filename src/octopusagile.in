@@ -20,20 +20,14 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 import os
-import sys
 import signal
-import locale
-import gettext
+import sys
 
 VERSION = '@VERSION@'
 pkgdatadir = '@pkgdatadir@'
-localedir = '@localedir@'
 
 sys.path.insert(1, pkgdatadir)
 signal.signal(signal.SIGINT, signal.SIG_DFL)
-locale.bindtextdomain('octopusagile', localedir)
-locale.textdomain('octopusagile')
-gettext.install('octopusagile', localedir)
 
 if __name__ == '__main__':
     import gi

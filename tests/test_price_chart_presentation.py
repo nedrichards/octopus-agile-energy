@@ -8,6 +8,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from price_chart_presentation import (
     find_price_index_by_start,
+    get_animation_factors,
+    get_composited_overlay_alpha,
     get_day_transition_markers,
     get_flyout_horizontal_position,
     get_price_axis_bounds,
@@ -15,6 +17,23 @@ from price_chart_presentation import (
 
 
 class PriceChartPresentationTests(unittest.TestCase):
+    def test_animation_factors_preserve_motion_speed_across_refresh_rates(self):
+        two_frame_rise, two_frame_decay = get_animation_factors(2.0)
+
+        self.assertAlmostEqual(two_frame_rise, 1 - ((1 - 0.28) ** 2))
+        self.assertAlmostEqual(two_frame_decay, 0.82 ** 2)
+
+    def test_overlay_alpha_recreates_the_original_combined_fill(self):
+        base_alpha = 0.035
+        target_alpha = 0.215
+        overlay_alpha = get_composited_overlay_alpha(base_alpha, target_alpha)
+        composited_alpha = 1 - ((1 - base_alpha) * (1 - overlay_alpha))
+
+        self.assertAlmostEqual(composited_alpha, target_alpha)
+
+    def test_overlay_alpha_never_reduces_the_static_fill(self):
+        self.assertEqual(get_composited_overlay_alpha(0.075, 0.035), 0.0)
+
     def test_flyout_uses_space_to_the_right_inside_scrolled_viewport(self):
         self.assertEqual(
             get_flyout_horizontal_position(360, 150, 300, 700),

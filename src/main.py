@@ -31,6 +31,17 @@ from .ui.main_window import MainWindow
 from .ui.styles import get_css
 
 
+def configure_logging():
+    """Enable app diagnostics without exposing third-party HTTP request paths."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        stream=sys.stdout,
+    )
+    application_logger = logging.getLogger(__package__ or __name__.partition('.')[0])
+    application_logger.setLevel(logging.DEBUG if is_development_build() else logging.INFO)
+
+
 class OctopusAgileApp(Adw.Application):
     def __init__(self):
         super().__init__(application_id=get_application_id())
@@ -50,11 +61,7 @@ def main(*args):
     Main function to initialize and run the Agile Rates application.
     Loads custom CSS for styling.
     """
-    logging.basicConfig(
-        level=logging.DEBUG if is_development_build() else logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        stream=sys.stdout
-    )
+    configure_logging()
     logger = logging.getLogger(__name__)
     logger.info("Starting Agile Rates")
 

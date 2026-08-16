@@ -70,24 +70,29 @@ flatpak run --command=sh com.nedrichards.octopusagile.Devel
 gsettings reset-recursively com.nedrichards.octopusagile
 ```
 
-### Host-Side Fast Checks
+### SDK Source Checks
 
-Host-side checks are optional. They are useful for quick iteration on pure Python logic, but the Flatpak build is the authoritative environment.
-
-```bash
-python3 -m pip install -r requirements-dev.txt
-python3 -m pytest
-python3 -m ruff check src tests
-```
-
-If you want to run Meson on the host, use a separate local build directory named `build` so it does not collide with Flatpak Builder output:
+Run source checks inside the GNOME SDK rather than against the host Python and GTK stack. The installed development build supplies the same pinned Python dependencies used by the application; install the development-only tools into a temporary SDK path first.
 
 ```bash
-meson setup build
-meson test -C build --print-errorlogs
+flatpak run --command=sh --filesystem="$PWD" --share=network org.gnome.Sdk//50
+python3 -m pip install --target=/tmp/octopusagile-test-tools -r requirements-dev.txt
+PYTHONPATH=/tmp/octopusagile-test-tools:$PWD/build-dir/files/lib/python3.13/site-packages python3 -m compileall -q src tests
+PYTHONPATH=/tmp/octopusagile-test-tools:$PWD/build-dir/files/lib/python3.13/site-packages python3 -m ruff check src tests
+PYTHONPATH=/tmp/octopusagile-test-tools:$PWD/build-dir/files/lib/python3.13/site-packages python3 -m pytest
 ```
 
-The `build` directory is reserved for host Meson tests. `build-dir` is reserved for Flatpak Builder output.
+The Python minor-version directory follows the GNOME SDK and can change when the runtime is upgraded. The authoritative `flatpak-builder` command above runs the Meson unit suite automatically without this extra setup.
+
+### Profiling
+
+Install your distribution's Sysprof package, then capture a representative run of the development Flatpak. Exercise the workspace switcher, chart selection, window resizing, and usage view before closing the app so Sysprof finishes the capture.
+
+```bash
+sysprof-cli --force --gtk --speedtrack --scheduler --no-debuginfod \
+  /tmp/octopusagile.syscap -- \
+  flatpak run com.nedrichards.octopusagile.Devel
+```
 
 ### GNOME Builder
 
@@ -109,6 +114,10 @@ flatpak run com.nedrichards.octopusagile
 Upon first launch, the application opens setup so you can choose the correct tariff and region before fetching prices. You can select a region manually, connect an Octopus account to infer its tariff and region, or choose **Use My Location** to ask the desktop location portal to identify your electricity region. Location is requested only when you press that button, is processed against bundled boundaries on your device, is not stored, and is never sent to Octopus Energy, Northern Powergrid, or another network service. You can use manual setup for current and upcoming prices, then add an Octopus API key and account number later to enable usage history and spend estimates.
 
 The selected workspace, Plan duration, and search window are remembered between runs. In Plan, select any half-hour on the chart to compare the price of starting the same-duration run then with the cheapest result. Durations can be adjusted in 30-minute steps for appliances that do not run in whole hours, with appliance-timer options showing whole-hour start and finish values, exact windows, and price differences from the cheapest window. It stacks the result and chart on smaller windows, then uses a two-column chart-and-controls layout when more width is available.
+
+### Account scope
+
+Accounts with several properties or independent active electricity supplies are not currently supported. Account auto-detection uses the first active electricity tariff agreement returned by the Octopus API. Usage history uses the first active electricity meter point for which consumption is available and, where that meter point lists several meters, chooses the meter with the most returned samples. The app does not aggregate properties or independent supplies, and the selected tariff and usage may therefore depend on the API ordering for such accounts. Choose the tariff manually if necessary, but do not treat the usage or spend views as whole-account totals.
 
 ### Configuration
 

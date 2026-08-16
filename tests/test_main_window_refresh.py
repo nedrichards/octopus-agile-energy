@@ -1,5 +1,6 @@
 import sys
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -56,6 +57,39 @@ class PriceRefreshCoordinationTests(unittest.TestCase):
         self.assertFalse(window._price_refresh_queued)
         self.assertFalse(window._queued_price_refresh_force)
         window.refresh_price.assert_called_once_with(force=True)
+
+
+class PriceProcessingTests(unittest.TestCase):
+    def test_invalid_and_non_finite_rates_are_skipped_and_valid_rates_sorted(self):
+        raw_rates = [
+            {"valid_from": "2026-07-01T00:30:00Z", "valid_to": "2026-07-01T01:00:00Z", "value_inc_vat": 20},
+            {"valid_from": "2026-07-01T00:00:00Z", "valid_to": "2026-07-01T00:30:00Z", "value_inc_vat": 10},
+            {"valid_from": "2026-07-01T01:00:00Z", "valid_to": "2026-07-01T01:30:00Z", "value_inc_vat": float("nan")},
+            {"valid_from": None, "valid_to": "2026-07-01T02:00:00Z", "value_inc_vat": 30},
+        ]
+
+        with patch("src.ui.main_window.GLib.idle_add") as idle_add:
+            MainWindow._process_and_set_prices(SimpleNamespace(_apply_processed_prices=Mock()), raw_rates, 7)
+
+        processed = idle_add.call_args.args[1]
+        self.assertEqual([price["price_gbp"] for price in processed], [0.1, 0.2])
+        self.assertEqual(processed[0]["valid_from"], datetime(2026, 7, 1, tzinfo=timezone.utc))
+
+    def test_error_detail_ignores_non_object_json(self):
+        response = Mock()
+        response.json.return_value = []
+
+        self.assertEqual(MainWindow._get_response_detail(response), "")
+
+    def test_half_hour_filter_ignores_malformed_and_non_half_hour_records(self):
+        valid = {"valid_from": "2026-07-01T00:00:00Z", "valid_to": "2026-07-01T00:30:00Z"}
+        rates = [
+            {"valid_from": "2026-07-01T01:00:00Z", "valid_to": None},
+            {"valid_from": "2026-07-01T00:30:00Z", "valid_to": "2026-07-01T01:30:00Z"},
+            valid,
+        ]
+
+        self.assertEqual(MainWindow._filter_half_hour_rates(rates), [valid])
 
 
 class PlanWorkspaceTests(unittest.TestCase):

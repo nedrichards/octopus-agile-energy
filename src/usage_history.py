@@ -1,24 +1,32 @@
 import logging
+import re
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
+
+import requests
 
 from .historical_costs import build_daily_costs, build_tariff_periods, get_usage_period
 from .octopus_api import OctopusApiError, get_json
 from .price_bands import PRICE_BAND_VERSION
 from .price_logic import build_dual_register_price_windows, extract_product_code
+from .uk_time import UK_TIMEZONE
 
 logger = logging.getLogger(__name__)
 USAGE_HISTORY_DAYS = 120
 USAGE_REFRESH_OVERLAP_DAYS = 7
+USAGE_CACHE_VERSION = 2
+ACCOUNT_NUMBER_PATTERN = re.compile(r"A-[A-Z0-9]+", re.IGNORECASE)
 
 
 def get_account_data(account_number):
     account_number = account_number.strip()
     if not account_number:
         raise OctopusApiError("Missing account number.")
+    if not ACCOUNT_NUMBER_PATTERN.fullmatch(account_number):
+        raise OctopusApiError("The account number format is invalid.")
 
     return get_json(
-        f"https://api.octopus.energy/v1/accounts/{account_number}/",
+        f"https://api.octopus.energy/v1/accounts/{quote(account_number, safe='')}/",
         use_api_key=True,
         timeout=10,
     )
@@ -43,8 +51,8 @@ def fetch_recent_usage_samples(account_data, period_from=None, now=None):
                     continue
 
                 url = (
-                    f"https://api.octopus.energy/v1/electricity-meter-points/{mpan}"
-                    f"/meters/{serial_number}/consumption/?"
+                    f"https://api.octopus.energy/v1/electricity-meter-points/{quote(str(mpan), safe='')}"
+                    f"/meters/{quote(str(serial_number), safe='')}/consumption/?"
                     + urlencode(
                         {
                             "period_from": period_from_text,
@@ -57,7 +65,7 @@ def fetch_recent_usage_samples(account_data, period_from=None, now=None):
                 try:
                     samples = fetch_all_consumption_pages(url)
                 except OctopusApiError as e:
-                    logger.debug("Usage fetch failed for meter %s/%s: %s", mpan, serial_number, e)
+                    logger.debug("Usage fetch failed for a meter: %s", type(e).__name__)
                     continue
 
                 if samples and len(samples) > len(best_samples):
@@ -86,12 +94,15 @@ def get_usage_refresh_start(cached_data, now=None):
     if latest_sample_start is None:
         return history_start
 
-    overlap_start = (min(latest_sample_start, now) - timedelta(days=USAGE_REFRESH_OVERLAP_DAYS)).replace(
+    overlap_start_local = (
+        min(latest_sample_start, now).astimezone(UK_TIMEZONE) - timedelta(days=USAGE_REFRESH_OVERLAP_DAYS)
+    ).replace(
         hour=0,
         minute=0,
         second=0,
         microsecond=0,
     )
+    overlap_start = overlap_start_local.astimezone(timezone.utc)
     return max(history_start, overlap_start)
 
 
@@ -112,7 +123,10 @@ def merge_usage_history(cached_data, fresh_samples, fresh_daily_costs, now=None)
             samples_by_start[sample_start] = sample
 
     merged_samples = [samples_by_start[sample_start] for sample_start in sorted(samples_by_start)]
-    retained_dates = {sample_start.date().isoformat() for sample_start in samples_by_start}
+    retained_dates = {
+        sample_start.astimezone(UK_TIMEZONE).date().isoformat()
+        for sample_start in samples_by_start
+    }
 
     daily_costs_by_date = {
         day.get("date"): day
@@ -128,6 +142,7 @@ def merge_usage_history(cached_data, fresh_samples, fresh_daily_costs, now=None)
     return {
         "samples": merged_samples,
         "daily_costs": [daily_costs_by_date[day] for day in sorted(daily_costs_by_date)],
+        "cache_version": USAGE_CACHE_VERSION,
         "price_band_version": PRICE_BAND_VERSION,
         "synced_at": now.isoformat(),
     }
@@ -136,6 +151,7 @@ def merge_usage_history(cached_data, fresh_samples, fresh_daily_costs, now=None)
 def _compatible_usage_cache(cached_data):
     if (
         not cached_data
+        or cached_data.get("cache_version") != USAGE_CACHE_VERSION
         or cached_data.get("price_band_version") != PRICE_BAND_VERSION
         or not isinstance(cached_data.get("samples"), list)
         or not isinstance(cached_data.get("daily_costs"), list)
@@ -162,16 +178,25 @@ def fetch_all_consumption_pages(initial_url):
     next_url = initial_url
     max_pages = 40
     pages_fetched = 0
+    seen_urls = set()
 
-    while next_url and pages_fetched < max_pages:
-        data = get_json(next_url, use_api_key=True, timeout=10)
-        page_results = data.get("results", [])
-        if page_results:
-            samples.extend(page_results)
+    with requests.Session() as session:
+        while next_url and pages_fetched < max_pages:
+            if next_url in seen_urls:
+                raise OctopusApiError("The API returned a repeated pagination URL.")
+            seen_urls.add(next_url)
+            data = get_json(next_url, use_api_key=True, timeout=10, session=session)
+            page_results = data.get("results", [])
+            if not isinstance(page_results, list):
+                raise OctopusApiError("The API returned invalid consumption data.")
+            if page_results:
+                samples.extend(page_results)
 
-        next_url = data.get("next")
-        pages_fetched += 1
+            next_url = data.get("next")
+            pages_fetched += 1
 
+    if next_url:
+        raise OctopusApiError("The API returned too many consumption pages.")
     return samples
 
 
@@ -234,8 +259,8 @@ def fetch_historical_unit_rates(product_code, tariff_code, period_start, period_
 
 def fetch_historical_tariff_records(product_code, tariff_code, endpoint, period_start, period_end):
     url = (
-        f"https://api.octopus.energy/v1/products/{product_code}"
-        f"/electricity-tariffs/{tariff_code}/{endpoint}/?"
+        f"https://api.octopus.energy/v1/products/{quote(product_code, safe='-')}"
+        f"/electricity-tariffs/{quote(tariff_code, safe='-')}/{quote(endpoint, safe='-')}/?"
         + urlencode(
             {
                 "period_from": _format_octopus_datetime(period_start),
@@ -252,16 +277,25 @@ def fetch_all_tariff_pages(initial_url):
     next_url = initial_url
     max_pages = 40
     pages_fetched = 0
+    seen_urls = set()
 
-    while next_url and pages_fetched < max_pages:
-        data = get_json(next_url, use_api_key=True, timeout=10)
-        page_results = data.get("results", [])
-        if page_results:
-            records.extend(page_results)
+    with requests.Session() as session:
+        while next_url and pages_fetched < max_pages:
+            if next_url in seen_urls:
+                raise OctopusApiError("The API returned a repeated pagination URL.")
+            seen_urls.add(next_url)
+            data = get_json(next_url, use_api_key=True, timeout=10, session=session)
+            page_results = data.get("results", [])
+            if not isinstance(page_results, list):
+                raise OctopusApiError("The API returned invalid tariff data.")
+            if page_results:
+                records.extend(page_results)
 
-        next_url = data.get("next")
-        pages_fetched += 1
+            next_url = data.get("next")
+            pages_fetched += 1
 
+    if next_url:
+        raise OctopusApiError("The API returned too many tariff pages.")
     return records
 
 

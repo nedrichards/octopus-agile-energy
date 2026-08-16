@@ -10,12 +10,16 @@ from .price_bands import (
     PRICE_BAND_VERSION,
     get_price_band,
 )
+from .uk_time import UK_TIMEZONE
 
 
 def parse_octopus_datetime(value):
     if not value:
         return None
-    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def build_tariff_periods(account_data, period_start, period_end):
@@ -87,7 +91,7 @@ def build_daily_costs(samples, tariff_periods, rates_by_tariff, standing_charges
         except (TypeError, ValueError):
             continue
 
-        day_key = start.date().isoformat()
+        day_key = start.astimezone(UK_TIMEZONE).date().isoformat()
         day = daily.setdefault(
             day_key,
             {
@@ -126,7 +130,7 @@ def build_daily_costs(samples, tariff_periods, rates_by_tariff, standing_charges
         day["energy_cost_gbp"] += consumption * unit_rate_gbp
 
     for day_key, day in daily.items():
-        midday = datetime.fromisoformat(day_key).replace(hour=12, tzinfo=timezone.utc)
+        midday = datetime.fromisoformat(day_key).replace(hour=12, tzinfo=UK_TIMEZONE)
         tariff_code = _find_tariff_code(tariff_lookup, midday)
         standing_charge = (
             _find_record(standing_charge_lookup.get(tariff_code, []), midday)

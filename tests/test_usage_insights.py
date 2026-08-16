@@ -69,6 +69,22 @@ class UsageInsightsTests(unittest.TestCase):
         self.assertEqual(result["average_unit_text"], "12.5p/kWh")
         self.assertIn("Refresh usage history", result["cheap_rate_detail"])
 
+    def test_rate_capture_accepts_a_complete_spring_clock_change_day(self):
+        result = build_usage_pattern_insights([], [{
+            "date": "2026-03-29",
+            "sample_count": 46,
+            "missing_rate_count": 0,
+            "matched_kwh": 10.0,
+            "cheap_kwh": 4.0,
+            "negative_kwh": 0.0,
+            "high_kwh": 2.0,
+            "price_band_version": PRICE_BAND_VERSION,
+            "energy_cost_gbp": 1.25,
+        }])
+
+        self.assertEqual(result["cheap_rate_text"], "40%")
+        self.assertEqual(result["average_unit_text"], "12.5p/kWh")
+
     def test_rate_capture_rejects_an_older_price_band_version(self):
         result = build_usage_pattern_insights([], [{
             "date": "2026-03-01",

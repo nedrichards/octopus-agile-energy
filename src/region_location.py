@@ -11,6 +11,7 @@ import json
 import math
 import secrets
 from collections.abc import Iterable
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -385,12 +386,10 @@ class LocationPortal:
         """Close the portal session without retaining any received location data."""
         self._finished = True
         if self.session_proxy is not None and self.session_path is not None:
-            try:
+            with suppress(GLib.Error):
                 self.session_proxy.call(
                     "Close", None, Gio.DBusCallFlags.NONE, -1, None, None, None
                 )
-            except GLib.Error:
-                pass
         self.session_path = None
         self.session_proxy = None
         self.request_proxy = None

@@ -43,7 +43,7 @@ class FindCheapestPresentationTests(unittest.TestCase):
         with utc_process_timezone():
             presentation = build_fixed_start_presentation(slot, 0.142)
 
-        self.assertEqual(presentation["window_text"], "15:00-16:30")
+        self.assertEqual(presentation["window_text"], "16:00-17:30")
         self.assertEqual(presentation["average_price_text"], "£0.17/kWh")
         self.assertEqual(presentation["comparison_text"], "3.1p/kWh more")
 
@@ -81,17 +81,17 @@ class FindCheapestPresentationTests(unittest.TestCase):
             )
 
         self.assertEqual(presentation["highlight_label"], "Best 3h 30m")
-        self.assertEqual(presentation["best_window_text"], "11:00-14:30")
+        self.assertEqual(presentation["best_window_text"], "12:00-15:30")
         self.assertEqual(presentation["average_price_text"], "-£0.06/kWh")
         self.assertEqual(presentation["start_timer_text"], "1h")
         self.assertEqual(
             presentation["start_timer_detail"],
-            "11:17-14:47 · -£0.06/kWh",
+            "12:17-15:47 · -£0.06/kWh",
         )
         self.assertEqual(presentation["finish_timer_text"], "4h")
         self.assertEqual(
             presentation["finish_timer_detail"],
-            "10:47-14:17 · -£0.06/kWh · +0.2p/kWh",
+            "11:47-15:17 · -£0.06/kWh · +0.2p/kWh",
         )
 
     def test_returns_none_without_a_cheapest_slot(self):
