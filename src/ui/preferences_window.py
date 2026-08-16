@@ -25,8 +25,10 @@ from ..region_location import (
 from ..secrets_manager import clear_api_key, get_api_key, store_api_key
 from ..usage_history import (
     build_historical_usage_costs,
+    fetch_daily_usage_archive,
     fetch_recent_usage_samples,
     get_account_data,
+    get_usage_archive_refresh_start,
     get_usage_refresh_start,
     merge_usage_history,
 )
@@ -60,6 +62,10 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
         self.settings = settings
         self.cache_manager = CacheManager()
+        self.usage_cache_manager = CacheManager(
+            cache_dir_name="octopus-agile-usage",
+            cache_expiry_days=450,
+        )
         # self.all_regions now stores full names for display in dropdown
         self.all_regions = sorted(self.REGION_CODE_TO_NAME.values())
         self.region_to_tariffs = {} # To be populated by API data for these regions
@@ -340,7 +346,9 @@ class PreferencesWindow(Adw.PreferencesWindow):
             account_data = self._get_account_data()
             account_number = self.settings.get_string("octopus-account-number").strip()
             cache_key = f"octopus_usage_{account_number}"
-            cached_data, _cache_mtime = self.cache_manager.get(cache_key)
+            cached_data, _cache_mtime = self.usage_cache_manager.get(cache_key)
+            if not cached_data:
+                cached_data, _cache_mtime = self.cache_manager.get(cache_key)
             refresh_started_at = datetime.now(timezone.utc)
             refresh_start = get_usage_refresh_start(cached_data, refresh_started_at)
             fresh_samples = self._fetch_recent_usage_samples(
@@ -353,13 +361,19 @@ class PreferencesWindow(Adw.PreferencesWindow):
                 return
 
             fresh_daily_costs = self._build_historical_usage_costs_for_cache(account_data, fresh_samples)
+            fresh_daily_archive = self._fetch_daily_usage_archive_for_cache(
+                account_data,
+                cached_data,
+                refresh_started_at,
+            )
             refreshed_data = merge_usage_history(
                 cached_data,
                 fresh_samples,
                 fresh_daily_costs,
                 now=datetime.now(timezone.utc),
+                fresh_daily_archive=fresh_daily_archive,
             )
-            self.cache_manager.set(cache_key, refreshed_data)
+            self.usage_cache_manager.set(cache_key, refreshed_data)
             GLib.idle_add(
                 self._set_usage_status,
                 f"Usage history refreshed ({len(refreshed_data['samples'])} records).",
@@ -387,6 +401,17 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
     def _fetch_recent_usage_samples(self, account_data, period_from=None, now=None):
         return fetch_recent_usage_samples(account_data, period_from=period_from, now=now)
+
+    def _fetch_daily_usage_archive_for_cache(self, account_data, cached_data, now):
+        try:
+            return fetch_daily_usage_archive(
+                account_data,
+                period_from=get_usage_archive_refresh_start(cached_data, now),
+                now=now,
+            )
+        except (OctopusApiError, requests.exceptions.RequestException) as exc:
+            logger.debug("Seasonal usage refresh failed: %s", type(exc).__name__)
+        return None
 
     def load_tariffs_and_regions(self):
         """

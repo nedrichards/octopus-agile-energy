@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 from .price_bands import (
     HIGH_PRICE_THRESHOLD_GBP,
@@ -8,7 +8,15 @@ from .price_bands import (
     PRICE_BAND_VERSION,
     format_price_threshold,
 )
-from .uk_time import UK_TIMEZONE
+from .uk_time import (
+    UK_TIMEZONE,
+    expected_half_hours_for_local_day,
+    is_complete_usage_day,
+    latest_complete_local_day,
+)
+from .usage_seasonality import build_seasonal_usage_insight
+
+RECENT_SUMMARY_DAYS = 30
 
 USAGE_BANDS = (
     ("Overnight", 0, 6),
@@ -20,13 +28,17 @@ USAGE_BANDS = (
 
 
 def build_usage_insight_data(samples: list[dict], synced_at: str | None):
-    if not samples:
+    return _build_usage_insight_data(_parse_samples(samples), synced_at)
+
+
+def _build_usage_insight_data(parsed_samples, synced_at):
+    if not parsed_samples:
         return _empty("No usage samples available yet.")
 
     daily_totals = {}
     daily_sample_counts = {}
-    for sample in _parse_samples(samples):
-        day_key = sample["start"].astimezone(UK_TIMEZONE).date().isoformat()
+    for sample in parsed_samples:
+        day_key = sample["day_key"]
         daily_totals[day_key] = daily_totals.get(day_key, 0.0) + sample["consumption"]
         daily_sample_counts[day_key] = daily_sample_counts.get(day_key, 0) + 1
 
@@ -36,14 +48,20 @@ def build_usage_insight_data(samples: list[dict], synced_at: str | None):
     sorted_days = sorted(daily_totals.items(), key=lambda x: x[0])
     day_keys = [day for day, _ in sorted_days]
     values = [value for _day, value in sorted_days]
-    avg_daily = sum(values) / len(values)
     complete_days = _get_complete_days(sorted_days, daily_sample_counts, synced_at)
-    trend_pct = _get_seven_day_trend_pct([value for _day, value in complete_days])
+    complete_values = [value for _day, value in complete_days]
+    if len(complete_values) < 7:
+        return _empty("Not enough complete usage data yet (need at least seven days).")
+
+    recent_complete_values = complete_values[-RECENT_SUMMARY_DAYS:]
+    avg_daily = sum(recent_complete_values) / len(recent_complete_values)
+    trend_pct = _get_seven_day_trend_pct(complete_values)
     if trend_pct is not None:
         trend_pct = max(-100.0, min(100.0, trend_pct))
 
     data_coverage = "high" if len(values) >= 60 else "medium" if len(values) >= 21 else "low"
-    based_on = f" Based on data up to {synced_at[:10]}." if synced_at else ""
+    latest_complete = latest_complete_local_day(synced_at)
+    based_on = f" Based on complete data through {latest_complete.isoformat()}." if latest_complete else ""
     coverage_note = " Data coverage: low." if data_coverage == "low" else ""
     if trend_pct is None:
         summary = f"Seven-day trend needs 14 complete days of data.{based_on}{coverage_note}"
@@ -53,14 +71,23 @@ def build_usage_insight_data(samples: list[dict], synced_at: str | None):
             f"{based_on}{coverage_note}"
         )
 
+    complete_rolling = build_rolling_average(complete_values)
+    rolling_by_day = {
+        day: value
+        for (day, _daily_value), value in zip(complete_days, complete_rolling, strict=True)
+    }
+
     return {
         "summary": summary,
         "avg_text": f"{avg_daily:.2f} kWh/day",
         "trend_text": "—" if trend_pct is None else f"{trend_pct:+.1f}%",
         "monthly_text": f"{(avg_daily * 30.0):.0f} kWh",
-        "chart_points": values[-90:],
-        "chart_dates": day_keys[-90:],
-        "chart_rolling_average": build_rolling_average(values[-90:]),
+        "chart_points": values[-RECENT_SUMMARY_DAYS:],
+        "chart_dates": day_keys[-RECENT_SUMMARY_DAYS:],
+        "chart_rolling_average": [
+            rolling_by_day.get(day)
+            for day in day_keys[-RECENT_SUMMARY_DAYS:]
+        ],
         "trend_pct": trend_pct or 0.0,
     }
 
@@ -90,8 +117,22 @@ def build_rolling_average(values: list[float], window_size: int = 7) -> list[flo
 
 
 def build_usage_pattern_insights(samples: list[dict], daily_costs: list[dict] | None = None):
-    baseline = _build_always_on_baseline(samples)
-    peak = _build_peak_usage_pattern(samples)
+    parsed_samples = _parse_samples(samples)
+    return _build_usage_pattern_insights(parsed_samples, daily_costs)
+
+
+def build_usage_dashboard_data(samples, synced_at, daily_costs=None, daily_archive=None):
+    """Build all Usage workspace presentation data from one normalized sample pass."""
+    parsed_samples = _parse_samples(samples)
+    insight = _build_usage_insight_data(parsed_samples, synced_at)
+    insight.update(_build_usage_pattern_insights(parsed_samples, daily_costs))
+    insight["seasonal"] = build_seasonal_usage_insight(daily_archive or [], synced_at)
+    return insight
+
+
+def _build_usage_pattern_insights(parsed_samples, daily_costs=None):
+    baseline = _build_always_on_baseline(parsed_samples)
+    peak = _build_peak_usage_pattern(parsed_samples)
     rate_capture = _build_rate_capture(daily_costs or [])
     return {
         "baseline_text": baseline["text"],
@@ -105,8 +146,8 @@ def build_usage_pattern_insights(samples: list[dict], daily_costs: list[dict] | 
     }
 
 
-def _build_always_on_baseline(samples: list[dict]):
-    daily_slots = _daily_complete_slots(samples)
+def _build_always_on_baseline(parsed_samples):
+    daily_slots = _daily_complete_slots(parsed_samples)
     if len(daily_slots) < 7:
         return _insight_empty("Needs seven complete days of usage data.")
 
@@ -122,12 +163,11 @@ def _build_always_on_baseline(samples: list[dict]):
     daily_kwh = typical_half_hour_kwh * 48
     return {
         "text": f"~{watts} W",
-        "detail": f"Lowest regular half-hour load suggests about {daily_kwh:.1f} kWh/day before active use.",
+        "detail": f"About {daily_kwh:.1f} kWh/day before active use.",
     }
 
 
-def _build_peak_usage_pattern(samples: list[dict]):
-    parsed_samples = _parse_samples(samples)
+def _build_peak_usage_pattern(parsed_samples):
     if not parsed_samples:
         return _insight_empty("Needs usage samples.")
 
@@ -135,11 +175,11 @@ def _build_peak_usage_pattern(samples: list[dict]):
     slot_totals = {}
     total_kwh = 0.0
     for sample in parsed_samples:
-        local_start = sample["start"].astimezone(UK_TIMEZONE)
+        local_start = sample["local_start"]
         consumption = sample["consumption"]
         total_kwh += consumption
         band_totals[_band_for_hour(local_start.hour)] += consumption
-        slot_key = local_start.strftime("%H:%M")
+        slot_key = sample["slot_key"]
         slot_totals[slot_key] = slot_totals.get(slot_key, 0.0) + consumption
 
     if total_kwh <= 0:
@@ -158,7 +198,7 @@ def _build_peak_usage_pattern(samples: list[dict]):
 def _build_rate_capture(daily_costs: list[dict]):
     complete_days = [
         day for day in daily_costs
-        if day.get("sample_count", 0) >= _expected_samples_for_day_text(day.get("date"))
+        if is_complete_usage_day(day.get("date"), day.get("sample_count", 0))
         and day.get("missing_rate_count", 0) == 0
     ]
     matched_kwh = sum(float(day.get("matched_kwh", day.get("kwh", 0.0)) or 0.0) for day in complete_days)
@@ -196,35 +236,34 @@ def _build_rate_capture(daily_costs: list[dict]):
     cheap_share = (cheap_kwh / matched_kwh) * 100
     high_share = (high_kwh / matched_kwh) * 100
     negative_detail = (
-        f" Includes {negative_kwh:.1f} kWh during negative prices."
+        f" {negative_kwh:.1f} kWh was at negative prices."
         if negative_kwh > 0.05
         else ""
     )
     return {
         "cheap_rate_text": f"{cheap_share:.0f}%",
         "cheap_rate_detail": (
-            f"{cheap_kwh:.1f} of {matched_kwh:.1f} kWh landed below "
+            f"{cheap_kwh:.1f} of {matched_kwh:.1f} kWh below "
             f"{format_price_threshold(LOW_PRICE_THRESHOLD_GBP)}."
             f"{negative_detail}"
         ),
         "average_unit_text": f"{average_unit_pence:.1f}p/kWh",
         "average_unit_detail": (
-            f"Effective energy rate across matched days; {high_share:.0f}% of usage was at "
+            f"{high_share:.0f}% of usage was at "
             f"{format_price_threshold(HIGH_PRICE_THRESHOLD_GBP)} or above."
         ),
     }
 
 
-def _daily_complete_slots(samples: list[dict]):
+def _daily_complete_slots(parsed_samples):
     slots_by_day = {}
-    for sample in _parse_samples(samples):
-        day_key = sample["start"].astimezone(UK_TIMEZONE).date().isoformat()
-        slots_by_day.setdefault(day_key, []).append(sample)
+    for sample in parsed_samples:
+        slots_by_day.setdefault(sample["day_key"], []).append(sample)
 
     complete = [
         (day_key, slots)
         for day_key, slots in sorted(slots_by_day.items())
-        if len(slots) >= _expected_samples_for_day_text(day_key)
+        if is_complete_usage_day(day_key, len(slots))
     ]
     return complete
 
@@ -240,8 +279,12 @@ def _parse_samples(samples: list[dict]):
             start = datetime.fromisoformat(interval_start.replace("Z", "+00:00"))
             if start.tzinfo is None:
                 start = start.replace(tzinfo=timezone.utc)
+            local_start = start.astimezone(UK_TIMEZONE)
             parsed_by_start[start.astimezone(timezone.utc)] = {
                 "start": start,
+                "local_start": local_start,
+                "day_key": local_start.date().isoformat(),
+                "slot_key": f"{local_start.hour:02d}:{local_start.minute:02d}",
                 "consumption": float(consumption),
             }
         except (TypeError, ValueError):
@@ -254,11 +297,7 @@ def _expected_samples_for_day_text(day_text):
         day = datetime.fromisoformat(day_text).date()
     except (TypeError, ValueError):
         return 48
-
-    local_start = datetime.combine(day, time.min, tzinfo=UK_TIMEZONE)
-    local_end = datetime.combine(day + timedelta(days=1), time.min, tzinfo=UK_TIMEZONE)
-    duration = local_end.astimezone(timezone.utc) - local_start.astimezone(timezone.utc)
-    return round(duration.total_seconds() / (30 * 60))
+    return expected_half_hours_for_local_day(day)
 
 
 def _band_for_hour(hour: int):
@@ -289,24 +328,13 @@ def _get_complete_days(sorted_days, daily_sample_counts, synced_at):
     if not sorted_days:
         return []
 
-    latest_complete_day = None
-    if synced_at:
-        try:
-            synced_dt = datetime.fromisoformat(synced_at.replace("Z", "+00:00"))
-            if synced_dt.tzinfo is None:
-                synced_dt = synced_dt.replace(tzinfo=timezone.utc)
-            latest_complete_day = synced_dt.astimezone(timezone.utc).date()
-            if synced_dt.time() != datetime.min.time():
-                latest_complete_day = latest_complete_day - timedelta(days=1)
-        except (TypeError, ValueError):
-            latest_complete_day = None
-
     complete_days = []
     for day_key, value in sorted_days:
-        day_date = datetime.fromisoformat(day_key).date()
-        if latest_complete_day and day_date > latest_complete_day:
-            continue
-        if daily_sample_counts.get(day_key, 0) >= _expected_samples_for_day_text(day_key):
+        if is_complete_usage_day(
+            day_key,
+            daily_sample_counts.get(day_key, 0),
+            synced_at,
+        ):
             complete_days.append((day_key, value))
 
     return complete_days

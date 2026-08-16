@@ -76,6 +76,20 @@ def get_css():
         border-radius: 6px; /* Slightly rounded corners for the chart area */
     }
 
+    .usage-metric-card {
+        background-color: alpha(currentColor, 0.055);
+        border: 1px solid alpha(currentColor, 0.09);
+        border-radius: 12px;
+        padding: 12px;
+        min-height: 86px;
+    }
+
+    .usage-metric-value {
+        font-size: 1.35rem;
+        font-weight: 700;
+        font-feature-settings: "tnum";
+    }
+
     .circular {
         border-radius: 9999px;
         min-height: 32px;

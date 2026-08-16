@@ -12,12 +12,15 @@ from src.price_bands import PRICE_BAND_VERSION
 from src.usage_history import (
     USAGE_CACHE_VERSION,
     fetch_all_tariff_pages,
+    fetch_daily_usage_archive,
     fetch_historical_unit_rates,
     fetch_recent_usage_samples,
     get_account_data,
+    get_usage_archive_refresh_start,
     get_usage_refresh_start,
     merge_usage_history,
 )
+from src.usage_seasonality import USAGE_ARCHIVE_DAYS
 
 
 class UsageHistoryTests(unittest.TestCase):
@@ -93,6 +96,7 @@ class UsageHistoryTests(unittest.TestCase):
         cached_data = {
             "samples": [{"interval_start": "2026-07-24T10:30:00Z"}],
             "daily_costs": [],
+            "daily_usage_archive": [],
             "cache_version": USAGE_CACHE_VERSION,
             "price_band_version": PRICE_BAND_VERSION,
         }
@@ -105,6 +109,7 @@ class UsageHistoryTests(unittest.TestCase):
         cached_data = {
             "samples": [{"interval_start": "2026-07-24T10:30:00Z"}],
             "daily_costs": [],
+            "daily_usage_archive": [],
             "cache_version": USAGE_CACHE_VERSION,
             "price_band_version": "old",
         }
@@ -117,6 +122,7 @@ class UsageHistoryTests(unittest.TestCase):
         cached_data = {
             "samples": [{"interval_start": "2026-07-24T10:30:00Z"}],
             "daily_costs": [],
+            "daily_usage_archive": [],
             "cache_version": USAGE_CACHE_VERSION - 1,
             "price_band_version": PRICE_BAND_VERSION,
         }
@@ -150,6 +156,7 @@ class UsageHistoryTests(unittest.TestCase):
                 {"date": "2026-03-20", "kwh": 1.0},
                 {"date": "2026-07-24", "kwh": 2.0},
             ],
+            "daily_usage_archive": [{"date": "2026-07-24", "kwh": 2.0}],
             "cache_version": USAGE_CACHE_VERSION,
             "price_band_version": PRICE_BAND_VERSION,
         }
@@ -177,6 +184,7 @@ class UsageHistoryTests(unittest.TestCase):
         cached_data = {
             "samples": [{"interval_start": "2026-07-24T10:30:00Z", "consumption": 0.2}],
             "daily_costs": cached_daily_costs,
+            "daily_usage_archive": [{"date": "2026-07-24", "kwh": 2.0}],
             "cache_version": USAGE_CACHE_VERSION,
             "price_band_version": PRICE_BAND_VERSION,
         }
@@ -189,6 +197,46 @@ class UsageHistoryTests(unittest.TestCase):
         )
 
         self.assertEqual(merged["daily_costs"], cached_daily_costs)
+
+    def test_archive_refresh_overlaps_latest_grouped_day(self):
+        cached_data = {
+            "samples": [],
+            "daily_costs": [],
+            "daily_usage_archive": [{"date": "2026-07-24", "kwh": 2.0}],
+            "cache_version": USAGE_CACHE_VERSION,
+            "price_band_version": PRICE_BAND_VERSION,
+        }
+
+        refresh_start = get_usage_archive_refresh_start(cached_data, self.now)
+
+        self.assertEqual(refresh_start, datetime(2026, 7, 16, 23, 0, tzinfo=timezone.utc))
+
+    def test_daily_archive_requests_local_day_grouping(self):
+        account_data = {
+            "properties": [{
+                "electricity_meter_points": [{
+                    "mpan": "test-mpan",
+                    "agreements": [{"valid_from": "2025-01-01T00:00:00Z"}],
+                    "meters": [{"serial_number": "test-serial"}],
+                }],
+            }],
+        }
+        grouped = [{
+            "interval_start": "2026-07-24T00:00:00+01:00",
+            "interval_end": "2026-07-25T00:00:00+01:00",
+            "consumption": 8.5,
+        }]
+
+        with patch("src.usage_history.fetch_all_consumption_pages", return_value=grouped) as fetch:
+            archive = fetch_daily_usage_archive(account_data, now=self.now)
+
+        query = parse_qs(urlparse(fetch.call_args.args[0]).query)
+        self.assertEqual(query["group_by"], ["day"])
+        self.assertEqual(
+            query["period_from"],
+            [(self.now - timedelta(days=USAGE_ARCHIVE_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")],
+        )
+        self.assertEqual(archive, [{"date": "2026-07-24", "kwh": 8.5}])
 
     def test_fetch_recent_usage_uses_explicit_incremental_start(self):
         account_data = {

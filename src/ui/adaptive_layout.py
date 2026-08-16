@@ -7,11 +7,19 @@ REGULAR_PRICE_WIDTH_THRESHOLD = 640
 PLAN_WIDE_WIDTH_THRESHOLD = 1000
 PLAN_PANE_WIDTH = 320
 PLAN_COLUMN_SPACING = 20
+USAGE_WIDE_WIDTH_THRESHOLD = 920
+USAGE_PANE_WIDTH = 330
+USAGE_COLUMN_SPACING = 20
+USAGE_DETAILS_WIDE_WIDTH_THRESHOLD = 1000
+USAGE_DETAILS_NARROW_MAX_WIDTH = 600
+USAGE_DETAILS_MAX_WIDTH = 920
+USAGE_DETAILS_COLUMN_SPACING = 20
 DEFAULT_CHART_SLOTS = 48
 MAX_CHART_SLOTS = 96
 COMPACT_CHART_SLOT_WIDTH = 18
 REGULAR_CHART_SLOT_WIDTH = 14
 WIDE_CHART_SLOT_WIDTH = 16
+USAGE_MIN_SLOT_WIDTH = 8
 
 
 def is_compact_width(width):
@@ -28,6 +36,27 @@ def get_plan_chart_width(width, content_margin):
         return available_width
 
     return max(320, available_width - PLAN_PANE_WIDTH - PLAN_COLUMN_SPACING)
+
+
+def is_usage_wide_layout(width):
+    return width >= USAGE_WIDE_WIDTH_THRESHOLD
+
+
+def is_usage_details_wide_layout(width):
+    return width >= USAGE_DETAILS_WIDE_WIDTH_THRESHOLD
+
+
+def get_usage_details_max_width(width):
+    if is_usage_details_wide_layout(width):
+        return USAGE_DETAILS_MAX_WIDTH
+    return USAGE_DETAILS_NARROW_MAX_WIDTH
+
+
+def get_usage_chart_width(width, content_margin):
+    available_width = max(240, width - (2 * content_margin))
+    if not is_usage_wide_layout(width):
+        return available_width
+    return max(360, available_width - USAGE_PANE_WIDTH - USAGE_COLUMN_SPACING)
 
 
 def get_content_margin(width):
@@ -66,6 +95,16 @@ def get_chart_content_width(width, slot_count):
 
     viewport_width = max(width - 16, 240) if width > 0 else 240
     content_width = slot_count * slot_width + 64
+    return max(viewport_width, content_width)
+
+
+def get_usage_chart_content_width(width, slot_count):
+    """Fit normal Usage ranges while retaining scrolling at extreme widths."""
+    if slot_count <= 0:
+        slot_count = DEFAULT_CHART_SLOTS
+
+    viewport_width = max(width - 16, 240) if width > 0 else 240
+    content_width = slot_count * USAGE_MIN_SLOT_WIDTH + 64
     return max(viewport_width, content_width)
 
 

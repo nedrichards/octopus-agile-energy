@@ -24,20 +24,26 @@ from ..price_logic import build_dual_register_price_windows, build_fixed_start_p
 from ..price_logic import find_cheapest_slot as calculate_cheapest_slot
 from ..price_logic import find_cheapest_timer_slot as calculate_cheapest_timer_slot
 from ..secrets_manager import get_api_key
-from ..uk_time import UK_TIMEZONE
+from ..uk_time import UK_TIMEZONE, is_complete_usage_day
 from ..usage_history import (
+    USAGE_CACHE_VERSION,
     build_historical_usage_costs,
+    fetch_daily_usage_archive,
     fetch_recent_usage_samples,
     get_account_data,
+    get_usage_archive_refresh_start,
     get_usage_refresh_start,
     merge_usage_history,
 )
-from ..usage_insights import build_rolling_average, build_usage_insight_data, build_usage_pattern_insights
+from ..usage_insights import build_rolling_average, build_usage_dashboard_data
 from ..utils import CacheManager
 from .adaptive_layout import (
     DEFAULT_CHART_SLOTS,
     PLAN_COLUMN_SPACING,
     PLAN_PANE_WIDTH,
+    USAGE_COLUMN_SPACING,
+    USAGE_DETAILS_COLUMN_SPACING,
+    USAGE_PANE_WIDTH,
     get_chart_content_width,
     get_chart_height,
     get_chart_scroll_value,
@@ -46,8 +52,13 @@ from .adaptive_layout import (
     get_plan_chart_width,
     get_price_summary_mode,
     get_time_label_interval,
+    get_usage_chart_content_width,
+    get_usage_chart_width,
+    get_usage_details_max_width,
     is_compact_width,
     is_plan_wide_layout,
+    is_usage_details_wide_layout,
+    is_usage_wide_layout,
 )
 from .custom_spin_button import CustomSpinButton
 from .preferences_window import PreferencesWindow
@@ -77,6 +88,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.chart_prices = []
         self.current_price_data = None
         self.cache_manager = CacheManager() # Initialize CacheManager
+        self.usage_cache_manager = CacheManager(
+            cache_dir_name="octopus-agile-usage",
+            cache_expiry_days=450,
+        )
 
         # Initialize Gio.Settings
         self.settings.connect("changed::selected-tariff-type", self.on_setting_changed)
@@ -106,13 +121,18 @@ class MainWindow(Adw.ApplicationWindow):
         self.usage_refresh_in_progress = False
         self.usage_refresh_attempted = False
         self.usage_graph_mode = "kwh"
+        self.usage_period_mode = "recent"
         self.usage_chart_selected_index = -1
         self.usage_chart_hovered_index = -1
         self.usage_chart_rolling_average = []
+        self.usage_chart_reference_value = None
         self._fade_animation_sources = {}
         self._price_chart_signature = None
         self._usage_chart_signature = None
         self._usage_insights_input_signature = None
+        self._usage_dashboard_insight = None
+        self._usage_daily_costs = []
+        self._usage_analysis_generation = 0
         self._adaptive_layout_signature = None
         self._usage_chart_layout_signature = None
         self._standing_charge_fetches = set()
@@ -273,6 +293,36 @@ class MainWindow(Adw.ApplicationWindow):
         row.add_suffix(value_label)
         return row, value_label
 
+    def _create_usage_metric_card(self, title, icon_name):
+        card = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        card.add_css_class("usage-metric-card")
+        card.set_hexpand(True)
+
+        heading = Gtk.Box.new(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        icon = Gtk.Image.new_from_icon_name(icon_name)
+        icon.add_css_class("dim-label")
+        heading.append(icon)
+        title_label = Gtk.Label.new(title)
+        title_label.set_halign(Gtk.Align.START)
+        title_label.add_css_class("caption")
+        title_label.add_css_class("dim-label")
+        heading.append(title_label)
+        card.append(heading)
+
+        value_label = Gtk.Label.new("—")
+        value_label.set_halign(Gtk.Align.START)
+        value_label.add_css_class("usage-metric-value")
+        card.append(value_label)
+
+        detail_label = Gtk.Label.new("")
+        detail_label.set_halign(Gtk.Align.START)
+        detail_label.set_wrap(True)
+        detail_label.set_xalign(0)
+        detail_label.add_css_class("caption")
+        detail_label.add_css_class("dim-label")
+        card.append(detail_label)
+        return card, title_label, value_label, detail_label
+
     def on_key_pressed(self, controller, keyval, keycode, modifier):
         """
         Handles key press events for the main window.
@@ -300,7 +350,7 @@ class MainWindow(Adw.ApplicationWindow):
             application_name="Agile Rates",
             application_icon="com.nedrichards.octopusagile",
             developer_name="Nick Richards",
-            version="1.0.23",
+            version="1.0.24",
             website="https://www.nedrichards.com/2026/05/agile-rates-after-launch/",
             copyright="© 2026 Nick Richards",
             license_type=Gtk.License.GPL_3_0
@@ -469,6 +519,7 @@ class MainWindow(Adw.ApplicationWindow):
         usage_content_box = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=14)
         self.usage_content_box = usage_content_box
         usage_clamp = Adw.Clamp.new()
+        self.usage_clamp = usage_clamp
         usage_clamp.set_child(usage_content_box)
         usage_page_box.append(usage_clamp)
 
@@ -523,6 +574,35 @@ class MainWindow(Adw.ApplicationWindow):
         self.usage_chart_scroller.set_hexpand(True)
         self.usage_chart_scroller.set_propagate_natural_height(True)
 
+        usage_chart_toolbar = Gtk.Box.new(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        usage_chart_toolbar.set_hexpand(True)
+        self.usage_chart_toolbar = usage_chart_toolbar
+
+        usage_period_box = Gtk.Box.new(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        usage_period_box.add_css_class("linked")
+        self.usage_period_box = usage_period_box
+        self.usage_recent_button = Gtk.ToggleButton.new_with_label("30 days")
+        self.usage_recent_button.set_active(True)
+        self.usage_seasonal_button = Gtk.ToggleButton.new_with_label("12 months")
+        self.usage_seasonal_button.set_group(self.usage_recent_button)
+        self.usage_two_year_button = Gtk.ToggleButton.new_with_label("24 months")
+        self.usage_two_year_button.set_group(self.usage_recent_button)
+        self.usage_five_year_button = Gtk.ToggleButton.new_with_label("5 years")
+        self.usage_five_year_button.set_group(self.usage_recent_button)
+        self.usage_recent_button.connect("toggled", self.on_usage_period_toggled, "recent")
+        self.usage_seasonal_button.connect("toggled", self.on_usage_period_toggled, "12-months")
+        self.usage_two_year_button.connect("toggled", self.on_usage_period_toggled, "24-months")
+        self.usage_five_year_button.connect("toggled", self.on_usage_period_toggled, "5-years")
+        usage_period_box.append(self.usage_recent_button)
+        usage_period_box.append(self.usage_seasonal_button)
+        usage_period_box.append(self.usage_two_year_button)
+        usage_period_box.append(self.usage_five_year_button)
+        usage_chart_toolbar.append(usage_period_box)
+
+        usage_toolbar_spacer = Gtk.Box.new(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        usage_toolbar_spacer.set_hexpand(True)
+        usage_chart_toolbar.append(usage_toolbar_spacer)
+
         usage_chart_mode_box = Gtk.Box.new(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         usage_chart_mode_box.set_halign(Gtk.Align.END)
         usage_chart_mode_box.add_css_class("linked")
@@ -542,26 +622,54 @@ class MainWindow(Adw.ApplicationWindow):
         usage_chart_mode_box.append(self.usage_kwh_button)
         usage_chart_mode_box.append(self.usage_energy_cost_button)
         usage_chart_mode_box.append(self.usage_total_cost_button)
-        usage_chart_box.append(usage_chart_mode_box)
+        usage_chart_toolbar.append(usage_chart_mode_box)
+        usage_chart_box.append(usage_chart_toolbar)
 
-        self.usage_chart_legend = Gtk.Label.new(
-            "Bars show daily values · Line shows 7-day average · Dashed bars are partial or incomplete"
+        usage_chart_legend = Gtk.FlowBox.new()
+        usage_chart_legend.set_selection_mode(Gtk.SelectionMode.NONE)
+        usage_chart_legend.set_halign(Gtk.Align.START)
+        usage_chart_legend.set_row_spacing(4)
+        usage_chart_legend.set_column_spacing(14)
+        usage_chart_legend.set_min_children_per_line(1)
+        usage_chart_legend.set_max_children_per_line(3)
+        usage_chart_legend.set_margin_start(12)
+        usage_chart_legend.set_margin_end(12)
+        usage_chart_legend.set_margin_top(4)
+        usage_chart_legend.set_margin_bottom(2)
+        self.usage_chart_legend = usage_chart_legend
+        bar_legend, self.usage_chart_legend_bar_label = self._create_usage_legend_item(
+            "Daily usage",
+            "bar",
         )
-        self.usage_chart_legend.set_halign(Gtk.Align.START)
-        self.usage_chart_legend.set_margin_start(12)
-        self.usage_chart_legend.set_margin_end(12)
-        self.usage_chart_legend.set_wrap(True)
-        self.usage_chart_legend.add_css_class("caption")
-        self.usage_chart_legend.add_css_class("dim-label")
-        usage_chart_box.append(self.usage_chart_legend)
+        line_legend, self.usage_chart_legend_line_label = self._create_usage_legend_item(
+            "7-day average",
+            "line",
+        )
+        confidence_legend, self.usage_chart_legend_confidence_label = (
+            self._create_usage_legend_item("Incomplete", "incomplete")
+        )
+        usage_chart_legend.append(bar_legend)
+        usage_chart_legend.append(line_legend)
+        usage_chart_legend.append(confidence_legend)
+        usage_chart_box.append(usage_chart_legend)
 
-        self.usage_chart_area = Gtk.DrawingArea.new()
+        self.usage_chart_area = Gtk.Overlay.new()
         self.usage_chart_area.set_hexpand(True)
         self.usage_chart_area.set_vexpand(False)
-        self.usage_chart_area.set_draw_func(self._draw_usage_chart)
         self.usage_chart_area.set_focusable(True)
         self.usage_chart_area.set_focus_on_click(True)
         self.usage_chart_area.set_accessible_role(Gtk.AccessibleRole.SLIDER)
+        self.usage_chart_base_area = Gtk.DrawingArea.new()
+        self.usage_chart_base_area.set_hexpand(True)
+        self.usage_chart_base_area.set_vexpand(True)
+        self.usage_chart_base_area.set_draw_func(self._draw_usage_chart)
+        self.usage_chart_area.set_child(self.usage_chart_base_area)
+        self.usage_chart_interaction_area = Gtk.DrawingArea.new()
+        self.usage_chart_interaction_area.set_hexpand(True)
+        self.usage_chart_interaction_area.set_vexpand(True)
+        self.usage_chart_interaction_area.set_can_target(False)
+        self.usage_chart_interaction_area.set_draw_func(self._draw_usage_chart_interaction)
+        self.usage_chart_area.add_overlay(self.usage_chart_interaction_area)
         self._connect_usage_chart_style_updates()
         self.usage_chart_points = []
         self.usage_chart_dates = []
@@ -633,6 +741,9 @@ class MainWindow(Adw.ApplicationWindow):
 
         usage_patterns_group = Adw.PreferencesGroup()
         usage_patterns_group.set_title("Usage Patterns")
+        usage_patterns_group.set_description(
+            "Daily demand shape from complete usage data."
+        )
         self.usage_patterns_group = usage_patterns_group
         usage_content_box.append(usage_patterns_group)
 
@@ -670,17 +781,13 @@ class MainWindow(Adw.ApplicationWindow):
 
         spending_group = Adw.PreferencesGroup()
         spending_group.set_title("Estimated Spend")
+        spending_group.set_description("Waiting for historical usage and rate data.")
         self.spending_group = spending_group
         usage_content_box.append(spending_group)
 
-        self.cost_accuracy_row = Adw.ActionRow.new()
-        self.cost_accuracy_row.set_title("Spend accuracy")
-        self.cost_accuracy_row.set_subtitle("Waiting for historical usage and rate data.")
-        self.cost_accuracy_row.add_prefix(Gtk.Image.new_from_icon_name("dialog-information-symbolic"))
-        spending_group.add(self.cost_accuracy_row)
-
         self.cost_daily_row = Adw.ActionRow.new()
         self.cost_daily_row.set_title("Average daily energy spend")
+        self.cost_daily_row.set_subtitle("Energy charges only.")
         self.cost_daily_row.add_prefix(Gtk.Image.new_from_icon_name("accessories-calculator-symbolic"))
         self.cost_daily_label = Gtk.Label.new("—")
         self.cost_daily_row.add_suffix(self.cost_daily_label)
@@ -688,13 +795,15 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.cost_total_daily_row = Adw.ActionRow.new()
         self.cost_total_daily_row.set_title("Average daily total spend")
+        self.cost_total_daily_row.set_subtitle("Includes the standing charge.")
         self.cost_total_daily_row.add_prefix(Gtk.Image.new_from_icon_name("accessories-calculator-symbolic"))
         self.cost_total_daily_label = Gtk.Label.new("—")
         self.cost_total_daily_row.add_suffix(self.cost_total_daily_label)
         spending_group.add(self.cost_total_daily_row)
 
         self.cost_trend_row = Adw.ActionRow.new()
-        self.cost_trend_row.set_title("Recent total spend trend")
+        self.cost_trend_row.set_title("Historical spend trend")
+        self.cost_trend_row.set_subtitle("Needs 14 complete days with matched historical rates.")
         self.cost_trend_row.add_prefix(Gtk.Image.new_from_icon_name("view-sort-descending-symbolic"))
         self.cost_trend_label = Gtk.Label.new("—")
         self.cost_trend_row.add_suffix(self.cost_trend_label)
@@ -702,10 +811,23 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.cost_month_row = Adw.ActionRow.new()
         self.cost_month_row.set_title("Estimated monthly total spend")
+        self.cost_month_row.set_subtitle("Thirty times the average daily total.")
         self.cost_month_row.add_prefix(Gtk.Image.new_from_icon_name("x-office-spreadsheet-symbolic"))
         self.cost_month_label = Gtk.Label.new("—")
         self.cost_month_row.add_suffix(self.cost_month_label)
         spending_group.add(self.cost_month_row)
+
+        for row in (
+            self.baseline_load_row,
+            self.peak_usage_row,
+            self.cheap_rate_row,
+            self.average_unit_rate_row,
+            self.cost_daily_row,
+            self.cost_total_daily_row,
+            self.cost_trend_row,
+            self.cost_month_row,
+        ):
+            row.set_size_request(-1, 84)
 
         self.usage_updated_label = Gtk.Label.new()
         self.usage_updated_label.set_markup("<span size='small'>Last updated: Never</span>")
@@ -713,6 +835,118 @@ class MainWindow(Adw.ApplicationWindow):
         self.usage_updated_label.set_margin_top(10)
         self.usage_updated_label.set_margin_end(10)
         usage_content_box.append(self.usage_updated_label)
+
+        usage_content_box.remove(usage_patterns_group)
+        usage_content_box.remove(spending_group)
+        usage_content_box.remove(self.usage_updated_label)
+        self.usage_details_layout_view = Adw.MultiLayoutView.new()
+        self.usage_details_layout_view.set_valign(Gtk.Align.START)
+        self.usage_details_layout_view.set_hexpand(True)
+
+        narrow_usage_details = Gtk.Box.new(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=16,
+        )
+        narrow_usage_details.append(Adw.LayoutSlot.new("usage-patterns"))
+        narrow_usage_details.append(Adw.LayoutSlot.new("historical-spend"))
+        narrow_usage_details_layout = Adw.Layout.new(narrow_usage_details)
+        narrow_usage_details_layout.set_name("narrow")
+
+        wide_usage_details = Gtk.Box.new(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=USAGE_DETAILS_COLUMN_SPACING,
+        )
+        wide_usage_details.set_valign(Gtk.Align.START)
+        patterns_slot = Adw.LayoutSlot.new("usage-patterns")
+        patterns_slot.set_hexpand(True)
+        spend_slot = Adw.LayoutSlot.new("historical-spend")
+        spend_slot.set_hexpand(True)
+        wide_usage_details.append(patterns_slot)
+        wide_usage_details.append(spend_slot)
+        wide_usage_details_layout = Adw.Layout.new(wide_usage_details)
+        wide_usage_details_layout.set_name("wide")
+
+        self.usage_details_layout_view.add_layout(narrow_usage_details_layout)
+        self.usage_details_layout_view.add_layout(wide_usage_details_layout)
+        self.usage_details_layout_view.set_child("usage-patterns", usage_patterns_group)
+        self.usage_details_layout_view.set_child("historical-spend", spending_group)
+        self.usage_details_layout_view.set_layout_name("narrow")
+        usage_content_box.append(self.usage_details_layout_view)
+        usage_content_box.append(self.usage_updated_label)
+
+        usage_group.set_visible(False)
+        self.usage_overview_pane = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        self.usage_overview_pane.set_valign(Gtk.Align.START)
+        overview_heading = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        self.usage_overview_title = Gtk.Label.new("Last 30 complete days")
+        self.usage_overview_title.set_halign(Gtk.Align.START)
+        self.usage_overview_title.add_css_class("title-3")
+        overview_heading.append(self.usage_overview_title)
+        self.usage_overview_description = Gtk.Label.new(
+            "A recent baseline that does not count today until it is complete."
+        )
+        self.usage_overview_description.set_halign(Gtk.Align.START)
+        self.usage_overview_description.set_xalign(0)
+        self.usage_overview_description.set_wrap(True)
+        self.usage_overview_description.add_css_class("caption")
+        self.usage_overview_description.add_css_class("dim-label")
+        overview_heading.append(self.usage_overview_description)
+        self.usage_overview_pane.append(overview_heading)
+
+        usage_metrics = Gtk.FlowBox.new()
+        usage_metrics.set_selection_mode(Gtk.SelectionMode.NONE)
+        usage_metrics.set_homogeneous(True)
+        usage_metrics.set_min_children_per_line(2)
+        usage_metrics.set_max_children_per_line(2)
+        usage_metrics.set_column_spacing(8)
+        usage_metrics.set_row_spacing(8)
+        self.usage_metrics = usage_metrics
+
+        metric_specs = (
+            ("average", "Daily average", "weather-clear-symbolic"),
+            ("change", "Recent change", "view-sort-descending-symbolic"),
+            ("monthly", "Monthly guide", "x-office-calendar-symbolic"),
+            ("rate", "Cheap-rate use", "starred-symbolic"),
+        )
+        self.usage_metric_widgets = {}
+        for key, title, icon_name in metric_specs:
+            card, title_label, value_label, detail_label = self._create_usage_metric_card(
+                title,
+                icon_name,
+            )
+            usage_metrics.append(card)
+            self.usage_metric_widgets[key] = (title_label, value_label, detail_label)
+        self.usage_overview_pane.append(usage_metrics)
+
+        usage_page_box.remove(usage_chart_box)
+        self.usage_layout_view = Adw.MultiLayoutView.new()
+        self.usage_layout_view.set_valign(Gtk.Align.START)
+        self.usage_layout_view.set_hexpand(True)
+
+        narrow_usage_box = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        narrow_usage_box.append(Adw.LayoutSlot.new("usage-overview"))
+        narrow_usage_box.append(Adw.LayoutSlot.new("usage-chart"))
+        narrow_usage_layout = Adw.Layout.new(narrow_usage_box)
+        narrow_usage_layout.set_name("narrow")
+
+        wide_usage_box = Gtk.Box.new(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=USAGE_COLUMN_SPACING,
+        )
+        wide_usage_box.set_valign(Gtk.Align.START)
+        wide_usage_chart_slot = Adw.LayoutSlot.new("usage-chart")
+        wide_usage_chart_slot.set_hexpand(True)
+        wide_usage_box.append(wide_usage_chart_slot)
+        wide_usage_box.append(Adw.LayoutSlot.new("usage-overview"))
+        wide_usage_layout = Adw.Layout.new(wide_usage_box)
+        wide_usage_layout.set_name("wide")
+
+        self.usage_layout_view.add_layout(narrow_usage_layout)
+        self.usage_layout_view.add_layout(wide_usage_layout)
+        self.usage_layout_view.set_child("usage-chart", usage_chart_box)
+        self.usage_layout_view.set_child("usage-overview", self.usage_overview_pane)
+        self.usage_layout_view.set_layout_name("narrow")
+        usage_page_box.prepend(self.usage_layout_view)
 
         self.main_view_stack = Adw.ViewStack.new()
         self.main_view_stack.add_titled_with_icon(scrolled_content, "prices", "Prices", "view-list-symbolic")
@@ -1078,8 +1312,11 @@ class MainWindow(Adw.ApplicationWindow):
         price_summary_mode = get_price_summary_mode(width, height)
         margin = get_content_margin(width)
         plan_wide = is_plan_wide_layout(width)
+        usage_wide = is_usage_wide_layout(width)
+        usage_details_wide = is_usage_details_wide_layout(width)
         chart_slot_count = len(self.chart_prices) if self.chart_prices else DEFAULT_CHART_SLOTS
         plan_chart_width = get_plan_chart_width(width, margin)
+        usage_chart_width = get_usage_chart_width(width, margin)
         usage_slot_count = (
             len(self.usage_chart_points)
             if self.usage_chart_points
@@ -1090,13 +1327,15 @@ class MainWindow(Adw.ApplicationWindow):
             price_summary_mode,
             margin,
             plan_wide,
+            usage_wide,
+            usage_details_wide,
             get_chart_content_width(width, chart_slot_count),
             get_chart_height(width),
             is_compact_width(plan_chart_width),
             get_chart_content_width(plan_chart_width, chart_slot_count),
             get_chart_height(plan_chart_width),
-            get_chart_content_width(width, usage_slot_count),
-            get_chart_height(width),
+            get_usage_chart_content_width(usage_chart_width, usage_slot_count),
+            get_chart_height(usage_chart_width),
         )
         if layout_signature == self._adaptive_layout_signature:
             return
@@ -1123,15 +1362,22 @@ class MainWindow(Adw.ApplicationWindow):
         self.price_chart_section.set_margin_bottom(chart_margin)
         self.price_chart_section.set_margin_start(chart_margin)
         self.price_chart_section.set_margin_end(chart_margin)
-        self.usage_chart_box.set_margin_top(chart_margin)
-        self.usage_chart_box.set_margin_bottom(chart_margin)
-        self.usage_chart_box.set_margin_start(chart_margin)
-        self.usage_chart_box.set_margin_end(chart_margin)
+        self.usage_chart_box.set_margin_top(0)
+        self.usage_chart_box.set_margin_bottom(0)
+        self.usage_chart_box.set_margin_start(0)
+        self.usage_chart_box.set_margin_end(0)
         mode_padding = 8 if compact else 10
         self.usage_chart_mode_box.set_margin_top(mode_padding)
         self.usage_chart_mode_box.set_margin_bottom(mode_padding)
         self.usage_chart_mode_box.set_margin_start(mode_padding)
         self.usage_chart_mode_box.set_margin_end(mode_padding)
+        usage_chart_compact = is_compact_width(usage_chart_width)
+        self.usage_chart_toolbar.set_orientation(
+            Gtk.Orientation.VERTICAL if usage_chart_compact else Gtk.Orientation.HORIZONTAL
+        )
+        self.usage_period_box.set_halign(
+            Gtk.Align.START if usage_chart_compact else Gtk.Align.FILL
+        )
 
         self.time_label.set_halign(Gtk.Align.CENTER if compact else Gtk.Align.END)
         self.time_label.set_margin_top(4)
@@ -1143,6 +1389,16 @@ class MainWindow(Adw.ApplicationWindow):
         self.plan_layout_view.set_layout_name("wide" if plan_wide else "narrow")
         self.plan_pane.set_size_request(PLAN_PANE_WIDTH if plan_wide else -1, -1)
         self.plan_pane.set_hexpand(not plan_wide)
+        self.usage_layout_view.set_layout_name("wide" if usage_wide else "narrow")
+        self.usage_details_layout_view.set_layout_name(
+            "wide" if usage_details_wide else "narrow"
+        )
+        self.usage_clamp.set_maximum_size(get_usage_details_max_width(width))
+        self.usage_overview_pane.set_size_request(
+            USAGE_PANE_WIDTH if usage_wide else -1,
+            -1,
+        )
+        self.usage_overview_pane.set_hexpand(not usage_wide)
 
         self.price_chart.set_compact_mode(compact, width, chart_slot_count)
         self.plan_price_chart.set_compact_mode(
@@ -1150,7 +1406,7 @@ class MainWindow(Adw.ApplicationWindow):
             plan_chart_width,
             chart_slot_count,
         )
-        self._set_usage_chart_layout(width)
+        self._set_usage_chart_layout(usage_chart_width)
         self._set_price_summary_mode(price_summary_mode)
         self.header_title_widget.set_visible(not compact)
         self.menu_button.set_tooltip_text("Menu" if compact else "Main Menu")
@@ -1196,7 +1452,35 @@ class MainWindow(Adw.ApplicationWindow):
             return
 
         self.usage_graph_mode = mode
-        self._update_usage_insights()
+        if self._usage_dashboard_insight is not None:
+            self._update_usage_chart_series(
+                self._usage_dashboard_insight,
+                self._usage_daily_costs,
+            )
+        else:
+            self._update_usage_insights()
+
+    def on_usage_period_toggled(self, button, mode):
+        if not button.get_active():
+            return
+
+        self.usage_period_mode = mode
+        seasonal = mode != "recent"
+        self.usage_energy_cost_button.set_sensitive(
+            not seasonal and self._has_complete_daily_costs(self._usage_daily_costs)
+        )
+        self.usage_total_cost_button.set_sensitive(
+            not seasonal and self._has_complete_daily_costs(self._usage_daily_costs)
+        )
+        if seasonal and self.usage_graph_mode != "kwh":
+            self.usage_graph_mode = "kwh"
+            self.usage_kwh_button.set_active(True)
+        if self._usage_dashboard_insight is not None:
+            self._update_usage_overview(self._usage_dashboard_insight)
+            self._update_usage_chart_series(
+                self._usage_dashboard_insight,
+                self._usage_daily_costs,
+            )
 
     def _update_find_cheapest_settings(self):
         self.settings.set_double("find-cheapest-duration-hours", self.duration_spin_button.get_value())
@@ -1855,7 +2139,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         self._set_usage_content_state()
         cache_key = f"octopus_usage_{account_number}"
-        cached_data, _cache_mtime = self.cache_manager.get(cache_key)
+        cached_data, _cache_mtime = self._get_usage_cache(cache_key)
         if not cached_data or "samples" not in cached_data:
             if self.usage_refresh_in_progress or not self.usage_refresh_attempted:
                 self._set_usage_loading_state()
@@ -1882,13 +2166,82 @@ class MainWindow(Adw.ApplicationWindow):
 
         self._set_usage_updated_label(cached_data.get("synced_at"))
         self._set_usage_cost_graph_controls_enabled(self._has_complete_daily_costs(daily_costs))
-        insight = self._build_usage_insight_data(
-            cached_data.get("samples", []),
-            cached_data.get("synced_at"),
-            daily_costs,
+        self._usage_analysis_generation += 1
+        generation = self._usage_analysis_generation
+        thread = threading.Thread(
+            target=self._build_usage_dashboard_background,
+            args=(
+                generation,
+                input_signature,
+                cached_data.get("samples", []),
+                cached_data.get("synced_at"),
+                daily_costs,
+                cached_data.get("daily_usage_archive", []),
+            ),
         )
+        thread.daemon = True
+        thread.start()
+
+    def _build_usage_dashboard_background(
+        self,
+        generation,
+        input_signature,
+        samples,
+        synced_at,
+        daily_costs,
+        daily_archive,
+    ):
+        try:
+            insight = build_usage_dashboard_data(samples, synced_at, daily_costs, daily_archive)
+        except Exception as error:  # Keep malformed cached data away from the GTK thread.
+            logger.exception("Unable to analyse usage history")
+            GLib.idle_add(
+                self._fail_usage_dashboard_analysis,
+                generation,
+                input_signature,
+                str(error),
+            )
+            return
+        GLib.idle_add(
+            self._finish_usage_dashboard_analysis,
+            generation,
+            input_signature,
+            insight,
+            daily_costs,
+            synced_at,
+        )
+
+    def _fail_usage_dashboard_analysis(self, generation, input_signature, error):
+        if (
+            generation != self._usage_analysis_generation
+            or input_signature != self._usage_insights_input_signature
+        ):
+            return False
+
+        self._usage_insights_input_signature = None
+        self.usage_insights_row.set_subtitle("Usage history could not be analysed.")
+        logger.warning("Usage analysis failed: %s", error)
+        return False
+
+    def _finish_usage_dashboard_analysis(
+        self,
+        generation,
+        input_signature,
+        insight,
+        daily_costs,
+        synced_at,
+    ):
+        if (
+            generation != self._usage_analysis_generation
+            or input_signature != self._usage_insights_input_signature
+        ):
+            return False
+
+        insight = self._add_usage_cost_insights(insight, synced_at, daily_costs)
+        self._usage_dashboard_insight = insight
+        self._usage_daily_costs = daily_costs
         self.usage_insights_row.set_subtitle(insight["summary"])
-        self._update_spend_accuracy_ui(daily_costs, cached_data.get("synced_at"))
+        self._update_spend_accuracy_ui(daily_costs, synced_at)
         self.usage_avg_label.set_text(insight["avg_text"])
         self.usage_trend_label.set_text(insight["trend_text"])
         self.usage_month_label.set_text(insight["monthly_text"])
@@ -1904,6 +2257,47 @@ class MainWindow(Adw.ApplicationWindow):
         self.cost_total_daily_label.set_text(insight["daily_total_cost_text"])
         self.cost_trend_label.set_text(insight["cost_trend_text"])
         self.cost_month_label.set_text(insight["monthly_cost_text"])
+        self._update_usage_overview(insight)
+        self._update_usage_chart_series(insight, daily_costs)
+        return False
+
+    def _update_usage_overview(self, insight):
+        if self.usage_period_mode != "recent":
+            seasonal = insight.get("seasonal", {})
+            self.usage_overview_title.set_text("Seasonal context")
+            self.usage_overview_description.set_text(
+                "Date-aligned comparisons describe household demand without attributing it to weather."
+            )
+            values = (
+                ("average", "Last 28 days", seasonal.get("recent_average_text", "—"), "Complete days only"),
+                ("change", "Year on year", seasonal.get("year_comparison_text", "—"), seasonal.get("summary", "")),
+                ("monthly", "12-month average", seasonal.get("annual_average_text", "—"), "Average per complete day"),
+                (
+                    "rate",
+                    "History",
+                    f"{len(seasonal.get('chart_months', []))} months",
+                    seasonal.get("coverage_text", ""),
+                ),
+            )
+        else:
+            self.usage_overview_title.set_text("Last 30 complete days")
+            self.usage_overview_description.set_text(
+                "A recent baseline that does not count today until it is complete."
+            )
+            values = (
+                ("average", "Daily average", insight.get("avg_text", "—"), "Up to 30 complete days"),
+                ("change", "Seven-day change", insight.get("trend_text", "—"), "Compared with the previous seven days"),
+                ("monthly", "Monthly guide", insight.get("monthly_text", "—"), "Thirty times the daily average"),
+                ("rate", "Cheap-rate use", insight.get("cheap_rate_text", "—"), insight.get("cheap_rate_detail", "")),
+            )
+
+        for key, title, value, detail in values:
+            title_label, value_label, detail_label = self.usage_metric_widgets[key]
+            title_label.set_text(title)
+            value_label.set_text(value)
+            detail_label.set_text(detail)
+
+    def _update_usage_chart_series(self, insight, daily_costs):
         selected_date = None
         if 0 <= self.usage_chart_selected_index < len(self.usage_chart_dates):
             selected_date = self.usage_chart_dates[self.usage_chart_selected_index]
@@ -1917,18 +2311,45 @@ class MainWindow(Adw.ApplicationWindow):
         self.usage_chart_daily_data = chart_daily_data
         self.usage_chart_rolling_average = rolling_average
         self.usage_chart_unit = chart_unit
+        self.usage_chart_reference_value = (
+            insight.get("seasonal", {}).get("annual_average")
+            if self.usage_period_mode != "recent"
+            else None
+        )
         if self.usage_chart_dates:
             if selected_date in self.usage_chart_dates:
                 self.usage_chart_selected_index = self.usage_chart_dates.index(selected_date)
+            elif self.usage_period_mode != "recent":
+                self.usage_chart_selected_index = len(self.usage_chart_dates) - 1
             else:
-                self.usage_chart_selected_index = 0
+                self.usage_chart_selected_index = next(
+                    (
+                        index
+                        for index in range(len(self.usage_chart_daily_data) - 1, -1, -1)
+                        if not self._usage_day_has_lower_confidence(
+                            self.usage_chart_daily_data[index]
+                        )
+                    ),
+                    len(self.usage_chart_dates) - 1,
+                )
         else:
             self.usage_chart_selected_index = -1
         self.usage_chart_hovered_index = -1
+        seasonal = self.usage_period_mode != "recent"
+        self.usage_chart_legend_bar_label.set_text(
+            "Monthly daily average" if seasonal else "Daily usage"
+        )
+        self.usage_chart_legend_line_label.set_text(
+            "3-month average" if seasonal else "7-day average"
+        )
+        self.usage_chart_legend_confidence_label.set_text(
+            "Partial month" if seasonal else "Incomplete"
+        )
         self._update_usage_selected_day_detail()
-        self._set_usage_chart_layout(self.get_width() or self.settings.get_int("window-width"))
-        self.usage_chart_area.queue_draw()
+        self._set_usage_chart_layout(self._current_usage_chart_width())
+        self._queue_usage_chart_static_draw()
         chart_signature = (
+            self.usage_period_mode,
             self.usage_graph_mode,
             tuple(chart_dates),
             tuple(chart_points),
@@ -1940,21 +2361,35 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _build_usage_insights_input_signature(self, account_number, cached_data, daily_costs):
         samples = cached_data.get("samples", [])
+        daily_archive = cached_data.get("daily_usage_archive", [])
         sample_edges = self._get_usage_sample_edges(samples)
         daily_cost_edges = self._get_daily_cost_edges(daily_costs)
         price_signature = self._get_price_data_signature(self.all_prices)
         standing_charge_signature = self._get_cached_standing_charge_signature()
         return (
             account_number,
-            self.usage_graph_mode,
             cached_data.get("synced_at"),
             cached_data.get("price_band_version"),
             len(samples),
             sample_edges,
             len(daily_costs),
             daily_cost_edges,
+            len(daily_archive),
+            self._get_daily_usage_archive_edges(daily_archive),
             price_signature,
             standing_charge_signature,
+        )
+
+    def _get_daily_usage_archive_edges(self, daily_archive):
+        if not daily_archive:
+            return None
+        first = daily_archive[0]
+        last = daily_archive[-1]
+        return (
+            first.get("date"),
+            first.get("kwh"),
+            last.get("date"),
+            last.get("kwh"),
         )
 
     def _get_usage_sample_edges(self, samples):
@@ -2005,7 +2440,7 @@ class MainWindow(Adw.ApplicationWindow):
             return None
 
         cache_key = f"octopus_standing_charge_{selected_tariff_code}"
-        cached_data, cache_mtime = self.cache_manager.get(cache_key)
+        cached_data, cache_mtime = self.usage_cache_manager.get(cache_key)
         if not cached_data:
             return selected_tariff_code, None, None
 
@@ -2064,7 +2499,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.usage_refresh_in_progress = True
         self.usage_refresh_attempted = True
         cache_key = f"octopus_usage_{account_number}"
-        cached_data, _cache_mtime = self.cache_manager.get(cache_key)
+        cached_data, _cache_mtime = self._get_usage_cache(cache_key)
         if not cached_data or "samples" not in cached_data:
             self._set_usage_loading_state()
         elif force:
@@ -2079,17 +2514,25 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _usage_cache_is_fresh(self, account_number):
         cache_key = f"octopus_usage_{account_number}"
-        cached_data, cache_mtime = self.cache_manager.get(cache_key)
+        cached_data, cache_mtime = self._get_usage_cache(cache_key)
         if (
             not cached_data
             or "samples" not in cached_data
             or "daily_costs" not in cached_data
+            or cached_data.get("cache_version") != USAGE_CACHE_VERSION
+            or not isinstance(cached_data.get("daily_usage_archive"), list)
             or cached_data.get("price_band_version") != PRICE_BAND_VERSION
             or not cache_mtime
         ):
             return False
 
         return (time.time() - cache_mtime) < USAGE_BACKGROUND_REFRESH_INTERVAL_SECONDS
+
+    def _get_usage_cache(self, cache_key):
+        cached_data, cache_mtime = self.usage_cache_manager.get(cache_key)
+        if cached_data:
+            return cached_data, cache_mtime
+        return self.cache_manager.get(cache_key)
 
     def _refresh_usage_history_background(self, account_number, cached_data):
         try:
@@ -2103,14 +2546,20 @@ class MainWindow(Adw.ApplicationWindow):
             )
             if fresh_samples:
                 fresh_daily_costs = self._build_historical_usage_costs_for_cache(account_data, fresh_samples)
+                fresh_daily_archive = self._fetch_daily_usage_archive_for_cache(
+                    account_data,
+                    cached_data,
+                    refresh_started_at,
+                )
                 refreshed_data = merge_usage_history(
                     cached_data,
                     fresh_samples,
                     fresh_daily_costs,
                     now=datetime.now(timezone.utc),
+                    fresh_daily_archive=fresh_daily_archive,
                 )
                 cache_key = f"octopus_usage_{account_number}"
-                self.cache_manager.set(cache_key, refreshed_data)
+                self.usage_cache_manager.set(cache_key, refreshed_data)
                 GLib.idle_add(self._finish_usage_history_background_refresh, True)
             else:
                 GLib.idle_add(self._finish_usage_history_background_refresh, False)
@@ -2133,6 +2582,21 @@ class MainWindow(Adw.ApplicationWindow):
             logger.debug("Historical usage cost network error: %s", type(exc).__name__)
         except Exception as exc:  # ruff: ignore[BLE001] Optional cost enrichment must not fail the refresh.
             logger.debug("Unexpected historical usage cost error: %s", type(exc).__name__)
+        return None
+
+    def _fetch_daily_usage_archive_for_cache(self, account_data, cached_data, now):
+        try:
+            return fetch_daily_usage_archive(
+                account_data,
+                period_from=get_usage_archive_refresh_start(cached_data, now),
+                now=now,
+            )
+        except OctopusApiError as exc:
+            logger.debug("Seasonal usage refresh failed: %s", type(exc).__name__)
+        except requests.exceptions.RequestException as exc:
+            logger.debug("Seasonal usage network error: %s", type(exc).__name__)
+        except Exception as exc:  # ruff: ignore[BLE001] Optional seasonal enrichment must not fail usage.
+            logger.debug("Unexpected seasonal usage error: %s", type(exc).__name__)
         return None
 
     def _finish_usage_history_background_refresh(self, updated):
@@ -2160,7 +2624,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.cost_total_daily_label.set_text("—")
         self.cost_trend_label.set_text("—")
         self.cost_month_label.set_text("—")
-        self.cost_accuracy_row.set_subtitle("Waiting for historical usage and rate data.")
+        self.spending_group.set_description("Waiting for historical usage and rate data.")
         self.spending_group.set_title("Estimated Spend")
         self.usage_chart_selected_index = -1
         self.usage_chart_hovered_index = -1
@@ -2168,22 +2632,31 @@ class MainWindow(Adw.ApplicationWindow):
         self.usage_chart_dates = []
         self.usage_chart_daily_data = []
         self.usage_chart_rolling_average = []
+        self.usage_chart_reference_value = None
         self.usage_chart_unit = "kWh"
         self._usage_chart_signature = None
         self._usage_insights_input_signature = None
+        self._usage_analysis_generation += 1
+        self._usage_dashboard_insight = None
+        self._usage_daily_costs = []
+        for _title_label, value_label, detail_label in self.usage_metric_widgets.values():
+            value_label.set_text("—")
+            detail_label.set_text("Waiting for complete usage history")
         self._update_usage_selected_day_detail()
         self._set_usage_updated_label(None)
         self._set_usage_cost_graph_controls_enabled(False)
-        self._set_usage_chart_layout(self.get_width() or self.settings.get_int("window-width"))
-        self.usage_chart_area.queue_draw()
+        self._set_usage_chart_layout(self._current_usage_chart_width())
+        self._queue_usage_chart_static_draw()
 
     def _has_complete_daily_costs(self, daily_costs):
         return any(
-            day.get("missing_rate_count", 0) == 0 and day.get("sample_count", 0) >= 48
+            day.get("missing_rate_count", 0) == 0
+            and is_complete_usage_day(day.get("date"), day.get("sample_count", 0))
             for day in daily_costs
         )
 
     def _set_usage_cost_graph_controls_enabled(self, enabled):
+        enabled = enabled and self.usage_period_mode == "recent"
         self.usage_energy_cost_button.set_sensitive(enabled)
         self.usage_total_cost_button.set_sensitive(enabled)
         if not enabled and self.usage_graph_mode != "kwh":
@@ -2199,31 +2672,36 @@ class MainWindow(Adw.ApplicationWindow):
         if complete_days:
             self.spending_group.set_title("Historical Spend")
             if incomplete_days:
-                self.cost_accuracy_row.set_subtitle(
-                    f"Matched historical rates for {len(complete_days)} complete days; "
-                    f"{incomplete_days} incomplete days ignored."
+                self.spending_group.set_description(
+                    f"{len(complete_days)} matched days · {incomplete_days} incomplete ignored."
                 )
             else:
-                self.cost_accuracy_row.set_subtitle(
-                    f"Matched historical rates and standing charges for {len(complete_days)} complete days."
+                self.spending_group.set_description(
+                    f"{len(complete_days)} complete days with matched rates and charges."
                 )
+            self.cost_trend_row.set_subtitle(
+                "Compares the latest seven complete matched days with the previous seven."
+            )
             return
 
         self.spending_group.set_title("Estimated Spend")
         if daily_costs:
-            self.cost_accuracy_row.set_subtitle(
-                "Historical rate data is incomplete, so spend is estimated from average available rates."
+            self.spending_group.set_description(
+                "Using average rates; historical matching is incomplete."
             )
         else:
-            self.cost_accuracy_row.set_subtitle(
-                "Estimated from average available unit rate and standing charge until historical rates are cached."
+            self.spending_group.set_description(
+                "Using average rates until historical matching is available."
             )
+        self.cost_trend_row.set_subtitle(
+            "Unavailable until historical rates cover 14 complete days."
+        )
 
 
     def _set_usage_chart_layout(self, width):
         compact = is_compact_width(width)
         slot_count = len(self.usage_chart_points) if self.usage_chart_points else DEFAULT_CHART_SLOTS
-        content_width = get_chart_content_width(width, slot_count)
+        content_width = get_usage_chart_content_width(width, slot_count)
         content_height = get_chart_height(width)
         layout_signature = (compact, slot_count, content_width, content_height)
         if layout_signature == self._usage_chart_layout_signature:
@@ -2231,12 +2709,66 @@ class MainWindow(Adw.ApplicationWindow):
 
         self._usage_chart_layout_signature = layout_signature
         self.usage_chart_area.set_size_request(content_width, content_height)
-        self.usage_chart_area.set_content_width(content_width)
-        self.usage_chart_area.set_content_height(content_height)
+        for area in (self.usage_chart_base_area, self.usage_chart_interaction_area):
+            area.set_content_width(content_width)
+            area.set_content_height(content_height)
         self.usage_chart_margin_left = 38 if compact else 45
         self.usage_chart_margin_right = 10 if compact else 15
         self.usage_chart_margin_top = 16 if compact else 20
         self.usage_chart_margin_bottom = 26 if compact else 30
+
+    def _current_usage_chart_width(self):
+        window_width = self.get_width() or self.settings.get_int("window-width")
+        return get_usage_chart_width(window_width, get_content_margin(window_width))
+
+    def _create_usage_legend_item(self, text, swatch_style):
+        item = Gtk.Box.new(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
+        item.add_css_class("usage-legend-item")
+        swatch = Gtk.DrawingArea.new()
+        swatch.set_content_width(20)
+        swatch.set_content_height(12)
+        swatch.set_draw_func(self._draw_usage_legend_swatch, swatch_style)
+        item.append(swatch)
+
+        label = Gtk.Label.new(text)
+        label.add_css_class("caption")
+        label.add_css_class("dim-label")
+        item.append(label)
+        return item, label
+
+    def _draw_usage_legend_swatch(self, area, cr, width, height, swatch_style):
+        style_context = area.get_style_context()
+        fg_color = style_context.get_color()
+        accent_color = self._lookup_style_color(
+            style_context,
+            ("accent_color", "accent_bg_color", "blue_4"),
+            (0.2, 0.4, 0.8),
+        )
+        bar_color = self._mix_colors(
+            accent_color,
+            (fg_color.red, fg_color.green, fg_color.blue),
+            0.12,
+        )
+
+        if swatch_style == "line":
+            cr.set_source_rgba(*accent_color, 0.9)
+            cr.set_line_width(2)
+            cr.move_to(1, height / 2)
+            cr.line_to(width - 1, height / 2)
+            cr.stroke()
+            return
+
+        cr.set_source_rgba(*bar_color, 0.76 if swatch_style == "bar" else 0.34)
+        self._rounded_rectangle(cr, 3, 1, width - 6, height - 2, 2)
+        cr.fill_preserve()
+        if swatch_style == "incomplete":
+            cr.set_source_rgba(*bar_color, 0.72)
+            cr.set_line_width(1)
+            cr.set_dash([2, 2], 0)
+            cr.stroke()
+            cr.set_dash([], 0)
+        else:
+            cr.new_path()
 
     def _connect_usage_chart_style_updates(self):
         style_manager = Adw.StyleManager.get_default()
@@ -2245,11 +2777,18 @@ class MainWindow(Adw.ApplicationWindow):
                 style_manager.connect(f"notify::{property_name}", self._on_usage_chart_style_changed)
 
     def _on_usage_chart_style_changed(self, *_args):
-        self.usage_chart_area.queue_draw()
+        self.usage_chart_legend.queue_draw()
+        self._queue_usage_chart_static_draw()
 
-    def _build_usage_insight_data(self, samples, synced_at, daily_costs=None):
-        insight = build_usage_insight_data(samples, synced_at)
-        insight.update(build_usage_pattern_insights(samples, daily_costs))
+    def _queue_usage_chart_static_draw(self):
+        self.usage_chart_base_area.queue_draw()
+        self.usage_chart_interaction_area.queue_draw()
+
+    def _queue_usage_chart_interaction_draw(self):
+        self.usage_chart_interaction_area.queue_draw()
+
+    def _add_usage_cost_insights(self, insight, synced_at, daily_costs=None):
+        insight = dict(insight)
         avg_daily = 0.0
         if insight["avg_text"] != "—":
             avg_daily = float(insight["avg_text"].split(" ")[0])
@@ -2274,15 +2813,41 @@ class MainWindow(Adw.ApplicationWindow):
         avg_daily_energy_cost = avg_daily * avg_unit_price
         avg_daily_total_cost = avg_daily_energy_cost + standing_charge_gbp
         monthly_cost = avg_daily_total_cost * 30.0
-        price_trend_pct = self._get_recent_price_trend_pct()
-        combined_cost_trend_pct = insight["trend_pct"] + price_trend_pct
         insight["daily_cost_text"] = "—" if insight["avg_text"] == "—" else f"{format_gbp(avg_daily_energy_cost)}/day"
         insight["daily_total_cost_text"] = "—" if insight["avg_text"] == "—" else f"{format_gbp(avg_daily_total_cost)}/day"
-        insight["cost_trend_text"] = "—" if insight["trend_text"] == "—" else f"{combined_cost_trend_pct:+.1f}%"
+        insight["cost_trend_text"] = "—"
         insight["monthly_cost_text"] = "—" if insight["monthly_text"] == "—" else format_gbp(monthly_cost, decimals=0)
         return insight
 
     def _get_usage_chart_series(self, insight, daily_costs):
+        if self.usage_period_mode != "recent":
+            seasonal = insight.get("seasonal", {})
+            month_limit = {
+                "12-months": 12,
+                "24-months": 24,
+                "5-years": 60,
+            }.get(self.usage_period_mode, 12)
+            months = seasonal.get("chart_months", [])[-month_limit:]
+            points = [float(month.get("average_kwh", 0.0)) for month in months]
+            dates = [month.get("month_start") for month in months]
+            daily_data = [
+                {
+                    "date": month.get("month_start"),
+                    "kwh": month.get("average_kwh"),
+                    "day_count": month.get("day_count"),
+                    "expected_days": month.get("expected_days"),
+                    "is_month": True,
+                }
+                for month in months
+            ]
+            return (
+                points,
+                dates,
+                "kWh",
+                daily_data,
+                build_rolling_average(points, window_size=3) if points else [],
+            )
+
         daily_cost_by_date = {
             day.get("date"): day
             for day in daily_costs
@@ -2303,11 +2868,11 @@ class MainWindow(Adw.ApplicationWindow):
                     "sample_count": day.get("sample_count"),
                 })
             return (
-                list(reversed(insight["chart_points"])),
-                list(reversed(insight["chart_dates"])),
+                list(insight["chart_points"]),
+                list(insight["chart_dates"]),
                 "kWh",
-                list(reversed(daily_data)),
-                list(reversed(insight.get("chart_rolling_average", []))),
+                daily_data,
+                list(insight.get("chart_rolling_average", [])),
             )
 
         points = []
@@ -2315,30 +2880,34 @@ class MainWindow(Adw.ApplicationWindow):
         daily_data = []
         for date in insight["chart_dates"]:
             day = daily_cost_by_date.get(date)
-            if not day or day.get("missing_rate_count", 0) != 0:
+            if (
+                not day
+                or day.get("missing_rate_count", 0) != 0
+                or not is_complete_usage_day(date, day.get("sample_count", 0))
+            ):
                 continue
             points.append(float(day.get(self.usage_graph_mode, 0.0)))
             dates.append(date)
             daily_data.append(day)
 
         return (
-            list(reversed(points)),
-            list(reversed(dates)),
+            points,
+            dates,
             "£",
-            list(reversed(daily_data)),
-            list(reversed(build_rolling_average(points))),
+            daily_data,
+            build_rolling_average(points),
         )
 
     def _set_usage_chart_selected_index(self, index):
         if not self.usage_chart_points:
             self.usage_chart_selected_index = -1
             self._update_usage_selected_day_detail()
-            self.usage_chart_area.queue_draw()
+            self._queue_usage_chart_interaction_draw()
             return
 
         self.usage_chart_selected_index = max(0, min(index, len(self.usage_chart_points) - 1))
         self._update_usage_selected_day_detail()
-        self.usage_chart_area.queue_draw()
+        self._queue_usage_chart_interaction_draw()
 
     def _update_usage_selected_day_detail(self):
         if (
@@ -2351,12 +2920,16 @@ class MainWindow(Adw.ApplicationWindow):
 
         day = self.usage_chart_daily_data[self.usage_chart_selected_index]
         date = day.get("date") or self.usage_chart_dates[self.usage_chart_selected_index]
-        self.usage_selected_day_title.set_text(date)
+        self.usage_selected_day_title.set_text(self._format_usage_period_label(date))
 
         detail_parts = []
         kwh = day.get("kwh")
         if kwh is not None:
-            detail_parts.append(f"{float(kwh):.2f} kWh")
+            suffix = "/day" if day.get("is_month") else ""
+            detail_parts.append(f"{float(kwh):.2f} kWh{suffix}")
+
+        if day.get("is_month"):
+            detail_parts.append(f"{day.get('day_count', 0)} complete days")
 
         energy_cost = day.get("energy_cost_gbp")
         standing_charge = day.get("standing_charge_gbp")
@@ -2377,9 +2950,16 @@ class MainWindow(Adw.ApplicationWindow):
         self._update_usage_chart_accessible_summary()
 
     def _describe_usage_day_quality(self, day):
+        if day.get("is_month"):
+            if day.get("day_count", 0) < day.get("expected_days", 0):
+                return "Partial month"
+            return "Complete month"
         if day.get("missing_rate_count", 0):
             return "Historical rates incomplete"
-        if day.get("sample_count") and day.get("sample_count", 0) < 48:
+        if day.get("sample_count") and not is_complete_usage_day(
+            day.get("date"),
+            day.get("sample_count", 0),
+        ):
             return "Partial usage day"
         if day.get("total_cost_gbp") is not None:
             return "Matched historical rates"
@@ -2411,9 +2991,10 @@ class MainWindow(Adw.ApplicationWindow):
                 float(index + 1),
                 self._build_accessible_usage_day_summary(index),
             ])
+            period_name = "months" if self.usage_period_mode != "recent" else "days"
             values[1] = (
-                "Daily usage history, newest day first. Use the left and right arrow keys "
-                "to review individual days."
+                "Usage history. Use the left and right arrow keys "
+                f"to review individual {period_name}."
             )
             if 0 <= self.usage_chart_selected_index < len(self.usage_chart_points):
                 values[1] = self._build_accessible_usage_day_summary(self.usage_chart_selected_index)
@@ -2433,10 +3014,11 @@ class MainWindow(Adw.ApplicationWindow):
 
         day = self.usage_chart_daily_data[index]
         date = day.get("date") or self.usage_chart_dates[index]
-        parts = [f"{date}."]
+        parts = [f"{self._format_usage_period_label(date)}."]
         kwh = day.get("kwh")
         if kwh is not None:
-            parts.append(f"{float(kwh):.2f} kilowatt hours.")
+            unit = "kilowatt hours per day" if day.get("is_month") else "kilowatt hours"
+            parts.append(f"{float(kwh):.2f} {unit}.")
 
         energy_cost = day.get("energy_cost_gbp")
         standing_charge = day.get("standing_charge_gbp")
@@ -2451,7 +3033,8 @@ class MainWindow(Adw.ApplicationWindow):
         quality_note = self._describe_usage_day_quality(day)
         if quality_note:
             parts.append(f"{quality_note}.")
-        parts.append(f"Day {index + 1} of {len(self.usage_chart_points)}.")
+        period_name = "Month" if self.usage_period_mode != "recent" else "Day"
+        parts.append(f"{period_name} {index + 1} of {len(self.usage_chart_points)}.")
         return " ".join(parts)
 
     def on_usage_chart_motion(self, _controller, x, _y):
@@ -2463,12 +3046,12 @@ class MainWindow(Adw.ApplicationWindow):
 
         if index != self.usage_chart_hovered_index:
             self.usage_chart_hovered_index = index
-            self.usage_chart_area.queue_draw()
+            self._queue_usage_chart_interaction_draw()
 
     def on_usage_chart_leave(self, _controller):
         if self.usage_chart_hovered_index != -1:
             self.usage_chart_hovered_index = -1
-            self.usage_chart_area.queue_draw()
+            self._queue_usage_chart_interaction_draw()
 
     def on_usage_chart_click(self, _gesture, _n_press, x, _y):
         index = self._get_usage_chart_index_at_x(x)
@@ -2510,28 +3093,13 @@ class MainWindow(Adw.ApplicationWindow):
         return max(-100.0, min(100.0, ((recent_avg - previous_avg) / previous_avg) * 100.0))
 
     def _get_complete_daily_costs(self, daily_costs, synced_at):
-        latest_complete_day = None
-        if synced_at:
-            try:
-                synced_dt = datetime.fromisoformat(synced_at.replace("Z", "+00:00"))
-                if synced_dt.tzinfo is None:
-                    synced_dt = synced_dt.replace(tzinfo=timezone.utc)
-                latest_complete_day = synced_dt.astimezone(timezone.utc).date()
-                if synced_dt.time() != datetime.min.time():
-                    latest_complete_day = latest_complete_day - timedelta(days=1)
-            except (TypeError, ValueError):
-                latest_complete_day = None
-
         complete_daily_costs = []
         for day in daily_costs:
-            if day.get("missing_rate_count", 0) != 0 or day.get("sample_count", 0) < 48:
-                continue
-
-            try:
-                day_date = datetime.fromisoformat(day.get("date")).date()
-            except (TypeError, ValueError):
-                continue
-            if latest_complete_day and day_date > latest_complete_day:
+            if day.get("missing_rate_count", 0) != 0 or not is_complete_usage_day(
+                day.get("date"),
+                day.get("sample_count", 0),
+                synced_at,
+            ):
                 continue
 
             complete_daily_costs.append(day)
@@ -2542,17 +3110,6 @@ class MainWindow(Adw.ApplicationWindow):
         if not self.all_prices:
             return 0.25
         return sum(p['price_gbp'] for p in self.all_prices) / len(self.all_prices)
-
-    def _get_recent_price_trend_pct(self):
-        if len(self.all_prices) < 48:
-            return 0.0
-        recent = self.all_prices[-24:]
-        previous = self.all_prices[-48:-24]
-        recent_avg = sum(p['price_gbp'] for p in recent) / len(recent)
-        previous_avg = sum(p['price_gbp'] for p in previous) / len(previous)
-        if previous_avg == 0:
-            return 0.0
-        return ((recent_avg - previous_avg) / previous_avg) * 100.0
 
     def _get_standing_charge_gbp_per_day(self):
         selected_tariff_code = self.settings.get_string("selected-tariff-code")
@@ -2606,11 +3163,14 @@ class MainWindow(Adw.ApplicationWindow):
 
         day = self.usage_chart_daily_data[index]
         date = day.get("date") or self.usage_chart_dates[index]
-        lines = [f"<b>{GLib.markup_escape_text(date)}</b>"]
+        lines = [f"<b>{GLib.markup_escape_text(self._format_usage_period_label(date))}</b>"]
 
         kwh = day.get("kwh")
         if kwh is not None:
-            lines.append(f"{float(kwh):.2f} kWh")
+            suffix = "/day" if day.get("is_month") else ""
+            lines.append(f"{float(kwh):.2f} kWh{suffix}")
+        if day.get("is_month"):
+            lines.append(f"{day.get('day_count', 0)} complete days")
 
         energy_cost = day.get("energy_cost_gbp")
         total_cost = day.get("total_cost_gbp")
@@ -2624,7 +3184,10 @@ class MainWindow(Adw.ApplicationWindow):
 
         if day.get("missing_rate_count", 0):
             lines.append("Historical rates incomplete")
-        elif day.get("sample_count") and day.get("sample_count", 0) < 48:
+        elif day.get("sample_count") and not is_complete_usage_day(
+            day.get("date"),
+            day.get("sample_count", 0),
+        ):
             lines.append("Partial usage day")
         elif total_cost is not None:
             lines.append("Matched historical rates")
@@ -2665,6 +3228,46 @@ class MainWindow(Adw.ApplicationWindow):
             for base_component, tint_component in zip(base_color, tint_color, strict=True)
         )
 
+    def _draw_usage_chart_interaction(self, area, cr, width, height):
+        if not self.usage_chart_points:
+            return
+
+        margin_left = getattr(self, "usage_chart_margin_left", 45)
+        margin_right = getattr(self, "usage_chart_margin_right", 15)
+        margin_top = getattr(self, "usage_chart_margin_top", 20)
+        margin_bottom = getattr(self, "usage_chart_margin_bottom", 30)
+        chart_width = width - margin_left - margin_right
+        chart_height = height - margin_top - margin_bottom
+        if chart_width <= 0 or chart_height <= 0:
+            return
+
+        style_context = area.get_style_context()
+        fg_color = style_context.get_color()
+        accent_color = self._lookup_style_color(
+            style_context,
+            ("accent_color", "accent_bg_color", "blue_4"),
+            (0.2, 0.4, 0.8),
+        )
+        hover_color = self._mix_colors(
+            accent_color,
+            (fg_color.red, fg_color.green, fg_color.blue),
+            0.4,
+        )
+        for index in {self.usage_chart_hovered_index, self.usage_chart_selected_index}:
+            if not (0 <= index < len(self.usage_chart_points)):
+                continue
+            left_x = margin_left + (index * chart_width) / len(self.usage_chart_points)
+            right_x = margin_left + ((index + 1) * chart_width) / len(self.usage_chart_points)
+            self._draw_usage_day_selection(
+                cr,
+                hover_color,
+                left_x,
+                right_x,
+                margin_top,
+                chart_height,
+                index == self.usage_chart_selected_index,
+            )
+
     def _draw_usage_chart(self, _area, cr, width, height):
         margin_left = getattr(self, "usage_chart_margin_left", 45)
         margin_right = getattr(self, "usage_chart_margin_right", 15)
@@ -2683,7 +3286,13 @@ class MainWindow(Adw.ApplicationWindow):
             return
 
         points = self.usage_chart_points
-        range_values = list(points) + list(self.usage_chart_rolling_average)
+        range_values = [
+            value
+            for value in [*points, *self.usage_chart_rolling_average]
+            if value is not None
+        ]
+        if self.usage_chart_reference_value is not None:
+            range_values.append(float(self.usage_chart_reference_value))
         if self.usage_graph_mode == "total_cost_gbp":
             for day in self.usage_chart_daily_data:
                 standing_charge = day.get("standing_charge_gbp")
@@ -2724,7 +3333,7 @@ class MainWindow(Adw.ApplicationWindow):
         cr.set_font_size(10)
         cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
 
-        self._draw_usage_day_boundaries(
+        self._draw_usage_period_context(
             cr,
             fg_color,
             width,
@@ -2771,7 +3380,6 @@ class MainWindow(Adw.ApplicationWindow):
         success, color = style_context.lookup_color("green_4")
         negative_color = (color.red, color.green, color.blue) if success else (0.2, 0.8, 0.2)
         standing_color = self._mix_colors(fg_rgb, accent_color, 0.18)
-        hover_color = self._mix_colors(accent_color, fg_rgb, 0.4)
 
         for idx, value in enumerate(points):
             bar_x_start = margin_left + (idx * chart_width) / len(points)
@@ -2780,18 +3388,6 @@ class MainWindow(Adw.ApplicationWindow):
             bar_width = max(1, round(bar_x_end) - bar_x)
             day = self.usage_chart_daily_data[idx] if idx < len(self.usage_chart_daily_data) else {}
             lower_confidence = self._usage_day_has_lower_confidence(day)
-            active = idx in (self.usage_chart_selected_index, self.usage_chart_hovered_index)
-            if active:
-                self._draw_usage_day_selection(
-                    cr,
-                    hover_color,
-                    bar_x_start,
-                    bar_x_end,
-                    margin_top,
-                    chart_height,
-                    idx == self.usage_chart_selected_index,
-                )
-
             if self.usage_graph_mode == "total_cost_gbp":
                 self._draw_total_usage_bar(
                     cr,
@@ -2829,6 +3425,15 @@ class MainWindow(Adw.ApplicationWindow):
             chart_height,
             accent_color,
         )
+        self._draw_usage_reference_line(
+            cr,
+            accent_color,
+            margin_left,
+            chart_width,
+            zero_y,
+            value_range,
+            chart_height,
+        )
 
         cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, 0.5)
         cr.set_font_size(9 if is_compact_width(width) else 10)
@@ -2838,7 +3443,7 @@ class MainWindow(Adw.ApplicationWindow):
             if not self.usage_chart_dates or idx >= len(self.usage_chart_dates) or idx == last_index:
                 continue
 
-            date_label = self.usage_chart_dates[idx]
+            date_label = self._format_usage_axis_label(self.usage_chart_dates[idx])
             extents = cr.text_extents(date_label)
             bar_x_center = margin_left + ((idx + 0.5) * chart_width) / len(points)
             text_x = round(bar_x_center - extents.width / 2)
@@ -2847,15 +3452,36 @@ class MainWindow(Adw.ApplicationWindow):
             cr.show_text(date_label)
 
         if self.usage_chart_dates:
-            last_label = self.usage_chart_dates[last_index]
+            last_label = self._format_usage_axis_label(self.usage_chart_dates[last_index])
             extents = cr.text_extents(last_label)
             text_x = margin_left + chart_width - extents.width
             text_y = height - 10
             cr.move_to(text_x, text_y)
             cr.show_text(last_label)
 
-    def _draw_usage_day_boundaries(self, cr, fg_color, width, margin_left, margin_top, chart_width, chart_height):
+    def _draw_usage_period_context(
+        self,
+        cr,
+        fg_color,
+        width,
+        margin_left,
+        margin_top,
+        chart_width,
+        chart_height,
+    ):
         if len(self.usage_chart_dates) < 2:
+            return
+
+        if self.usage_period_mode != "recent":
+            self._draw_usage_seasonal_context(
+                cr,
+                fg_color,
+                width,
+                margin_left,
+                margin_top,
+                chart_width,
+                chart_height,
+            )
             return
 
         previous_month = None
@@ -2889,9 +3515,92 @@ class MainWindow(Adw.ApplicationWindow):
             cr.show_text(month_label)
             previous_month = day_date.month
 
+    def _draw_usage_seasonal_context(
+        self,
+        cr,
+        fg_color,
+        width,
+        margin_left,
+        margin_top,
+        chart_width,
+        chart_height,
+    ):
+        parsed_dates = []
+        for date_label in self.usage_chart_dates:
+            try:
+                parsed_dates.append(datetime.fromisoformat(date_label).date())
+            except (TypeError, ValueError):
+                parsed_dates.append(None)
+
+        slot_count = len(parsed_dates)
+        for index, month_date in enumerate(parsed_dates):
+            if month_date is None:
+                continue
+            quarter = ((month_date.month - 1) // 3) + 1
+            left_x = margin_left + (index * chart_width) / slot_count
+            right_x = margin_left + ((index + 1) * chart_width) / slot_count
+            if quarter % 2 == 0:
+                cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, 0.025)
+                cr.rectangle(left_x, margin_top, right_x - left_x, chart_height)
+                cr.fill()
+
+            if index == 0 or month_date.month not in (1, 4, 7, 10):
+                continue
+
+            is_year_boundary = month_date.month == 1
+            cr.set_source_rgba(
+                fg_color.red,
+                fg_color.green,
+                fg_color.blue,
+                0.24 if is_year_boundary else 0.11,
+            )
+            cr.set_line_width(1.5 if is_year_boundary else 1.0)
+            cr.move_to(round(left_x) + 0.5, margin_top + 3)
+            cr.line_to(round(left_x) + 0.5, margin_top + chart_height)
+            cr.stroke()
+
+            label = str(month_date.year) if is_year_boundary else f"Q{quarter}"
+            cr.set_font_size(9 if is_compact_width(width) else 10)
+            extents = cr.text_extents(label)
+            cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, 0.46)
+            cr.move_to(left_x + 5, margin_top + extents.height + 2)
+            cr.show_text(label)
+
+    def _draw_usage_reference_line(
+        self,
+        cr,
+        color,
+        margin_left,
+        chart_width,
+        zero_y,
+        value_range,
+        chart_height,
+    ):
+        if self.usage_period_mode == "recent" or self.usage_chart_reference_value is None:
+            return
+
+        reference_value = float(self.usage_chart_reference_value)
+        reference_y = zero_y - (reference_value / value_range) * chart_height
+        cr.save()
+        cr.set_source_rgba(*color, 0.5)
+        cr.set_line_width(1.2)
+        cr.set_dash([5, 4], 0)
+        cr.move_to(margin_left, round(reference_y) + 0.5)
+        cr.line_to(margin_left + chart_width, round(reference_y) + 0.5)
+        cr.stroke()
+        cr.set_dash([], 0)
+
+        label = f"Annual avg {reference_value:.1f}"
+        cr.set_font_size(9)
+        extents = cr.text_extents(label)
+        cr.set_source_rgba(*color, 0.78)
+        cr.move_to(margin_left + chart_width - extents.width - 4, reference_y - 4)
+        cr.show_text(label)
+        cr.restore()
+
     def _draw_usage_day_selection(self, cr, color, left_x, right_x, margin_top, chart_height, selected):
         width = max(1, right_x - left_x)
-        alpha = 0.16 if selected else 0.09
+        alpha = 0.17 if selected else 0.055
         cr.save()
         self._rounded_rectangle(cr, left_x + 1, margin_top + 2, max(1, width - 2), chart_height - 4, 6)
         cr.set_source_rgba(color[0], color[1], color[2], alpha)
@@ -2922,7 +3631,14 @@ class MainWindow(Adw.ApplicationWindow):
         rect_width = max(1, bar_width - 1)
 
         cr.set_source_rgba(color[0] * 0.82, color[1] * 0.82, color[2] * 0.82, fill_alpha)
-        cr.rectangle(bar_x, bar_y, rect_width, max(1, bar_height))
+        self._rounded_rectangle(
+            cr,
+            bar_x,
+            bar_y,
+            rect_width,
+            max(1, bar_height),
+            min(2.5, rect_width / 2),
+        )
         cr.fill()
         if lower_confidence:
             self._outline_uncertain_usage_bar(cr, color, bar_x, bar_y, rect_width, max(1, bar_height))
@@ -2949,7 +3665,14 @@ class MainWindow(Adw.ApplicationWindow):
         standing_height = abs(standing_charge / value_range) * chart_height
         standing_y = zero_y - standing_height
         cr.set_source_rgba(standing_color[0], standing_color[1], standing_color[2], fill_alpha * 0.72)
-        cr.rectangle(bar_x, standing_y, rect_width, max(1, standing_height))
+        self._rounded_rectangle(
+            cr,
+            bar_x,
+            standing_y,
+            rect_width,
+            max(1, standing_height),
+            min(2.5, rect_width / 2),
+        )
         cr.fill()
 
         energy_color = negative_color if energy_cost < 0 else energy_color
@@ -2960,7 +3683,14 @@ class MainWindow(Adw.ApplicationWindow):
             energy_y = zero_y
 
         cr.set_source_rgba(energy_color[0] * 0.82, energy_color[1] * 0.82, energy_color[2] * 0.82, fill_alpha)
-        cr.rectangle(bar_x, energy_y, rect_width, max(1, energy_height))
+        self._rounded_rectangle(
+            cr,
+            bar_x,
+            energy_y,
+            rect_width,
+            max(1, energy_height),
+            min(2.5, rect_width / 2),
+        )
         cr.fill()
 
         if lower_confidence:
@@ -3009,16 +3739,44 @@ class MainWindow(Adw.ApplicationWindow):
         cr.restore()
 
     def _trace_usage_line(self, cr, values, margin_left, chart_width, zero_y, value_range, chart_height):
+        path_started = False
         for index, value in enumerate(values):
+            if value is None:
+                path_started = False
+                continue
             point_x = margin_left + ((index + 0.5) * chart_width) / len(values)
             point_y = zero_y - (value / value_range) * chart_height
-            if index == 0:
+            if not path_started:
                 cr.move_to(point_x, point_y)
+                path_started = True
             else:
                 cr.line_to(point_x, point_y)
 
     def _usage_day_has_lower_confidence(self, day):
-        return bool(day.get("missing_rate_count", 0)) or bool(day.get("sample_count") and day.get("sample_count", 0) < 48)
+        if day.get("is_month"):
+            return day.get("day_count", 0) < day.get("expected_days", 0)
+        return bool(day.get("missing_rate_count", 0)) or bool(
+            day.get("sample_count")
+            and not is_complete_usage_day(day.get("date"), day.get("sample_count", 0))
+        )
+
+    def _format_usage_period_label(self, date_text):
+        try:
+            day = datetime.fromisoformat(date_text).date()
+        except (TypeError, ValueError):
+            return date_text or "Unknown period"
+        if self.usage_period_mode != "recent":
+            return day.strftime("%B %Y")
+        return f"{day.strftime('%A')} {day.day} {day.strftime('%B %Y')}"
+
+    def _format_usage_axis_label(self, date_text):
+        try:
+            day = datetime.fromisoformat(date_text).date()
+        except (TypeError, ValueError):
+            return date_text or ""
+        if self.usage_period_mode != "recent":
+            return day.strftime("%b")
+        return f"{day.day} {day.strftime('%b')}"
 
     def _rounded_rectangle(self, cr, x, y, width, height, radius):
         radius = min(radius, width / 2, height / 2)

@@ -150,6 +150,20 @@ class UsageInsightsTests(unittest.TestCase):
 
         self.assertEqual(result["trend_text"], "+0.0%")
 
+    def test_headline_average_excludes_partial_latest_day(self):
+        samples = self._daily_samples(7, lambda _day: 10)
+        for slot in range(12):
+            samples.append({
+                "interval_start": f"2026-03-08T{slot // 2:02d}:{'30' if slot % 2 else '00'}:00Z",
+                "consumption": 5.0,
+            })
+
+        result = build_usage_insight_data(samples, "2026-03-08T12:00:00Z")
+
+        self.assertEqual(result["avg_text"], "10.00 kWh/day")
+        self.assertEqual(result["monthly_text"], "300 kWh")
+        self.assertIsNone(result["chart_rolling_average"][-1])
+
     def test_trend_needs_fourteen_complete_days(self):
         samples = self._daily_samples(13, lambda _day: 10)
 

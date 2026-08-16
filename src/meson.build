@@ -41,6 +41,7 @@ install_data(
     'price_formatting.py',
     'usage_history.py',
     'usage_insights.py',
+    'usage_seasonality.py',
     'time_formatting.py',
     'uk_time.py',
     'price_logic.py',

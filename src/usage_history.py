@@ -10,11 +10,16 @@ from .octopus_api import OctopusApiError, get_json
 from .price_bands import PRICE_BAND_VERSION
 from .price_logic import build_dual_register_price_windows, extract_product_code
 from .uk_time import UK_TIMEZONE
+from .usage_seasonality import (
+    USAGE_ARCHIVE_DAYS,
+    build_daily_usage_archive,
+    merge_daily_usage_archive,
+)
 
 logger = logging.getLogger(__name__)
 USAGE_HISTORY_DAYS = 120
 USAGE_REFRESH_OVERLAP_DAYS = 7
-USAGE_CACHE_VERSION = 2
+USAGE_CACHE_VERSION = 4
 ACCOUNT_NUMBER_PATTERN = re.compile(r"A-[A-Z0-9]+", re.IGNORECASE)
 
 
@@ -36,7 +41,20 @@ def fetch_recent_usage_samples(account_data, period_from=None, now=None):
     now = now or datetime.now(timezone.utc)
     if period_from is None:
         period_from = now - timedelta(days=USAGE_HISTORY_DAYS)
+    return _fetch_usage_samples(account_data, period_from, now)
+
+
+def fetch_daily_usage_archive(account_data, period_from=None, now=None):
+    now = now or datetime.now(timezone.utc)
+    if period_from is None:
+        period_from = now - timedelta(days=USAGE_ARCHIVE_DAYS)
+    samples = _fetch_usage_samples(account_data, period_from, now, group_by="day")
+    return build_daily_usage_archive(samples)
+
+
+def _fetch_usage_samples(account_data, period_from, now, group_by=None):
     period_from_text = _format_octopus_datetime(period_from)
+    period_to_text = _format_octopus_datetime(now)
 
     for property_data in account_data.get("properties", []):
         for meter_point in property_data.get("electricity_meter_points", []):
@@ -50,16 +68,19 @@ def fetch_recent_usage_samples(account_data, period_from=None, now=None):
                 if not mpan or not serial_number:
                     continue
 
+                query = {
+                    "period_from": period_from_text,
+                    "period_to": period_to_text,
+                    "order_by": "period",
+                    "page_size": 500 if group_by else 250,
+                }
+                if group_by:
+                    query["group_by"] = group_by
+
                 url = (
                     f"https://api.octopus.energy/v1/electricity-meter-points/{quote(str(mpan), safe='')}"
                     f"/meters/{quote(str(serial_number), safe='')}/consumption/?"
-                    + urlencode(
-                        {
-                            "period_from": period_from_text,
-                            "order_by": "period",
-                            "page_size": 250,
-                        }
-                    )
+                    + urlencode(query)
                 )
 
                 try:
@@ -106,7 +127,35 @@ def get_usage_refresh_start(cached_data, now=None):
     return max(history_start, overlap_start)
 
 
-def merge_usage_history(cached_data, fresh_samples, fresh_daily_costs, now=None):
+def get_usage_archive_refresh_start(cached_data, now=None):
+    """Return a bounded start for a compact, local-day seasonal refresh."""
+    now = now or datetime.now(timezone.utc)
+    archive_start = now - timedelta(days=USAGE_ARCHIVE_DAYS)
+    cached_data = _compatible_usage_cache(cached_data)
+    if not cached_data:
+        return archive_start
+
+    archive_dates = []
+    for record in cached_data.get("daily_usage_archive", []):
+        try:
+            archive_dates.append(datetime.fromisoformat(record.get("date")).date())
+        except (TypeError, ValueError):
+            continue
+    if not archive_dates:
+        return archive_start
+
+    overlap_day = max(archive_dates) - timedelta(days=USAGE_REFRESH_OVERLAP_DAYS)
+    overlap_start = datetime.combine(overlap_day, datetime.min.time(), tzinfo=UK_TIMEZONE)
+    return max(archive_start, overlap_start.astimezone(timezone.utc))
+
+
+def merge_usage_history(
+    cached_data,
+    fresh_samples,
+    fresh_daily_costs,
+    now=None,
+    fresh_daily_archive=None,
+):
     """Merge refreshed overlap data into a bounded, current usage cache payload."""
     now = now or datetime.now(timezone.utc)
     history_start = now - timedelta(days=USAGE_HISTORY_DAYS)
@@ -142,6 +191,11 @@ def merge_usage_history(cached_data, fresh_samples, fresh_daily_costs, now=None)
     return {
         "samples": merged_samples,
         "daily_costs": [daily_costs_by_date[day] for day in sorted(daily_costs_by_date)],
+        "daily_usage_archive": merge_daily_usage_archive(
+            cached_data.get("daily_usage_archive", []),
+            fresh_daily_archive if fresh_daily_archive is not None else build_daily_usage_archive(fresh_samples),
+            now,
+        ),
         "cache_version": USAGE_CACHE_VERSION,
         "price_band_version": PRICE_BAND_VERSION,
         "synced_at": now.isoformat(),
@@ -155,6 +209,7 @@ def _compatible_usage_cache(cached_data):
         or cached_data.get("price_band_version") != PRICE_BAND_VERSION
         or not isinstance(cached_data.get("samples"), list)
         or not isinstance(cached_data.get("daily_costs"), list)
+        or not isinstance(cached_data.get("daily_usage_archive"), list)
     ):
         return None
     return cached_data

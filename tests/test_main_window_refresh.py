@@ -7,7 +7,9 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from src.price_bands import PRICE_BAND_VERSION
 from src.ui.main_window import MainWindow
+from src.usage_history import USAGE_CACHE_VERSION
 
 
 class PriceRefreshCoordinationTests(unittest.TestCase):
@@ -190,6 +192,88 @@ class PlanWorkspaceTests(unittest.TestCase):
         MainWindow.on_window_width_changed(window, None, None)
 
         window._refresh_adaptive_layout.assert_called_once_with()
+
+
+class UsageRefreshTests(unittest.TestCase):
+    def test_long_usage_ranges_select_the_requested_number_of_months(self):
+        months = [
+            {
+                "month_start": f"{2020 + index // 12:04d}-{index % 12 + 1:02d}-01",
+                "average_kwh": float(index + 1),
+                "day_count": 28,
+                "expected_days": 28,
+            }
+            for index in range(72)
+        ]
+        insight = {"seasonal": {"chart_months": months}}
+
+        for mode, expected_months in (
+            ("12-months", 12),
+            ("24-months", 24),
+            ("5-years", 60),
+        ):
+            window = SimpleNamespace(usage_period_mode=mode)
+            points, dates, unit, daily_data, rolling = MainWindow._get_usage_chart_series(
+                window,
+                insight,
+                [],
+            )
+            self.assertEqual(len(points), expected_months)
+            self.assertEqual(len(dates), expected_months)
+            self.assertEqual(len(daily_data), expected_months)
+            self.assertEqual(len(rolling), expected_months)
+            self.assertEqual(unit, "kWh")
+
+    def test_old_usage_cache_is_not_fresh_without_seasonal_archive(self):
+        window = SimpleNamespace(
+            _get_usage_cache=Mock(
+                return_value=(
+                    {
+                        "cache_version": USAGE_CACHE_VERSION - 1,
+                        "price_band_version": PRICE_BAND_VERSION,
+                        "samples": [],
+                        "daily_costs": [],
+                    },
+                    100.0,
+                )
+            )
+        )
+
+        with patch("src.ui.main_window.time.time", return_value=101.0):
+            self.assertFalse(MainWindow._usage_cache_is_fresh(window, "A-TEST"))
+
+    def test_current_usage_cache_with_archive_can_be_fresh(self):
+        window = SimpleNamespace(
+            _get_usage_cache=Mock(
+                return_value=(
+                    {
+                        "cache_version": USAGE_CACHE_VERSION,
+                        "price_band_version": PRICE_BAND_VERSION,
+                        "samples": [],
+                        "daily_costs": [],
+                        "daily_usage_archive": [],
+                    },
+                    100.0,
+                )
+            )
+        )
+
+        with patch("src.ui.main_window.time.time", return_value=101.0):
+            self.assertTrue(MainWindow._usage_cache_is_fresh(window, "A-TEST"))
+
+    def test_seasonal_view_keeps_cost_modes_disabled(self):
+        window = SimpleNamespace(
+            usage_period_mode="12-months",
+            usage_graph_mode="kwh",
+            usage_energy_cost_button=Mock(),
+            usage_total_cost_button=Mock(),
+            usage_kwh_button=Mock(),
+        )
+
+        MainWindow._set_usage_cost_graph_controls_enabled(window, True)
+
+        window.usage_energy_cost_button.set_sensitive.assert_called_once_with(False)
+        window.usage_total_cost_button.set_sensitive.assert_called_once_with(False)
 
 
 if __name__ == "__main__":
