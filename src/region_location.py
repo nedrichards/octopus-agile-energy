@@ -10,8 +10,9 @@ from __future__ import annotations
 import json
 import math
 import secrets
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 REGION_DATA_PATH = "/app/share/octopusagile/gb-electricity-regions.geojson"
 
@@ -70,7 +71,7 @@ def load_region_features(path: str | Path = REGION_DATA_PATH) -> list[dict[str, 
         data = json.load(data_file)
     features = data.get("features")
     if not isinstance(features, list):
-        raise ValueError("The bundled electricity-region data has no features list.")
+        raise TypeError("The bundled electricity-region data has no features list.")
     return features
 
 
@@ -215,10 +216,10 @@ def is_clearly_outside_uk(latitude: float, longitude: float) -> bool:
 suggest_region_code = find_region_for_coordinates
 
 
-import gi  # noqa: E402  The geometry helpers above deliberately avoid GI imports.
+import gi
 
 gi.require_version("Gio", "2.0")
-from gi.repository import Gio, GLib  # noqa: E402
+from gi.repository import Gio, GLib
 
 
 class LocationPortal:
