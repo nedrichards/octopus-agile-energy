@@ -14,6 +14,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
 from ..find_cheapest_presentation import (
     build_find_cheapest_presentation,
+    build_fixed_start_presentation,
     format_duration,
     format_price_delta,
     format_time_window,
@@ -22,7 +23,7 @@ from ..find_cheapest_presentation import (
 from ..octopus_api import OctopusApiError
 from ..price_bands import PRICE_BAND_NEGATIVE, PRICE_BAND_VERSION, get_price_band
 from ..price_formatting import format_gbp, format_unit_price_gbp
-from ..price_logic import build_dual_register_price_windows, extract_product_code
+from ..price_logic import build_dual_register_price_windows, build_fixed_start_price_window, extract_product_code
 from ..price_logic import find_cheapest_slot as calculate_cheapest_slot
 from ..price_logic import find_cheapest_timer_slot as calculate_cheapest_timer_slot
 from ..secrets_manager import get_api_key
@@ -37,14 +38,18 @@ from ..usage_insights import build_rolling_average, build_usage_insight_data, bu
 from ..utils import CacheManager
 from .adaptive_layout import (
     DEFAULT_CHART_SLOTS,
+    PLAN_COLUMN_SPACING,
+    PLAN_PANE_WIDTH,
     get_chart_content_width,
     get_chart_height,
     get_chart_scroll_value,
     get_chart_slot_count,
     get_content_margin,
+    get_plan_chart_width,
     get_price_summary_mode,
     get_time_label_interval,
     is_compact_width,
+    is_plan_wide_layout,
 )
 from .custom_spin_button import CustomSpinButton
 from .preferences_window import PreferencesWindow
@@ -55,6 +60,7 @@ logger = logging.getLogger(__name__)
 USAGE_BACKGROUND_REFRESH_INTERVAL_SECONDS = 6 * 60 * 60
 SUBTLE_ANIMATION_DURATION_MS = 180
 SUBTLE_ANIMATION_FRAME_MS = 16
+MAIN_VIEW_NAMES = frozenset(("prices", "plan", "usage"))
 
 class MainWindow(Adw.ApplicationWindow):
     """
@@ -88,7 +94,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.setup_window = None
         self.best_slot_start_time = None
         self.best_slot_end_time = None
-        self.is_first_expansion = True
+        self.best_slot_average_price = None
+        self.plan_comparison_start_time = None
         self._fetch_generation = 0
         self.price_refresh_in_progress = False
         self._price_refresh_queued = False
@@ -112,8 +119,9 @@ class MainWindow(Adw.ApplicationWindow):
         self._refresh_button_waiting_for_usage = False
 
         self.connect("notify::visible", self.on_visibility_change)
-        self.connect("notify::width", self.on_window_width_changed)
-        self.connect("notify::height", self.on_window_width_changed)
+        self.connect("notify::default-width", self.on_window_width_changed)
+        self.connect("notify::default-height", self.on_window_width_changed)
+        self.connect("notify::maximized", self.on_window_state_changed)
 
         key_controller = Gtk.EventControllerKey.new()
         key_controller.connect("key-pressed", self.on_key_pressed)
@@ -235,10 +243,15 @@ class MainWindow(Adw.ApplicationWindow):
 
     def on_find_cheapest_action(self, action, param):
         """
-        Handles the find cheapest action by expanding the expander row and focusing the duration spin button.
+        Opens the planning workspace and focuses the duration control.
         """
-        self.expander_row.set_expanded(True)
-        self.duration_spin_button.grab_focus()
+        self.main_view_stack.set_visible_child_name("plan")
+
+        def focus_duration_control():
+            self.duration_spin_button.grab_focus()
+            return False
+
+        GLib.idle_add(focus_duration_control)
 
     def _clamp_float_setting(self, key, minimum, maximum, default):
         value = self.settings.get_double(key)
@@ -251,14 +264,6 @@ class MainWindow(Adw.ApplicationWindow):
         if value < minimum or value > maximum:
             return default
         return value
-
-    def _create_summary_section_row(self, title):
-        row = Adw.ActionRow.new()
-        row.set_title(title)
-        row.set_selectable(False)
-        row.set_activatable(False)
-        row.add_css_class("heading")
-        return row
 
     def _create_summary_value_row(self, title):
         row = Adw.ActionRow.new()
@@ -448,11 +453,8 @@ class MainWindow(Adw.ApplicationWindow):
 
         bottom_content_box = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.bottom_content_box = bottom_content_box
-        bottom_clamp = Adw.Clamp.new()
-        bottom_clamp.set_child(bottom_content_box)
 
         overall_content_box.append(top_clamp)
-        overall_content_box.append(bottom_clamp)
 
         # Create a scrolled window for the entire main content.
         # Adw.ApplicationWindow handles scrolling of its main content, so this Gtk.ScrolledWindow
@@ -485,6 +487,34 @@ class MainWindow(Adw.ApplicationWindow):
         self.usage_state_stack.add_named(self._build_usage_empty_page(), "empty")
         self.usage_state_stack.add_named(self._build_usage_loading_page(), "loading")
         self.usage_state_stack.add_named(usage_scroll, "content")
+
+        # Planning page. It stacks on compact and regular windows, then becomes
+        # a chart-and-controls workspace when enough width is available.
+        self.plan_page_box = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.plan_content_box = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=PLAN_COLUMN_SPACING)
+        self.plan_content_box.set_valign(Gtk.Align.START)
+        self.plan_page_box.append(self.plan_content_box)
+
+        self.plan_chart_column = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        self.plan_chart_column.set_hexpand(True)
+        self.plan_chart_column.add_css_class("chart-background")
+        self.plan_chart_scroller = Gtk.ScrolledWindow.new()
+        self.plan_chart_scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        self.plan_chart_scroller.set_hexpand(True)
+        self.plan_chart_scroller.set_propagate_natural_height(True)
+        self.plan_price_chart = PriceChartWidget()
+        self.plan_price_chart.set_vexpand(True)
+        self.plan_chart_scroller.set_child(self.plan_price_chart)
+        self.plan_price_chart.set_horizontal_adjustment(
+            self.plan_chart_scroller.get_hadjustment()
+        )
+        self.plan_chart_column.append(self.plan_chart_scroller)
+        self.plan_content_box.append(self.plan_chart_column)
+
+        plan_scroll = Gtk.ScrolledWindow.new()
+        plan_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        plan_scroll.set_vexpand(True)
+        plan_scroll.set_child(self.plan_page_box)
 
         usage_chart_box = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         usage_chart_box.add_css_class("chart-background")
@@ -689,8 +719,8 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.main_view_stack = Adw.ViewStack.new()
         self.main_view_stack.add_titled_with_icon(scrolled_content, "prices", "Prices", "view-list-symbolic")
+        self.main_view_stack.add_titled_with_icon(plan_scroll, "plan", "Plan", "alarm-symbolic")
         self.main_view_stack.add_titled_with_icon(self.usage_state_stack, "usage", "Usage", "preferences-system-symbolic")
-        self.main_view_stack.connect("notify::visible-child-name", self.on_visible_tab_changed)
 
         view_switcher = Adw.ViewSwitcher.new()
         view_switcher.set_stack(self.main_view_stack)
@@ -760,19 +790,33 @@ class MainWindow(Adw.ApplicationWindow):
         self.price_chart = PriceChartWidget()
         self.price_chart.set_vexpand(True)
         self.chart_scroller.set_child(self.price_chart)
+        self.price_chart.set_horizontal_adjustment(self.chart_scroller.get_hadjustment())
         chart_box.append(self.chart_scroller)
 
-        overall_content_box.insert_child_after(chart_box, top_clamp)
+        self.price_chart_section = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        self.price_chart_section.append(chart_box)
+        self.price_chart_section.append(bottom_content_box)
+        overall_content_box.insert_child_after(self.price_chart_section, top_clamp)
 
-        # --- New section for finding the best slot ---
-        expander_group = Adw.PreferencesGroup()
-        bottom_content_box.append(expander_group)
+        # Planning controls and results remain visible in their own workspace.
+        self.plan_pane = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=18)
+        self.plan_pane.set_valign(Gtk.Align.START)
+        self.plan_result_group = Adw.PreferencesGroup()
+        self.plan_result_group.set_title("Cheapest time")
+        self.plan_result_group.set_description("The lowest average price for your selected duration.")
 
-        self.expander_row = Adw.ExpanderRow()
-        self.expander_row.set_title("Find Cheapest Time")
-        self.expander_row.set_subtitle("Find the cheapest time to use electricity")
-        self.expander_row.connect("notify::expanded", self.on_expander_row_activated)
-        expander_group.add(self.expander_row)
+        self.plan_controls_group = Adw.PreferencesGroup()
+        self.plan_controls_group.set_title("Plan a run")
+        self.plan_controls_group.set_description(
+            "Choose an appliance run time and compare the cheapest exact and timer-friendly windows."
+        )
+        self.plan_pane.append(self.plan_controls_group)
+        self.plan_pane.append(self.plan_result_group)
+
+        self.plan_timer_group = Adw.PreferencesGroup()
+        self.plan_timer_group.set_title("Appliance timers")
+        self.plan_pane.append(self.plan_timer_group)
+        self.plan_content_box.append(self.plan_pane)
 
         # --- Duration input ---
         self.duration_row = Adw.ActionRow.new()
@@ -788,7 +832,7 @@ class MainWindow(Adw.ApplicationWindow):
         )
         self.duration_row.add_suffix(self.duration_spin_button)
         self.duration_spin_button.connect('value-changed', self.on_find_cheapest_slot_triggered)
-        self.expander_row.add_row(self.duration_row)
+        self.plan_controls_group.add(self.duration_row)
 
         # --- Start within input ---
         self.start_within_row = Adw.ActionRow.new()
@@ -804,7 +848,7 @@ class MainWindow(Adw.ApplicationWindow):
         )
         self.start_within_row.add_suffix(self.start_within_spin_button)
         self.start_within_spin_button.connect('value-changed', self.on_find_cheapest_slot_triggered)
-        self.expander_row.add_row(self.start_within_row)
+        self.plan_controls_group.add(self.start_within_row)
 
         # --- Result summary ---
         self.best_slot_message_row = Adw.ActionRow.new()
@@ -812,40 +856,60 @@ class MainWindow(Adw.ApplicationWindow):
         self.best_slot_message_row.set_selectable(False)
         self.best_slot_message_row.set_activatable(False)
         self.best_slot_message_row.add_css_class("dim-label")
-        self.expander_row.add_row(self.best_slot_message_row)
+        self.plan_result_group.add(self.best_slot_message_row)
 
-        self.cheapest_summary_row = self._create_summary_section_row("Cheapest")
-        self.expander_row.add_row(self.cheapest_summary_row)
         self.best_slot_result_row, self.best_slot_result_label = self._create_summary_value_row("Best window")
-        self.expander_row.add_row(self.best_slot_result_row)
+        self.plan_result_group.add(self.best_slot_result_row)
         self.average_price_row, self.average_price_label = self._create_summary_value_row("Average price")
-        self.expander_row.add_row(self.average_price_row)
+        self.plan_result_group.add(self.average_price_row)
 
-        self.timer_summary_row = self._create_summary_section_row("Appliance timers")
-        self.expander_row.add_row(self.timer_summary_row)
+        self.comparison_message_row = Adw.ActionRow.new()
+        self.comparison_message_row.set_title("Select a half-hour on the chart to compare another start time.")
+        self.comparison_message_row.set_selectable(False)
+        self.comparison_message_row.set_activatable(False)
+        self.comparison_message_row.add_css_class("dim-label")
+        self.plan_result_group.add(self.comparison_message_row)
+        self.comparison_window_row, self.comparison_window_label = self._create_summary_value_row(
+            "Selected start"
+        )
+        self.plan_result_group.add(self.comparison_window_row)
+        self.comparison_price_row, self.comparison_price_label = self._create_summary_value_row(
+            "Selected average"
+        )
+        self.plan_result_group.add(self.comparison_price_row)
+        self.comparison_delta_row, self.comparison_delta_label = self._create_summary_value_row(
+            "Compared with cheapest"
+        )
+        self.plan_result_group.add(self.comparison_delta_row)
+
         self.start_timer_row, self.timer_label = self._create_summary_value_row("Start in")
-        self.expander_row.add_row(self.start_timer_row)
+        self.plan_timer_group.add(self.start_timer_row)
         self.finish_timer_row, self.finish_time_label = self._create_summary_value_row("Finish in")
-        self.expander_row.add_row(self.finish_timer_row)
+        self.plan_timer_group.add(self.finish_timer_row)
 
         self.best_slot_result_rows = [
-            self.cheapest_summary_row,
             self.best_slot_result_row,
             self.average_price_row,
-            self.timer_summary_row,
             self.start_timer_row,
             self.finish_timer_row,
         ]
-        self.best_slot_message_row.set_visible(False)
+        self.comparison_result_rows = [
+            self.comparison_window_row,
+            self.comparison_price_row,
+            self.comparison_delta_row,
+        ]
+        self.best_slot_message_row.set_visible(True)
+        self.plan_timer_group.set_visible(False)
         for row in self.best_slot_result_rows:
+            row.set_visible(False)
+        for row in self.comparison_result_rows:
             row.set_visible(False)
         # --- End of new section ---
 
         self.time_label = Gtk.Label.new()
         self.time_label.set_markup("<span size='small'>Last updated: Never</span>")
         self.time_label.set_halign(Gtk.Align.END)
-        self.time_label.set_margin_top(12)
-        self.time_label.set_margin_end(10)
+        self.time_label.set_margin_top(4)
         bottom_content_box.append(self.time_label)
 
         # Status label for persistent error messages.
@@ -859,6 +923,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.toast_overlay = Adw.ToastOverlay.new()
         self.toast_overlay.set_child(root_vbox) # The root_vbox (containing header and scrolled content) is the child.
         self.set_content(self.toast_overlay) # Set the toast overlay as the main window content.
+        self.main_view_stack.set_visible_child_name(self._get_saved_main_view_name())
+        self.main_view_stack.connect("notify::visible-child-name", self.on_visible_tab_changed)
         GLib.idle_add(self._refresh_adaptive_layout)
 
     def _animations_enabled(self):
@@ -971,6 +1037,9 @@ class MainWindow(Adw.ApplicationWindow):
     def on_window_width_changed(self, widget, _pspec):
         self._refresh_adaptive_layout()
 
+    def on_window_state_changed(self, widget, _pspec):
+        GLib.idle_add(self._refresh_adaptive_layout)
+
     def _refresh_adaptive_layout(self):
         width = self.get_width() or self.settings.get_int("window-width")
         if width <= 0:
@@ -994,13 +1063,17 @@ class MainWindow(Adw.ApplicationWindow):
         self.usage_page_box.set_margin_bottom(margin)
         self.usage_page_box.set_margin_start(margin)
         self.usage_page_box.set_margin_end(margin)
+        self.plan_page_box.set_margin_top(margin)
+        self.plan_page_box.set_margin_bottom(margin)
+        self.plan_page_box.set_margin_start(margin)
+        self.plan_page_box.set_margin_end(margin)
         self.usage_content_box.set_spacing(12 if compact else 16)
 
         chart_margin = max(8, margin - 2)
-        self.chart_box.set_margin_top(chart_margin)
-        self.chart_box.set_margin_bottom(chart_margin)
-        self.chart_box.set_margin_start(chart_margin)
-        self.chart_box.set_margin_end(chart_margin)
+        self.price_chart_section.set_margin_top(chart_margin)
+        self.price_chart_section.set_margin_bottom(chart_margin)
+        self.price_chart_section.set_margin_start(chart_margin)
+        self.price_chart_section.set_margin_end(chart_margin)
         self.usage_chart_box.set_margin_top(chart_margin)
         self.usage_chart_box.set_margin_bottom(chart_margin)
         self.usage_chart_box.set_margin_start(chart_margin)
@@ -1012,14 +1085,32 @@ class MainWindow(Adw.ApplicationWindow):
         self.usage_chart_mode_box.set_margin_end(mode_padding)
 
         self.time_label.set_halign(Gtk.Align.CENTER if compact else Gtk.Align.END)
-        self.time_label.set_margin_top(10 if compact else 14)
-        self.time_label.set_margin_end(0 if compact else 10)
+        self.time_label.set_margin_top(4)
+        self.time_label.set_margin_end(0)
         self.usage_updated_label.set_halign(Gtk.Align.CENTER if compact else Gtk.Align.END)
         self.usage_updated_label.set_margin_end(0 if compact else 10)
         self.status_label.set_wrap(compact)
 
+        plan_wide = is_plan_wide_layout(width)
+        self.plan_content_box.set_orientation(
+            Gtk.Orientation.HORIZONTAL if plan_wide else Gtk.Orientation.VERTICAL
+        )
+        self.plan_content_box.set_spacing(PLAN_COLUMN_SPACING if plan_wide else 16)
+        self.plan_pane.set_size_request(PLAN_PANE_WIDTH if plan_wide else -1, -1)
+        self.plan_pane.set_hexpand(not plan_wide)
+        self.plan_content_box.reorder_child_after(
+            self.plan_pane,
+            self.plan_chart_column if plan_wide else None,
+        )
+
         chart_slot_count = len(self.chart_prices) if self.chart_prices else DEFAULT_CHART_SLOTS
         self.price_chart.set_compact_mode(compact, width, chart_slot_count)
+        plan_chart_width = get_plan_chart_width(width, margin)
+        self.plan_price_chart.set_compact_mode(
+            is_compact_width(plan_chart_width),
+            plan_chart_width,
+            chart_slot_count,
+        )
         self._set_usage_chart_layout(width)
         self._set_price_summary_mode(price_summary_mode)
         self.header_title_widget.set_visible(not compact)
@@ -1030,15 +1121,36 @@ class MainWindow(Adw.ApplicationWindow):
 
 
 
-    def on_chart_click(self, index):
-        """
-        Handles chart bar clicks. Currently mirrors hover logic but can be expanded.
-        """
+    def on_chart_click(self, chart, index):
+        if chart is not self.plan_price_chart or not (0 <= index < len(chart.prices)):
+            return
+
+        self.plan_comparison_start_time = chart.prices[index]['valid_from']
+        self._update_plan_comparison()
+
+    def _get_saved_main_view_name(self):
+        saved_view = self.settings.get_string("selected-main-view")
+        return saved_view if saved_view in MAIN_VIEW_NAMES else "prices"
 
     def on_visible_tab_changed(self, stack, _pspec):
-        if stack.get_visible_child_name() == "usage":
+        # Hidden stack pages retain their previous allocation. Re-evaluate from
+        # the window after GTK has allocated the newly visible page at the
+        # current maximized/restored size.
+        GLib.idle_add(self._refresh_adaptive_layout)
+
+        visible_page = stack.get_visible_child_name()
+        if visible_page in MAIN_VIEW_NAMES:
+            self.settings.set_string("selected-main-view", visible_page)
+        if visible_page == "usage":
             self._update_usage_insights()
             self.refresh_usage_history_background()
+        elif visible_page == "plan":
+            self.find_cheapest_slot(
+                self.duration_spin_button.get_value(),
+                self.start_within_spin_button.get_value_as_int(),
+            )
+        elif visible_page == "prices" and self.best_slot_start_time:
+            self._scroll_chart_to_time(self.best_slot_start_time)
 
     def on_usage_graph_mode_toggled(self, button, mode):
         if not button.get_active():
@@ -1068,20 +1180,8 @@ class MainWindow(Adw.ApplicationWindow):
 
     def on_find_cheapest_slot_triggered(self, spin_button):
         self._update_find_cheapest_settings()
-        if not self.expander_row.get_expanded():
+        if self.main_view_stack.get_visible_child_name() != "plan":
             return
-
-        self.find_cheapest_slot(
-            self.duration_spin_button.get_value(),
-            self.start_within_spin_button.get_value_as_int(),
-        )
-
-    def on_expander_row_activated(self, expander_row, param):
-        if not expander_row.get_expanded():
-            return
-
-        if self.is_first_expansion:
-            self.is_first_expansion = False
 
         self.find_cheapest_slot(
             self.duration_spin_button.get_value(),
@@ -1090,6 +1190,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def find_cheapest_slot(self, duration_hours, start_within_hours):
         self.price_chart.set_highlight_range(None, None) # Clear previous highlight
+        self.plan_price_chart.set_highlight_range(None, None)
         now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
         cheapest_slot = calculate_cheapest_slot(
             self.all_prices,
@@ -1123,17 +1224,25 @@ class MainWindow(Adw.ApplicationWindow):
             was_visible = self.best_slot_message_row.get_visible()
             self.best_slot_start_time = None
             self.best_slot_end_time = None
+            self.best_slot_average_price = None
             self.best_slot_message_row.set_visible(True)
             for row in self.best_slot_result_rows:
                 row.set_visible(False)
+            self.plan_timer_group.set_visible(False)
             if not was_visible:
                 self._fade_widget_in(self.best_slot_message_row, start_opacity=0.88)
+            self._clear_plan_comparison()
             return
 
         was_visible = self.best_slot_result_row.get_visible()
         best_slot_start_time = presentation["highlight_start"]
         best_slot_end_time = presentation["highlight_end"]
         self.price_chart.set_highlight_range(
+            best_slot_start_time,
+            best_slot_end_time,
+            presentation["highlight_label"],
+        )
+        self.plan_price_chart.set_highlight_range(
             best_slot_start_time,
             best_slot_end_time,
             presentation["highlight_label"],
@@ -1150,11 +1259,50 @@ class MainWindow(Adw.ApplicationWindow):
         self.best_slot_message_row.set_visible(False)
         for row in self.best_slot_result_rows:
             row.set_visible(True)
+        self.plan_timer_group.set_visible(True)
         if not was_visible:
             self._fade_widget_in(self.best_slot_result_row, start_opacity=0.88)
 
         self.best_slot_start_time = best_slot_start_time.astimezone()
         self.best_slot_end_time = best_slot_end_time.astimezone()
+        self.best_slot_average_price = cheapest_slot['average_price_gbp']
+        self._update_plan_comparison()
+
+    def _update_plan_comparison(self):
+        if self.plan_comparison_start_time is None or self.best_slot_average_price is None:
+            self._clear_plan_comparison(show_instruction=True)
+            return
+
+        slot = build_fixed_start_price_window(
+            self.all_prices,
+            self.plan_comparison_start_time,
+            self.duration_spin_button.get_value(),
+        )
+        presentation = build_fixed_start_presentation(slot, self.best_slot_average_price)
+        if not presentation:
+            self._clear_plan_comparison(message="Not enough price data for a run starting here.")
+            return
+
+        self.plan_price_chart.set_comparison_range(
+            presentation["highlight_start"],
+            presentation["highlight_end"],
+        )
+        self.comparison_window_label.set_text(presentation["window_text"])
+        self.comparison_price_label.set_text(presentation["average_price_text"])
+        self.comparison_delta_label.set_text(presentation["comparison_text"])
+        self.comparison_message_row.set_visible(False)
+        for row in self.comparison_result_rows:
+            row.set_visible(True)
+
+    def _clear_plan_comparison(self, message=None, show_instruction=False):
+        self.plan_price_chart.set_comparison_range(None, None)
+        for row in self.comparison_result_rows:
+            row.set_visible(False)
+
+        if show_instruction:
+            message = "Select a half-hour on the chart to compare another start time."
+        self.comparison_message_row.set_title(message or "")
+        self.comparison_message_row.set_visible(bool(message))
 
     def _format_time_window(self, start_time, end_time):
         return format_time_window(start_time, end_time)
@@ -1173,7 +1321,13 @@ class MainWindow(Adw.ApplicationWindow):
         if target_index is None:
             return
 
-        GLib.idle_add(self._scroll_chart_to_index, target_index)
+        GLib.idle_add(self._scroll_chart_to_index, target_index, self.price_chart, self.chart_scroller)
+        GLib.idle_add(
+            self._scroll_chart_to_index,
+            target_index,
+            self.plan_price_chart,
+            self.plan_chart_scroller,
+        )
 
     def _find_chart_index_for_time(self, target_time):
         for index, price in enumerate(self.chart_prices):
@@ -1186,12 +1340,12 @@ class MainWindow(Adw.ApplicationWindow):
 
         return None
 
-    def _scroll_chart_to_index(self, target_index):
-        target_x = self.price_chart.get_bar_start_x(target_index)
+    def _scroll_chart_to_index(self, target_index, chart, scroller):
+        target_x = chart.get_bar_start_x(target_index)
         if target_x is None:
             return False
 
-        adjustment = self.chart_scroller.get_hadjustment()
+        adjustment = scroller.get_hadjustment()
         if adjustment is None:
             return False
 
@@ -1569,6 +1723,21 @@ class MainWindow(Adw.ApplicationWindow):
             len(chart_prices),
         )
         self.price_chart.set_prices(chart_prices, current_index)
+        plan_chart_width = get_plan_chart_width(
+            self.get_width() or self.settings.get_int("window-width"),
+            get_content_margin(self.get_width() or self.settings.get_int("window-width")),
+        )
+        self.plan_price_chart.set_compact_mode(
+            is_compact_width(plan_chart_width),
+            plan_chart_width,
+            len(chart_prices),
+        )
+        self.plan_price_chart.set_prices(chart_prices, current_index)
+        if self.main_view_stack.get_visible_child_name() == "plan":
+            self.find_cheapest_slot(
+                self.duration_spin_button.get_value(),
+                self.start_within_spin_button.get_value_as_int(),
+            )
         chart_signature = tuple(
             (price["valid_from"], price["price_gbp"])
             for price in chart_prices

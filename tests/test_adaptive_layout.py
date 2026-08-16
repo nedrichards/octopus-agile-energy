@@ -10,9 +10,11 @@ from ui.adaptive_layout import (
     get_chart_scroll_value,
     get_chart_slot_count,
     get_content_margin,
+    get_plan_chart_width,
     get_price_summary_mode,
     get_time_label_interval,
     is_compact_width,
+    is_plan_wide_layout,
 )
 
 
@@ -59,6 +61,16 @@ class AdaptiveLayoutTests(unittest.TestCase):
         self.assertEqual(get_price_summary_mode(560, 520), "compact")
         self.assertEqual(get_price_summary_mode(700, 900), "regular")
         self.assertEqual(get_price_summary_mode(700, 520), "regular")
+
+    def test_plan_workspace_stacks_until_a_wide_window_is_available(self):
+        self.assertFalse(is_plan_wide_layout(700))
+        self.assertFalse(is_plan_wide_layout(999))
+        self.assertTrue(is_plan_wide_layout(1000))
+
+    def test_plan_chart_width_reserves_a_wide_planner_pane(self):
+        self.assertEqual(get_plan_chart_width(700, 20), 660)
+        self.assertEqual(get_plan_chart_width(1000, 24), 572)
+        self.assertEqual(get_plan_chart_width(1280, 32), 836)
 
 
 if __name__ == '__main__':

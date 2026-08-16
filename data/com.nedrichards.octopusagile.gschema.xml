@@ -41,6 +41,11 @@
       <summary>Window maximized</summary>
       <description>Whether the application window is maximized.</description>
     </key>
+    <key name="selected-main-view" type="s">
+      <default>'prices'</default>
+      <summary>Selected main view</summary>
+      <description>The Prices, Plan, or Usage workspace selected when the application was last closed.</description>
+    </key>
     <key name="find-cheapest-duration-hours" type="d">
       <default>1.0</default>
       <summary>Find cheapest duration</summary>

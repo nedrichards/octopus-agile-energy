@@ -85,6 +85,20 @@ def find_cheapest_timer_slot(prices, now, duration_hours, start_within_hours, ti
     return best_slot
 
 
+def build_fixed_start_price_window(prices, start, duration_hours):
+    end = start + timedelta(hours=duration_hours)
+    sorted_prices = sorted(prices, key=lambda price: price['valid_from'])
+    average_price = _calculate_weighted_average_price(sorted_prices, start, end)
+    if average_price is None:
+        return None
+
+    return {
+        'start': start,
+        'end': end,
+        'average_price_gbp': average_price,
+    }
+
+
 def _has_contiguous_price_coverage(window):
     return all(
         current_price['valid_to'] == next_price['valid_from']

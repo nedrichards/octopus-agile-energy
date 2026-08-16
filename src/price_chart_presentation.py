@@ -26,6 +26,28 @@ def find_price_index_by_start(prices, target_time):
     )
 
 
+def get_flyout_horizontal_position(
+    point_x,
+    flyout_width,
+    viewport_left,
+    viewport_right,
+    gap=14,
+    padding=8,
+):
+    """Place a chart flyout beside its point while keeping it in the viewport."""
+    minimum_x = viewport_left + padding
+    maximum_x = max(minimum_x, viewport_right - padding - flyout_width)
+
+    if point_x + gap + flyout_width <= viewport_right - padding:
+        preferred_x = point_x + gap
+    elif point_x - gap - flyout_width >= viewport_left + padding:
+        preferred_x = point_x - gap - flyout_width
+    else:
+        preferred_x = point_x - flyout_width / 2
+
+    return max(minimum_x, min(preferred_x, maximum_x))
+
+
 def get_day_transition_markers(valid_from_values, local_timezone=None):
     """Return each visible day boundary as an index and short chart label."""
     if not valid_from_values:

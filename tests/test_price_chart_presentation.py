@@ -9,11 +9,30 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from price_chart_presentation import (
     find_price_index_by_start,
     get_day_transition_markers,
+    get_flyout_horizontal_position,
     get_price_axis_bounds,
 )
 
 
 class PriceChartPresentationTests(unittest.TestCase):
+    def test_flyout_uses_space_to_the_right_inside_scrolled_viewport(self):
+        self.assertEqual(
+            get_flyout_horizontal_position(360, 150, 300, 700),
+            374,
+        )
+
+    def test_flyout_flips_left_at_scrolled_viewport_edge(self):
+        self.assertEqual(
+            get_flyout_horizontal_position(650, 150, 300, 700),
+            486,
+        )
+
+    def test_flyout_clamps_to_scrolled_viewport_when_neither_side_fits(self):
+        self.assertEqual(
+            get_flyout_horizontal_position(505, 180, 500, 700),
+            508,
+        )
+
     def test_axis_includes_zero_for_positive_prices(self):
         self.assertEqual(get_price_axis_bounds([0.12, 0.24]), (0.0, 0.24))
 

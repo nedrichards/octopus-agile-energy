@@ -20,6 +20,7 @@ from ..price_bands import (
 from ..price_chart_presentation import (
     find_price_index_by_start,
     get_day_transition_markers,
+    get_flyout_horizontal_position,
     get_price_axis_bounds,
 )
 from ..price_formatting import format_gbp, format_unit_price_gbp
@@ -51,10 +52,13 @@ class PriceChartWidget(Gtk.DrawingArea):
         self.highlight_start_time = None
         self.highlight_end_time = None
         self.highlight_label = None
+        self.comparison_start_time = None
+        self.comparison_end_time = None
         self.slot_count = 0
         self.slot_energies = []
         self.animation_source_id = None
         self.hover_started_at = None
+        self.horizontal_adjustment = None
 
         self.set_size_request(-1, get_chart_height(0))
         self.set_draw_func(self.on_draw)
@@ -77,6 +81,13 @@ class PriceChartWidget(Gtk.DrawingArea):
         self.add_controller(click_controller)
 
         self._update_accessible_summary()
+
+    def set_horizontal_adjustment(self, adjustment):
+        self.horizontal_adjustment = adjustment
+        adjustment.connect("value-changed", self._on_horizontal_adjustment_changed)
+
+    def _on_horizontal_adjustment_changed(self, _adjustment):
+        self.queue_draw()
 
     def set_compact_mode(self, compact, width, slot_count=0):
         self.compact = compact
@@ -127,6 +138,12 @@ class PriceChartWidget(Gtk.DrawingArea):
         self._update_accessible_summary()
         self.queue_draw()
 
+    def set_comparison_range(self, start_time, end_time):
+        self.comparison_start_time = start_time
+        self.comparison_end_time = end_time
+        self._update_accessible_summary()
+        self.queue_draw()
+
     def get_bar_start_x(self, index):
         if not self.prices or index < 0 or index >= len(self.prices):
             return None
@@ -166,7 +183,7 @@ class PriceChartWidget(Gtk.DrawingArea):
 
         parent_window = self.get_ancestor(Gtk.Window)
         if parent_window and hasattr(parent_window, 'on_chart_click'):
-            parent_window.on_chart_click(index)
+            parent_window.on_chart_click(self, index)
 
     def _selection_base_index(self):
         if 0 <= self.selected_index < len(self.prices):
@@ -220,6 +237,10 @@ class PriceChartWidget(Gtk.DrawingArea):
             )
             if self.highlight_label:
                 description += f" Highlighted range: {self.highlight_label}."
+            if self.comparison_start_time and self.comparison_end_time:
+                comparison_start = self.comparison_start_time.astimezone().strftime('%H:%M')
+                comparison_end = self.comparison_end_time.astimezone().strftime('%H:%M')
+                description += f" Compared range: {comparison_start} to {comparison_end}."
 
         values[1] = description
         self.update_property(properties, values)
@@ -495,6 +516,8 @@ class PriceChartWidget(Gtk.DrawingArea):
         # --- Draw Chart ---
         highlight_x_start = None
         highlight_x_end = None
+        comparison_x_start = None
+        comparison_x_end = None
         highlighted_indices = []
         points = []
         slot_bounds = []
@@ -529,6 +552,22 @@ class PriceChartWidget(Gtk.DrawingArea):
                     else max(highlight_x_end, bar_x_start + bar_width - 1)
                 )
 
+            if (
+                self.comparison_start_time
+                and self.comparison_end_time
+                and self.comparison_start_time <= price_data['valid_from'] < self.comparison_end_time
+            ):
+                comparison_x_start = (
+                    bar_x_start
+                    if comparison_x_start is None
+                    else min(comparison_x_start, bar_x_start)
+                )
+                comparison_x_end = (
+                    bar_x_start + bar_width - 1
+                    if comparison_x_end is None
+                    else max(comparison_x_end, bar_x_start + bar_width - 1)
+                )
+
         day_transitions = [
             (slot_bounds[index][0], label)
             for index, label in get_day_transition_markers(
@@ -536,6 +575,13 @@ class PriceChartWidget(Gtk.DrawingArea):
             )
         ]
 
+        self._draw_comparison_range(
+            cr,
+            fg_color,
+            comparison_x_start,
+            comparison_x_end,
+            chart_height,
+        )
         self._draw_highlight_range(
             cr,
             fg_color,
@@ -746,6 +792,24 @@ class PriceChartWidget(Gtk.DrawingArea):
         cr.stroke()
         cr.restore()
 
+    def _draw_comparison_range(self, cr, fg_color, range_start, range_end, chart_height):
+        if range_start is None or range_end is None:
+            return
+
+        range_y = self.margin_top + 4
+        range_height = max(1, chart_height - 8)
+        range_width = max(1, range_end - range_start)
+
+        cr.save()
+        self._rounded_rectangle(cr, range_start, range_y, range_width, range_height, 8)
+        cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, 0.06)
+        cr.fill_preserve()
+        cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, 0.46)
+        cr.set_line_width(1.4)
+        cr.set_dash([5.0, 3.0])
+        cr.stroke()
+        cr.restore()
+
     def _draw_active_slot_wash(self, cr, fg_color, energy, left_x, right_x, chart_height):
         """Draw interaction state across the plot without changing price-area semantics."""
         if energy <= 0.001:
@@ -926,6 +990,8 @@ class PriceChartWidget(Gtk.DrawingArea):
             max(line_width for line_width, _line_height in line_metrics) + padding_x * 2,
             max(150, min(210, chart_width - 12)),
         )
+        viewport_left, viewport_right = self._get_visible_horizontal_bounds(width)
+        flyout_width = min(flyout_width, max(1, viewport_right - viewport_left - 16))
         max_line_width = max(1, flyout_width - padding_x * 2)
         line_layouts = [
             self._create_text_layout(line, scale=scale, weight=weight, max_width=max_line_width)
@@ -936,11 +1002,12 @@ class PriceChartWidget(Gtk.DrawingArea):
         flyout_height = text_height + padding_y * 2 + 2
         point_x, point_y = point
 
-        if point_x + flyout_width + 18 <= width - self.margin_right:
-            flyout_x = point_x + 14
-        else:
-            flyout_x = point_x - flyout_width - 14
-        flyout_x = max(self.margin_left, min(flyout_x, width - self.margin_right - flyout_width))
+        flyout_x = get_flyout_horizontal_position(
+            point_x,
+            flyout_width,
+            viewport_left,
+            viewport_right,
+        )
 
         preferred_y = point_y - flyout_height - 12
         if preferred_y < self.margin_top + 4:
@@ -973,11 +1040,30 @@ class PriceChartWidget(Gtk.DrawingArea):
 
         cr.restore()
 
+    def _get_visible_horizontal_bounds(self, width):
+        if self.horizontal_adjustment is None:
+            return self.margin_left, width - self.margin_right
+
+        viewport_left = max(0, self.horizontal_adjustment.get_value())
+        viewport_width = self.horizontal_adjustment.get_page_size()
+        if viewport_width <= 0:
+            return self.margin_left, width - self.margin_right
+
+        content_left = self.margin_left
+        content_right = width - self.margin_right
+        viewport_right = viewport_left + viewport_width
+        viewport_left = max(content_left, min(viewport_left, content_right))
+        viewport_right = min(content_right, viewport_right)
+        return viewport_left, max(viewport_left, viewport_right)
+
     def _describe_slot(self, index, price, min_index, max_index):
         in_highlight = False
+        in_comparison = False
+        valid_from = self.prices[index]['valid_from']
         if self.highlight_start_time and self.highlight_end_time:
-            valid_from = self.prices[index]['valid_from']
             in_highlight = self.highlight_start_time <= valid_from < self.highlight_end_time
+        if self.comparison_start_time and self.comparison_end_time:
+            in_comparison = self.comparison_start_time <= valid_from < self.comparison_end_time
 
         if index == self.current_price_index:
             if in_highlight:
@@ -995,6 +1081,8 @@ class PriceChartWidget(Gtk.DrawingArea):
             return "Peak visible price"
         if in_highlight:
             return self.highlight_label or "Cheapest window"
+        if in_comparison:
+            return "Selected comparison window"
         return f"{get_price_band(price).title()} price"
 
     def _rounded_rectangle(self, cr, x, y, width, height, radius):

@@ -14,6 +14,7 @@ from price_fixtures import (
 )
 from price_logic import (
     build_dual_register_price_windows,
+    build_fixed_start_price_window,
     build_region_to_tariffs_map,
     extract_product_code,
     find_cheapest_slot,
@@ -52,6 +53,47 @@ class PriceLogicTests(unittest.TestCase):
         self.assertEqual(slot['start'], now + timedelta(hours=1))
         self.assertEqual(slot['end'], now + timedelta(hours=2))
         self.assertAlmostEqual(slot['average_price_gbp'], 0.045)
+
+    def test_build_fixed_start_price_window_uses_selected_half_hour(self):
+        start = datetime(2026, 3, 21, 12, 0, tzinfo=timezone.utc)
+        prices = []
+        for i, value in enumerate([0.30, 0.20, 0.10, 0.40]):
+            slot_start = start + timedelta(minutes=30 * i)
+            prices.append({
+                'valid_from': slot_start,
+                'valid_to': slot_start + timedelta(minutes=30),
+                'price_gbp': value,
+            })
+
+        slot = build_fixed_start_price_window(
+            prices,
+            start + timedelta(minutes=30),
+            duration_hours=1.5,
+        )
+
+        self.assertSlot(
+            slot,
+            start + timedelta(minutes=30),
+            start + timedelta(hours=2),
+            (0.20 + 0.10 + 0.40) / 3,
+        )
+
+    def test_build_fixed_start_price_window_requires_contiguous_coverage(self):
+        start = datetime(2026, 3, 21, 12, 0, tzinfo=timezone.utc)
+        prices = [
+            {
+                'valid_from': start,
+                'valid_to': start + timedelta(minutes=30),
+                'price_gbp': 0.10,
+            },
+            {
+                'valid_from': start + timedelta(hours=1),
+                'valid_to': start + timedelta(hours=1, minutes=30),
+                'price_gbp': 0.20,
+            },
+        ]
+
+        self.assertIsNone(build_fixed_start_price_window(prices, start, duration_hours=1.5))
 
     def test_find_cheapest_slot_can_restrict_to_whole_hour_starts(self):
         now = datetime(2026, 3, 21, 12, 0, tzinfo=timezone.utc)

@@ -4,6 +4,9 @@ COMPACT_WIDTH_THRESHOLD = 560
 COMPACT_PRICE_WIDTH_THRESHOLD = 480
 COMPACT_PRICE_HEIGHT_THRESHOLD = 560
 REGULAR_PRICE_WIDTH_THRESHOLD = 640
+PLAN_WIDE_WIDTH_THRESHOLD = 1000
+PLAN_PANE_WIDTH = 360
+PLAN_COLUMN_SPACING = 20
 DEFAULT_CHART_SLOTS = 48
 MAX_CHART_SLOTS = 96
 COMPACT_CHART_SLOT_WIDTH = 18
@@ -13,6 +16,18 @@ WIDE_CHART_SLOT_WIDTH = 16
 
 def is_compact_width(width):
     return width > 0 and width < COMPACT_WIDTH_THRESHOLD
+
+
+def is_plan_wide_layout(width):
+    return width >= PLAN_WIDE_WIDTH_THRESHOLD
+
+
+def get_plan_chart_width(width, content_margin):
+    available_width = max(240, width - (2 * content_margin))
+    if not is_plan_wide_layout(width):
+        return available_width
+
+    return max(320, available_width - PLAN_PANE_WIDTH - PLAN_COLUMN_SPACING)
 
 
 def get_content_margin(width):

@@ -9,7 +9,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from find_cheapest_presentation import build_find_cheapest_presentation
+from find_cheapest_presentation import (
+    build_find_cheapest_presentation,
+    build_fixed_start_presentation,
+)
 from price_fixtures import AGILE_REGION_A_2025_05_25_PENCE, historical_agile_prices
 from price_logic import find_cheapest_slot, find_cheapest_timer_slot
 
@@ -30,6 +33,31 @@ def utc_process_timezone():
 
 
 class FindCheapestPresentationTests(unittest.TestCase):
+    def test_builds_fixed_start_comparison_for_more_expensive_window(self):
+        slot = {
+            "start": datetime(2025, 5, 25, 15, 0, tzinfo=timezone.utc),
+            "end": datetime(2025, 5, 25, 16, 30, tzinfo=timezone.utc),
+            "average_price_gbp": 0.173,
+        }
+
+        with utc_process_timezone():
+            presentation = build_fixed_start_presentation(slot, 0.142)
+
+        self.assertEqual(presentation["window_text"], "15:00-16:30")
+        self.assertEqual(presentation["average_price_text"], "£0.17/kWh")
+        self.assertEqual(presentation["comparison_text"], "3.1p/kWh more")
+
+    def test_fixed_start_comparison_can_be_cheaper_outside_search_window(self):
+        slot = {
+            "start": datetime(2025, 5, 25, 23, 0, tzinfo=timezone.utc),
+            "end": datetime(2025, 5, 26, 0, 0, tzinfo=timezone.utc),
+            "average_price_gbp": 0.10,
+        }
+
+        presentation = build_fixed_start_presentation(slot, 0.142)
+
+        self.assertEqual(presentation["comparison_text"], "4.2p/kWh less")
+
     def test_builds_user_visible_rows_for_negative_price_appliance_window(self):
         day_start = datetime(2025, 5, 25, 0, 0, tzinfo=timezone.utc)
         now = datetime(2025, 5, 25, 10, 17, tzinfo=timezone.utc)

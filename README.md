@@ -108,7 +108,7 @@ flatpak run com.nedrichards.octopusagile
 
 Upon first launch, the application opens setup so you can choose the correct tariff and region before fetching prices. You can select a region manually, connect an Octopus account to infer its tariff and region, or choose **Use My Location** to ask the desktop location portal to identify your electricity region. Location is requested only when you press that button, is processed against bundled boundaries on your device, is not stored, and is never sent to Octopus Energy, Northern Powergrid, or another network service. You can use manual setup for current and upcoming prices, then add an Octopus API key and account number later to enable usage history and spend estimates.
 
-The Find Cheapest Time section remembers the last duration and search window you used. Durations can be adjusted in 30-minute steps for appliances that do not run in whole hours, with appliance-timer options showing whole-hour start and finish values, exact windows, and price differences from the cheapest window.
+The selected workspace, Plan duration, and search window are remembered between runs. In Plan, select any half-hour on the chart to compare the price of starting the same-duration run then with the cheapest result. Durations can be adjusted in 30-minute steps for appliances that do not run in whole hours, with appliance-timer options showing whole-hour start and finish values, exact windows, and price differences from the cheapest window. It stacks the result and chart on smaller windows, then uses a two-column chart-and-controls layout when more width is available.
 
 ### Configuration
 
