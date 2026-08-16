@@ -67,6 +67,17 @@
   </screenshots>
 
   <releases>
+    <release version="1.0.24" date="2026-08-17">
+      <description>
+        <p>This release makes Usage a richer, more consistent workspace for understanding electricity demand over time.</p>
+        <ul>
+          <li>Compare recent usage with seasonal patterns and historical spend across the available archive</li>
+          <li>Add 12-month, 24-month, and five-year views while preserving the detail of recent half-hour readings</li>
+          <li>Improve adaptive layouts, chart context, loading behaviour, and aligned usage detail rows across window sizes</li>
+          <li>Keep incomplete days and limited history clear so trends are not overstated</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.23" date="2026-08-16">
       <description>
         <p>This release adds a focused planning workspace and makes the app more responsive across window sizes.</p>
