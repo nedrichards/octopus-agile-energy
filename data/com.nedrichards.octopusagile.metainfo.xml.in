@@ -67,6 +67,18 @@
   </screenshots>
 
   <releases>
+    <release version="1.0.23" date="2026-08-16">
+      <description>
+        <p>This release adds a focused planning workspace and makes the app more responsive across window sizes.</p>
+        <ul>
+          <li>Plan appliance runs beside Prices and Usage, with remembered workspace selection and duration preferences</li>
+          <li>Compare any chart time with the cheapest matching run, including exact half-hour and whole-hour appliance-timer guidance</li>
+          <li>Adapt the planning workspace between stacked and two-column layouts, keeping chart selections and flyouts visible</li>
+          <li>Improve chart rendering, resize handling, cache freshness, loading states, and main-loop safety for smoother interaction</li>
+          <li>Harden account, API, location, credentials, and cached-data handling, with clear documentation of unsupported multi-property accounts</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.22" date="2026-08-09">
       <description>
         <p>This release makes location-based region setup private, reliable, and clearer.</p>
