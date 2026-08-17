@@ -67,6 +67,16 @@
   </screenshots>
 
   <releases>
+    <release version="1.0.25" date="2026-08-17">
+      <description>
+        <p>This release refines the Usage workspace and adds a direct workspace launch option.</p>
+        <ul>
+          <li>Align the Usage chart, overview, and detail panels into a consistent responsive grid</li>
+          <li>Match chart switchers and spacing across duration and cost views</li>
+          <li>Launch directly into Prices, Plan, or Usage with the one-off <code>--tab</code> option</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.24" date="2026-08-17">
       <description>
         <p>This release makes Usage a richer, more consistent workspace for understanding electricity demand over time.</p>

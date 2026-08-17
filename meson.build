@@ -1,5 +1,5 @@
 project('octopusagile',
-          version: '1.0.24',
+          version: '1.0.25',
     meson_version: '>= 1.0.0',
   default_options: [ 'warning_level=2', 'werror=false', ],
 )
