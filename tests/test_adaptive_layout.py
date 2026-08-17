@@ -16,6 +16,7 @@ from ui.adaptive_layout import (
     get_usage_chart_content_width,
     get_usage_chart_width,
     get_usage_details_max_width,
+    get_usage_top_row_height,
     is_compact_width,
     is_plan_wide_layout,
     is_usage_details_wide_layout,
@@ -77,23 +78,27 @@ class AdaptiveLayoutTests(unittest.TestCase):
         self.assertEqual(get_plan_chart_width(1000, 24), 612)
         self.assertEqual(get_plan_chart_width(1280, 32), 876)
 
-    def test_usage_layout_preserves_graph_space_at_intermediate_widths(self):
-        self.assertFalse(is_usage_wide_layout(900))
-        self.assertTrue(is_usage_wide_layout(920))
-        self.assertEqual(get_usage_chart_width(900, 24), 852)
-        self.assertEqual(get_usage_chart_width(920, 24), 522)
+    def test_usage_layout_uses_equal_tracks_for_the_wide_workspace(self):
+        self.assertFalse(is_usage_wide_layout(999))
+        self.assertTrue(is_usage_wide_layout(1000))
+        self.assertEqual(get_usage_chart_width(999, 24), 951)
+        self.assertEqual(get_usage_chart_width(1000, 24), 466)
 
-    def test_usage_details_wait_for_comfortable_two_column_width(self):
+    def test_usage_details_align_with_the_wide_workspace(self):
         self.assertFalse(is_usage_details_wide_layout(999))
         self.assertTrue(is_usage_details_wide_layout(1000))
         self.assertEqual(get_usage_details_max_width(999), 600)
-        self.assertEqual(get_usage_details_max_width(1000), 920)
+        self.assertEqual(get_usage_details_max_width(1000), 952)
 
     def test_usage_chart_keeps_normal_ranges_at_a_stable_viewport_width(self):
         self.assertEqual(get_usage_chart_content_width(396, 30), 380)
         self.assertEqual(get_usage_chart_content_width(396, 12), 380)
         self.assertEqual(get_usage_chart_content_width(522, 30), 506)
         self.assertEqual(get_usage_chart_content_width(522, 12), 506)
+
+    def test_usage_wide_top_row_reserves_chart_controls_and_detail(self):
+        self.assertEqual(get_usage_top_row_height(705), 366)
+        self.assertEqual(get_usage_top_row_height(1100), 406)
 
     def test_usage_chart_only_scrolls_at_extreme_widths(self):
         self.assertEqual(get_usage_chart_content_width(240, 30), 304)

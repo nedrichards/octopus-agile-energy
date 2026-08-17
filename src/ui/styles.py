@@ -73,15 +73,14 @@ def get_css():
     .chart-background {
         background-color: alpha(currentColor, 0.05);
         border: 1px solid alpha(currentColor, 0.1);
-        border-radius: 6px; /* Slightly rounded corners for the chart area */
+        border-radius: 12px;
     }
 
     .usage-metric-card {
         background-color: alpha(currentColor, 0.055);
         border: 1px solid alpha(currentColor, 0.09);
         border-radius: 12px;
-        padding: 12px;
-        min-height: 86px;
+        padding: 16px;
     }
 
     .usage-metric-value {

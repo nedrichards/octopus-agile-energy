@@ -117,6 +117,8 @@ Usage keeps detailed half-hour readings for up to 120 days and compact local dai
 
 The selected workspace, Plan duration, and search window are remembered between runs. In Plan, select any half-hour on the chart to compare the price of starting the same-duration run then with the cheapest result. Durations can be adjusted in 30-minute steps for appliances that do not run in whole hours, with appliance-timer options showing whole-hour start and finish values, exact windows, and price differences from the cheapest window. It stacks the result and chart on smaller windows, then uses a two-column chart-and-controls layout when more width is available.
 
+For a one-off launch into a particular workspace, use `--tab prices`, `--tab plan`, or `--tab usage`. This does not replace the workspace remembered for normal launches.
+
 ### Account scope
 
 Accounts with several properties or independent active electricity supplies are not currently supported. Account auto-detection uses the first active electricity tariff agreement returned by the Octopus API. Usage history uses the first active electricity meter point for which consumption is available and, where that meter point lists several meters, chooses the meter with the most returned samples. The app does not aggregate properties or independent supplies, and the selected tariff and usage may therefore depend on the API ordering for such accounts. Choose the tariff manually if necessary, but do not treat the usage or spend views as whole-account totals.

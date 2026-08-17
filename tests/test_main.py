@@ -7,10 +7,21 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.main import OctopusAgileApp, configure_logging
+from src.main import LAUNCHABLE_MAIN_VIEWS, OctopusAgileApp, configure_logging
 
 
 class ApplicationActivationTests(unittest.TestCase):
+    @patch("src.main.get_application_id", return_value="com.example.AgileRates")
+    def test_registers_the_tab_command_line_option(self, _get_application_id):
+        application = OctopusAgileApp()
+
+        self.assertIsNone(application._requested_main_view)
+
+    def test_supported_command_line_tabs_match_the_workspaces(self):
+        self.assertEqual(LAUNCHABLE_MAIN_VIEWS, {"prices", "plan", "usage"})
+        self.assertEqual(OctopusAgileApp._validate_requested_main_view("usage"), "usage")
+        self.assertIsNone(OctopusAgileApp._validate_requested_main_view("invalid"))
+
     def test_reuses_active_window(self):
         window = Mock()
         app = Mock()

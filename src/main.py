@@ -24,11 +24,14 @@ gi.require_version('Adw', '1')
 import logging
 import sys
 
-from gi.repository import Adw, Gdk, Gtk
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
 from .application_id import get_application_id, is_development_build
 from .ui.main_window import MainWindow
 from .ui.styles import get_css
+
+
+LAUNCHABLE_MAIN_VIEWS = frozenset(("prices", "plan", "usage"))
 
 
 def configure_logging():
@@ -44,17 +47,55 @@ def configure_logging():
 
 class OctopusAgileApp(Adw.Application):
     def __init__(self):
-        super().__init__(application_id=get_application_id())
+        super().__init__(
+            application_id=get_application_id(),
+            flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE,
+        )
+        self._requested_main_view = None
+        self.add_main_option(
+            "tab",
+            ord("t"),
+            GLib.OptionFlags.NONE,
+            GLib.OptionArg.STRING,
+            "Show a workspace without changing the saved selection",
+            "prices|plan|usage",
+        )
         self.connect("activate", self.on_activate)
+        self.connect("command-line", self.on_command_line)
+
+    @staticmethod
+    def _validate_requested_main_view(view_name):
+        return view_name if view_name in LAUNCHABLE_MAIN_VIEWS else None
+
+    def on_command_line(self, _app, command_line):
+        options = command_line.get_options_dict()
+        option_value = options.lookup_value("tab", GLib.VariantType.new("s"))
+        requested_view = option_value.get_string() if option_value else None
+        if requested_view and not self._validate_requested_main_view(requested_view):
+            command_line.printerr(
+                "--tab must be one of: prices, plan, usage\n"
+            )
+            return 2
+
+        self._requested_main_view = requested_view
+        self.activate()
+        return 0
 
     def on_activate(self, app):
         """
         Activates the application, creating the main window only when needed.
         """
+        requested_main_view = getattr(self, "_requested_main_view", None)
         self.window = app.get_active_window()
         if self.window is None:
-            self.window = MainWindow(application=app)
+            window_kwargs = {"application": app}
+            if requested_main_view:
+                window_kwargs["initial_main_view"] = requested_main_view
+            self.window = MainWindow(**window_kwargs)
+        elif requested_main_view:
+            self.window.show_main_view(requested_main_view)
         self.window.present()
+        self._requested_main_view = None
 
 def main(*args):
     """

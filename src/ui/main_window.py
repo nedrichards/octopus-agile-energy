@@ -43,7 +43,6 @@ from .adaptive_layout import (
     PLAN_PANE_WIDTH,
     USAGE_COLUMN_SPACING,
     USAGE_DETAILS_COLUMN_SPACING,
-    USAGE_PANE_WIDTH,
     get_chart_content_width,
     get_chart_height,
     get_chart_scroll_value,
@@ -55,6 +54,7 @@ from .adaptive_layout import (
     get_usage_chart_content_width,
     get_usage_chart_width,
     get_usage_details_max_width,
+    get_usage_top_row_height,
     is_compact_width,
     is_plan_wide_layout,
     is_usage_details_wide_layout,
@@ -76,8 +76,13 @@ class MainWindow(Adw.ApplicationWindow):
     The main application window, inheriting from Adw.ApplicationWindow for LibAdwaita styling.
     Manages UI setup, data fetching, and display updates.
     """
-    def __init__(self, **kwargs):
+    def __init__(self, initial_main_view=None, **kwargs):
         super().__init__(**kwargs)
+
+        self._initial_main_view = (
+            initial_main_view if initial_main_view in MAIN_VIEW_NAMES else None
+        )
+        self._suppress_main_view_save = False
 
         self.settings = Gio.Settings.new("com.nedrichards.octopusagile")
         if self.settings.get_string("selected-tariff-code") and not self.settings.get_boolean("setup-completed"):
@@ -845,7 +850,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         narrow_usage_details = Gtk.Box.new(
             orientation=Gtk.Orientation.VERTICAL,
-            spacing=16,
+            spacing=USAGE_COLUMN_SPACING,
         )
         narrow_usage_details.append(Adw.LayoutSlot.new("usage-patterns"))
         narrow_usage_details.append(Adw.LayoutSlot.new("historical-spend"))
@@ -893,11 +898,9 @@ class MainWindow(Adw.ApplicationWindow):
         overview_heading.append(self.usage_overview_description)
         self.usage_overview_pane.append(overview_heading)
 
-        usage_metrics = Gtk.FlowBox.new()
-        usage_metrics.set_selection_mode(Gtk.SelectionMode.NONE)
-        usage_metrics.set_homogeneous(True)
-        usage_metrics.set_min_children_per_line(2)
-        usage_metrics.set_max_children_per_line(2)
+        usage_metrics = Gtk.Grid.new()
+        usage_metrics.set_column_homogeneous(True)
+        usage_metrics.set_row_homogeneous(True)
         usage_metrics.set_column_spacing(8)
         usage_metrics.set_row_spacing(8)
         self.usage_metrics = usage_metrics
@@ -909,12 +912,13 @@ class MainWindow(Adw.ApplicationWindow):
             ("rate", "Cheap-rate use", "starred-symbolic"),
         )
         self.usage_metric_widgets = {}
-        for key, title, icon_name in metric_specs:
+        for index, (key, title, icon_name) in enumerate(metric_specs):
             card, title_label, value_label, detail_label = self._create_usage_metric_card(
                 title,
                 icon_name,
             )
-            usage_metrics.append(card)
+            card.set_vexpand(True)
+            usage_metrics.attach(card, index % 2, index // 2, 1, 1)
             self.usage_metric_widgets[key] = (title_label, value_label, detail_label)
         self.usage_overview_pane.append(usage_metrics)
 
@@ -923,7 +927,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.usage_layout_view.set_valign(Gtk.Align.START)
         self.usage_layout_view.set_hexpand(True)
 
-        narrow_usage_box = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        narrow_usage_box = Gtk.Box.new(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=USAGE_COLUMN_SPACING,
+        )
         narrow_usage_box.append(Adw.LayoutSlot.new("usage-overview"))
         narrow_usage_box.append(Adw.LayoutSlot.new("usage-chart"))
         narrow_usage_layout = Adw.Layout.new(narrow_usage_box)
@@ -933,11 +940,14 @@ class MainWindow(Adw.ApplicationWindow):
             orientation=Gtk.Orientation.HORIZONTAL,
             spacing=USAGE_COLUMN_SPACING,
         )
+        self.wide_usage_box = wide_usage_box
         wide_usage_box.set_valign(Gtk.Align.START)
         wide_usage_chart_slot = Adw.LayoutSlot.new("usage-chart")
         wide_usage_chart_slot.set_hexpand(True)
         wide_usage_box.append(wide_usage_chart_slot)
-        wide_usage_box.append(Adw.LayoutSlot.new("usage-overview"))
+        wide_usage_overview_slot = Adw.LayoutSlot.new("usage-overview")
+        wide_usage_overview_slot.set_hexpand(True)
+        wide_usage_box.append(wide_usage_overview_slot)
         wide_usage_layout = Adw.Layout.new(wide_usage_box)
         wide_usage_layout.set_name("wide")
 
@@ -1181,7 +1191,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.toast_overlay = Adw.ToastOverlay.new()
         self.toast_overlay.set_child(root_vbox) # The root_vbox (containing header and scrolled content) is the child.
         self.set_content(self.toast_overlay) # Set the toast overlay as the main window content.
-        self.main_view_stack.set_visible_child_name(self._get_saved_main_view_name())
+        self.main_view_stack.set_visible_child_name(
+            self._initial_main_view or self._get_saved_main_view_name()
+        )
         self.main_view_stack.connect("notify::visible-child-name", self.on_visible_tab_changed)
         GLib.idle_add(self._refresh_adaptive_layout)
 
@@ -1355,7 +1367,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.plan_page_box.set_margin_bottom(margin)
         self.plan_page_box.set_margin_start(margin)
         self.plan_page_box.set_margin_end(margin)
-        self.usage_content_box.set_spacing(12 if compact else 16)
+        self.usage_content_box.set_spacing(12 if compact else USAGE_COLUMN_SPACING)
+        self.usage_clamp.set_margin_top(20 if compact else 28)
 
         chart_margin = max(8, margin - 2)
         self.price_chart_section.set_margin_top(chart_margin)
@@ -1366,11 +1379,12 @@ class MainWindow(Adw.ApplicationWindow):
         self.usage_chart_box.set_margin_bottom(0)
         self.usage_chart_box.set_margin_start(0)
         self.usage_chart_box.set_margin_end(0)
-        mode_padding = 8 if compact else 10
-        self.usage_chart_mode_box.set_margin_top(mode_padding)
-        self.usage_chart_mode_box.set_margin_bottom(mode_padding)
-        self.usage_chart_mode_box.set_margin_start(mode_padding)
-        self.usage_chart_mode_box.set_margin_end(mode_padding)
+        switcher_padding = 8 if compact else 10
+        for switcher in (self.usage_period_box, self.usage_chart_mode_box):
+            switcher.set_margin_top(switcher_padding)
+            switcher.set_margin_bottom(switcher_padding)
+            switcher.set_margin_start(switcher_padding)
+            switcher.set_margin_end(switcher_padding)
         usage_chart_compact = is_compact_width(usage_chart_width)
         self.usage_chart_toolbar.set_orientation(
             Gtk.Orientation.VERTICAL if usage_chart_compact else Gtk.Orientation.HORIZONTAL
@@ -1394,11 +1408,23 @@ class MainWindow(Adw.ApplicationWindow):
             "wide" if usage_details_wide else "narrow"
         )
         self.usage_clamp.set_maximum_size(get_usage_details_max_width(width))
-        self.usage_overview_pane.set_size_request(
-            USAGE_PANE_WIDTH if usage_wide else -1,
-            -1,
+        usage_top_row_height = (
+            get_usage_top_row_height(usage_chart_width)
+            if usage_wide and not usage_chart_compact
+            else -1
         )
-        self.usage_overview_pane.set_hexpand(not usage_wide)
+        self.wide_usage_box.set_size_request(-1, usage_top_row_height)
+        self.usage_chart_box.set_size_request(-1, usage_top_row_height)
+        self.usage_overview_pane.set_size_request(
+            -1,
+            usage_top_row_height,
+        )
+        self.usage_overview_pane.set_hexpand(usage_wide)
+        self.usage_overview_pane.set_valign(
+            Gtk.Align.FILL if usage_wide else Gtk.Align.START
+        )
+        self.usage_overview_pane.set_vexpand(usage_wide)
+        self.usage_metrics.set_vexpand(usage_wide)
 
         self.price_chart.set_compact_mode(compact, width, chart_slot_count)
         self.plan_price_chart.set_compact_mode(
@@ -1434,7 +1460,11 @@ class MainWindow(Adw.ApplicationWindow):
         GLib.idle_add(self._refresh_adaptive_layout)
 
         visible_page = stack.get_visible_child_name()
-        if visible_page in MAIN_VIEW_NAMES:
+        if visible_page in MAIN_VIEW_NAMES and not getattr(
+            self,
+            "_suppress_main_view_save",
+            False,
+        ):
             self.settings.set_string("selected-main-view", visible_page)
         if visible_page == "usage":
             self._update_usage_insights()
@@ -1446,6 +1476,15 @@ class MainWindow(Adw.ApplicationWindow):
             )
         elif visible_page == "prices" and self.best_slot_start_time:
             self._scroll_chart_to_time(self.best_slot_start_time)
+
+    def show_main_view(self, view_name):
+        """Show a workspace for this window without replacing the saved default."""
+        if view_name not in MAIN_VIEW_NAMES:
+            return
+
+        self._suppress_main_view_save = True
+        self.main_view_stack.set_visible_child_name(view_name)
+        self._suppress_main_view_save = False
 
     def on_usage_graph_mode_toggled(self, button, mode):
         if not button.get_active():

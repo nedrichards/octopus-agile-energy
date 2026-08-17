@@ -7,13 +7,13 @@ REGULAR_PRICE_WIDTH_THRESHOLD = 640
 PLAN_WIDE_WIDTH_THRESHOLD = 1000
 PLAN_PANE_WIDTH = 320
 PLAN_COLUMN_SPACING = 20
-USAGE_WIDE_WIDTH_THRESHOLD = 920
-USAGE_PANE_WIDTH = 330
+USAGE_WIDE_WIDTH_THRESHOLD = 1000
 USAGE_COLUMN_SPACING = 20
 USAGE_DETAILS_WIDE_WIDTH_THRESHOLD = 1000
 USAGE_DETAILS_NARROW_MAX_WIDTH = 600
 USAGE_DETAILS_MAX_WIDTH = 920
 USAGE_DETAILS_COLUMN_SPACING = 20
+USAGE_CHART_WIDE_CHROME_HEIGHT = 146
 DEFAULT_CHART_SLOTS = 48
 MAX_CHART_SLOTS = 96
 COMPACT_CHART_SLOT_WIDTH = 18
@@ -47,8 +47,12 @@ def is_usage_details_wide_layout(width):
 
 
 def get_usage_details_max_width(width):
+    """Keep stacked details readable, but align wide panels with the workspace."""
     if is_usage_details_wide_layout(width):
-        return USAGE_DETAILS_MAX_WIDTH
+        return max(
+            USAGE_DETAILS_MAX_WIDTH,
+            width - (2 * get_content_margin(width)),
+        )
     return USAGE_DETAILS_NARROW_MAX_WIDTH
 
 
@@ -56,7 +60,12 @@ def get_usage_chart_width(width, content_margin):
     available_width = max(240, width - (2 * content_margin))
     if not is_usage_wide_layout(width):
         return available_width
-    return max(360, available_width - USAGE_PANE_WIDTH - USAGE_COLUMN_SPACING)
+    return max(360, (available_width - USAGE_COLUMN_SPACING) // 2)
+
+
+def get_usage_top_row_height(chart_width):
+    """Reserve the Usage chart controls and selected-day detail on wide screens."""
+    return get_chart_height(chart_width) + USAGE_CHART_WIDE_CHROME_HEIGHT
 
 
 def get_content_margin(width):
