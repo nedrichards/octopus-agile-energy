@@ -1,7 +1,15 @@
 name: Flatpak Build
+run-name: >-
+  Flatpak ${{ github.event_name == 'pull_request'
+    && format('PR #{0}', github.event.pull_request.number)
+    || github.sha }}
 
 permissions:
   contents: read
+
+concurrency:
+  group: flatpak-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 on:
   push:
@@ -12,17 +20,63 @@ on:
 jobs:
   flatpak:
     name: "Build Flatpak"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container:
-      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-48
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-50
       options: --privileged
     steps:
       - uses: actions/checkout@v7
-      
+
+      - name: Name development bundle
+        id: metadata
+        shell: bash
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          short_sha="${GITHUB_SHA::12}"
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            build_label="pr-${PR_NUMBER}-merge-${short_sha}"
+          else
+            build_label="commit-${short_sha}"
+          fi
+          bundle="Agile-Rates-Devel-${build_label}-x86_64.flatpak"
+          artifact="${bundle%.flatpak}"
+          echo "bundle=${bundle}" >> "$GITHUB_OUTPUT"
+          echo "artifact=${artifact}" >> "$GITHUB_OUTPUT"
+
       - name: Build Flatpak
         uses: flatpak/flatpak-github-actions/flatpak-builder@v6.7
         with:
-          bundle: octopusagile.flatpak
+          bundle: ${{ steps.metadata.outputs.bundle }}
           manifest-path: com.nedrichards.octopusagile.Devel.json
           cache-key: flatpak-builder-${{ github.sha }}
-          upload-artifact: true
+          upload-artifact: false
+
+      - name: Upload development bundle
+        id: upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.metadata.outputs.artifact }}
+          path: ${{ steps.metadata.outputs.bundle }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Add bundle to workflow summary
+        shell: bash
+        env:
+          ARTIFACT_NAME: ${{ steps.metadata.outputs.artifact }}
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+          BUNDLE_NAME: ${{ steps.metadata.outputs.bundle }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          {
+            echo "### Development Flatpak"
+            echo
+            printf -- '- Download: [%s](%s)\n' "$ARTIFACT_NAME" "$ARTIFACT_URL"
+            printf -- '- Built checkout commit: %s\n' "$GITHUB_SHA"
+            if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+              printf -- '- Pull request head commit: %s\n' "$PR_HEAD_SHA"
+            fi
+            printf -- '- Retention: 14 days\n'
+            printf '\nAfter extracting the artifact:\n\n```console\nflatpak install --user ./%s\n```\n' "$BUNDLE_NAME"
+          } >> "$GITHUB_STEP_SUMMARY"

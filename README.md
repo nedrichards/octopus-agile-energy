@@ -12,6 +12,21 @@ This is a modern GNOME application built to track and visualise UK smart electri
 
 ![The application interface, showing the current price and a graph of future prices](data/octopus-agile-screenshot.png "Application screenshot")
 
+## Install From Flathub
+
+Flathub is the recommended installation method and provides automatic
+application updates:
+
+```bash
+flatpak install flathub com.nedrichards.octopusagile
+```
+
+Launch Agile Rates from the application grid or run:
+
+```bash
+flatpak run com.nedrichards.octopusagile
+```
+
 ## Development
 
 This application targets GNOME 50 and is best developed through the Flatpak SDK. That keeps GTK, libadwaita, Python, Meson, and native tooling in the same environment used to build the app.
@@ -108,6 +123,34 @@ To build and run the pinned production manifest:
 flatpak-builder --user --install --force-clean build-dir com.nedrichards.octopusagile.json
 flatpak run com.nedrichards.octopusagile
 ```
+
+### Continuous Integration Bundles
+
+Every pull request and push to `main` builds the development Flatpak. The
+workflow summary links directly to a 14-day artifact whose filename includes
+the pull request number or built commit. These bundles install the separate
+`com.nedrichards.octopusagile.Devel` application and are intended only for
+testing a particular change.
+
+After extracting the downloaded artifact, install it with:
+
+```bash
+flatpak install --user ./Agile-Rates-Devel-*.flatpak
+```
+
+Stable releases attach `x86_64` and `aarch64` bundles, plus `SHA256SUMS`, to
+the corresponding GitHub release. The release workflow accepts an existing
+`vX.Y.Z` tag only after the production manifest has been pinned to that exact
+tag commit, and publishes the GitHub release only after both bundles build.
+
+Install a downloaded stable bundle with:
+
+```bash
+flatpak install --user ./Agile-Rates-vX.Y.Z-x86_64.flatpak
+```
+
+GitHub bundles are fixed release snapshots rather than an update repository.
+Install from Flathub when automatic application updates are desired.
 
 ## Usage
 
