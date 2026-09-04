@@ -115,8 +115,15 @@ jobs:
           manifest-path: com.nedrichards.octopusagile.json
           cache-key: release-flatpak-${{ inputs.tag }}
           run-tests: true
-          upload-artifact: true
-          artifact-name: Agile-Rates-${{ inputs.tag }}-${{ matrix.variant.arch }}
+          upload-artifact: false
+
+      - name: Upload release bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: Agile-Rates-${{ inputs.tag }}-${{ matrix.variant.arch }}
+          path: Agile-Rates-${{ inputs.tag }}-${{ matrix.variant.arch }}.flatpak
+          if-no-files-found: error
+          retention-days: 1
 
   publish:
     name: Publish GitHub release
