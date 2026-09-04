@@ -26,7 +26,7 @@ from ..price_chart_presentation import (
     get_price_axis_bounds,
 )
 from ..price_formatting import format_gbp, format_unit_price_gbp
-from ..uk_time import UK_TIMEZONE
+from ..time_formatting import format_uk_time, format_uk_time_window
 from .adaptive_layout import (
     get_chart_content_width,
     get_chart_height,
@@ -304,9 +304,12 @@ class PriceChartWidget(Gtk.Overlay):
             if self.highlight_label:
                 description += f" Highlighted range: {self.highlight_label}."
             if self.comparison_start_time and self.comparison_end_time:
-                comparison_start = self.comparison_start_time.astimezone(UK_TIMEZONE).strftime('%H:%M')
-                comparison_end = self.comparison_end_time.astimezone(UK_TIMEZONE).strftime('%H:%M')
-                description += f" Compared range: {comparison_start} to {comparison_end}."
+                comparison_range = format_uk_time_window(
+                    self.comparison_start_time,
+                    self.comparison_end_time,
+                    separator=" to ",
+                )
+                description += f" Compared range: {comparison_range}."
 
         values[1] = description
         self.update_property(properties, values)
@@ -314,12 +317,15 @@ class PriceChartWidget(Gtk.Overlay):
     def _build_accessible_slot_summary(self, index):
         min_index, max_index = self._get_extreme_indices()
         price_data = self.prices[index]
-        valid_from = price_data['valid_from'].astimezone(UK_TIMEZONE).strftime('%H:%M')
-        valid_to = price_data['valid_to'].astimezone(UK_TIMEZONE).strftime('%H:%M')
+        time_range = format_uk_time_window(
+            price_data['valid_from'],
+            price_data['valid_to'],
+            separator=" to ",
+        )
         price = price_data['price_gbp']
         reason = self._describe_slot(index, price, min_index, max_index)
         return (
-            f"{valid_from} to {valid_to}, {format_unit_price_gbp(price)}. "
+            f"{time_range}, {format_unit_price_gbp(price)}. "
             f"{reason}. Slot {index + 1} of {len(self.prices)}."
         )
 
@@ -801,7 +807,7 @@ class PriceChartWidget(Gtk.Overlay):
         label_interval = get_time_label_interval(width, len(self.prices))
         for i in range(0, len(self.prices), label_interval):
             if i < len(self.prices):
-                time_str = self.prices[i]['valid_from'].astimezone(UK_TIMEZONE).strftime('%H:%M')
+                time_str = format_uk_time(self.prices[i]['valid_from'])
                 time_layout = self._create_text_layout(time_str, scale=time_label_scale)
                 time_width, time_height = self._layout_size(time_layout)
                 bar_x_center = self.margin_left + ((i + 0.5) * chart_width) / len(self.prices)
@@ -1134,12 +1140,15 @@ class PriceChartWidget(Gtk.Overlay):
         width,
     ):
         price_data = self.prices[index]
-        valid_from = price_data['valid_from'].astimezone(UK_TIMEZONE).strftime('%H:%M')
-        valid_to = price_data['valid_to'].astimezone(UK_TIMEZONE).strftime('%H:%M')
+        time_range = format_uk_time_window(
+            price_data['valid_from'],
+            price_data['valid_to'],
+            separator=" - ",
+        )
         price = price_data['price_gbp']
         reason = self._describe_slot(index, price, min_index, max_index)
         lines = [
-            f"{valid_from} - {valid_to}",
+            time_range,
             format_unit_price_gbp(price),
             reason,
         ]

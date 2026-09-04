@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from find_cheapest_presentation import (
     build_find_cheapest_presentation,
     build_fixed_start_presentation,
+    format_time_window,
 )
 from price_fixtures import AGILE_REGION_A_2025_05_25_PENCE, historical_agile_prices
 from price_logic import find_cheapest_slot, find_cheapest_timer_slot
@@ -33,6 +34,15 @@ def utc_process_timezone():
 
 
 class FindCheapestPresentationTests(unittest.TestCase):
+    def test_repeated_autumn_window_is_unambiguous(self):
+        start = datetime(2025, 10, 26, 0, 0, tzinfo=timezone.utc)
+        end = datetime(2025, 10, 26, 1, 0, tzinfo=timezone.utc)
+
+        self.assertEqual(
+            format_time_window(start, end),
+            "01:00 BST-01:00 GMT",
+        )
+
     def test_builds_fixed_start_comparison_for_more_expensive_window(self):
         slot = {
             "start": datetime(2025, 5, 25, 15, 0, tzinfo=timezone.utc),

@@ -2,10 +2,44 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from time_formatting import format_time_from_now
+from time_formatting import (
+    format_time_from_now,
+    format_uk_time,
+    format_uk_time_window,
+)
 
 
 class TimeFormattingTests(unittest.TestCase):
+    def test_repeated_autumn_times_include_their_uk_timezone(self):
+        first_one_am = datetime(2025, 10, 26, 0, 0, tzinfo=timezone.utc)
+        second_one_am = datetime(2025, 10, 26, 1, 0, tzinfo=timezone.utc)
+
+        self.assertEqual(format_uk_time(first_one_am), "01:00 BST")
+        self.assertEqual(format_uk_time(second_one_am), "01:00 GMT")
+
+    def test_ordinary_uk_time_remains_compact(self):
+        value = datetime(2025, 10, 26, 2, 0, tzinfo=timezone.utc)
+
+        self.assertEqual(format_uk_time(value), "02:00")
+
+    def test_autumn_window_disambiguates_both_ends(self):
+        start = datetime(2025, 10, 26, 0, 30, tzinfo=timezone.utc)
+        end = datetime(2025, 10, 26, 1, 0, tzinfo=timezone.utc)
+
+        self.assertEqual(
+            format_uk_time_window(start, end),
+            "01:30 BST-01:00 GMT",
+        )
+
+    def test_spring_window_makes_the_clock_jump_explicit(self):
+        start = datetime(2025, 3, 30, 0, 30, tzinfo=timezone.utc)
+        end = datetime(2025, 3, 30, 1, 0, tzinfo=timezone.utc)
+
+        self.assertEqual(
+            format_uk_time_window(start, end),
+            "00:30 GMT-02:00 BST",
+        )
+
     def test_format_time_from_now_formats_whole_hours(self):
         now = datetime(2026, 6, 29, 12, 0, tzinfo=timezone.utc)
 
