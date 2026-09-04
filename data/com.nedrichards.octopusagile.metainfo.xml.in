@@ -67,6 +67,17 @@
   </screenshots>
 
   <releases>
+    <release version="1.0.26" date="2026-09-04">
+      <description>
+        <p>This release keeps price forecasts fresh and makes unavailable or clock-change data clearer.</p>
+        <ul>
+          <li>Recover scheduled price refreshes after suspend, hibernate, and network interruptions</li>
+          <li>Retry incomplete or transiently unavailable forecasts with bounded backoff and smaller API requests</li>
+          <li>Show dedicated loading, setup, and unavailable states when Prices has no useful data</li>
+          <li>Handle spring and autumn clock changes without ambiguous chart or planning times</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.25" date="2026-08-17">
       <description>
         <p>This release refines the Usage workspace and adds a direct workspace launch option.</p>
