@@ -1,6 +1,6 @@
 import sys
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -50,6 +50,8 @@ class PriceRefreshCoordinationTests(unittest.TestCase):
             _price_refresh_queued=True,
             _queued_price_refresh_force=True,
             refresh_price=Mock(),
+            _is_current_fetch=Mock(return_value=True),
+            _schedule_price_refresh_after_result=Mock(),
         )
 
         keep_source = MainWindow._finish_price_refresh(window, 4)
@@ -59,9 +61,150 @@ class PriceRefreshCoordinationTests(unittest.TestCase):
         self.assertFalse(window._price_refresh_queued)
         self.assertFalse(window._queued_price_refresh_force)
         window.refresh_price.assert_called_once_with(force=True)
+        window._schedule_price_refresh_after_result.assert_not_called()
+
+    def test_due_watchdog_starts_forced_refresh(self):
+        now = datetime(2026, 7, 25, 16, 30, tzinfo=timezone.utc)
+        window = SimpleNamespace(
+            _next_price_refresh_at=now - timedelta(minutes=1),
+            _needs_setup=Mock(return_value=False),
+            price_refresh_in_progress=False,
+            network_monitor=Mock(),
+            refresh_price=Mock(return_value=True),
+        )
+        window.network_monitor.get_network_available.return_value = True
+
+        with patch("src.ui.main_window.datetime") as mocked_datetime:
+            mocked_datetime.now.return_value = now
+            keep_source = MainWindow._on_data_fetch_timer(window)
+
+        self.assertTrue(keep_source)
+        window.refresh_price.assert_called_once_with(force=True)
+        self.assertIsNone(window._next_price_refresh_at)
+
+    def test_due_watchdog_waits_for_in_flight_refresh(self):
+        now = datetime(2026, 7, 25, 16, 30, tzinfo=timezone.utc)
+        due_at = now - timedelta(minutes=1)
+        window = SimpleNamespace(
+            _next_price_refresh_at=due_at,
+            _needs_setup=Mock(return_value=False),
+            price_refresh_in_progress=True,
+            network_monitor=Mock(),
+            refresh_price=Mock(),
+        )
+        window.network_monitor.get_network_available.return_value = True
+
+        with patch("src.ui.main_window.datetime") as mocked_datetime:
+            mocked_datetime.now.return_value = now
+            keep_source = MainWindow._on_data_fetch_timer(window)
+
+        self.assertTrue(keep_source)
+        window.refresh_price.assert_not_called()
+        self.assertEqual(window._next_price_refresh_at, due_at)
+
+    def test_transient_failure_uses_bounded_retry_sequence(self):
+        now = datetime(2026, 7, 25, 16, 30, tzinfo=timezone.utc)
+        window = SimpleNamespace(
+            _price_retry_attempt=0,
+            _next_price_refresh_at=None,
+        )
+
+        with (
+            patch("src.ui.main_window.datetime") as mocked_datetime,
+            patch("src.ui.main_window.next_price_release_check") as next_release,
+        ):
+            mocked_datetime.now.return_value = now
+            next_release.return_value = now + timedelta(days=1)
+            for attempt, delay in enumerate((120, 300, 600, 1200, 1800, 3600), start=1):
+                MainWindow._schedule_price_refresh_after_result(window, "retryable-error")
+                self.assertEqual(window._price_retry_attempt, attempt)
+                self.assertEqual(window._next_price_refresh_at, now + timedelta(seconds=delay))
+
+            MainWindow._schedule_price_refresh_after_result(window, "retryable-error")
+
+        self.assertEqual(window._price_retry_attempt, 0)
+        self.assertEqual(window._next_price_refresh_at, now + timedelta(days=1))
+
+    def test_due_watchdog_does_not_fetch_while_offline(self):
+        now = datetime(2026, 7, 25, 16, 30, tzinfo=timezone.utc)
+        due_at = now - timedelta(minutes=1)
+        window = SimpleNamespace(
+            _next_price_refresh_at=due_at,
+            _needs_setup=Mock(return_value=False),
+            price_refresh_in_progress=False,
+            network_monitor=Mock(),
+            refresh_price=Mock(),
+        )
+        window.network_monitor.get_network_available.return_value = False
+
+        with patch("src.ui.main_window.datetime") as mocked_datetime:
+            mocked_datetime.now.return_value = now
+            MainWindow._on_data_fetch_timer(window)
+
+        window.refresh_price.assert_not_called()
+        self.assertEqual(window._next_price_refresh_at, due_at)
 
 
 class PriceProcessingTests(unittest.TestCase):
+    def test_empty_configured_price_data_uses_unavailable_state(self):
+        window = SimpleNamespace(
+            all_prices=[],
+            _show_current_price_unavailable=Mock(),
+        )
+
+        MainWindow.update_current_price(window)
+
+        window._show_current_price_unavailable.assert_called_once_with(
+            "No price data is currently available. The app will retry automatically.",
+        )
+
+    def test_future_only_prices_remain_visible_in_unavailable_state(self):
+        now = datetime(2026, 7, 25, 15, 30, tzinfo=timezone.utc)
+        future_price = {
+            "valid_from": now + timedelta(minutes=30),
+            "valid_to": now + timedelta(hours=1),
+            "price_gbp": 0.2,
+        }
+        window = SimpleNamespace(
+            all_prices=[future_price],
+            chart_prices=[],
+            get_width=Mock(return_value=700),
+            settings=Mock(),
+            _show_current_price_unavailable=Mock(),
+            update_display=Mock(),
+        )
+
+        with patch("src.ui.main_window.datetime") as mocked_datetime:
+            mocked_datetime.now.return_value = now
+            MainWindow.update_current_price(window)
+
+        self.assertEqual(window.chart_prices, [future_price])
+        window._show_current_price_unavailable.assert_called_once_with(
+            "No rate covers the current half-hour. The app will retry automatically.",
+            [future_price],
+        )
+        window.update_display.assert_not_called()
+
+    def test_transient_refresh_error_preserves_a_valid_current_price(self):
+        window = SimpleNamespace(
+            _is_current_fetch=Mock(return_value=True),
+            update_current_price=Mock(),
+            current_price_data=None,
+            status_label=Mock(),
+            show_error=Mock(),
+        )
+
+        def restore_current_price():
+            window.current_price_data = {"price_gbp": 0.2}
+
+        window.update_current_price.side_effect = restore_current_price
+        MainWindow._show_error_if_current(window, "Network error", 7, True)
+
+        window.show_error.assert_not_called()
+        window.status_label.set_text.assert_called_once_with(
+            "Network error Existing prices remain available while the app retries."
+        )
+
     def test_invalid_and_non_finite_rates_are_skipped_and_valid_rates_sorted(self):
         raw_rates = [
             {"valid_from": "2026-07-01T00:30:00Z", "valid_to": "2026-07-01T01:00:00Z", "value_inc_vat": 20},

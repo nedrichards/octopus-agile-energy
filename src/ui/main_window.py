@@ -18,7 +18,14 @@ from ..find_cheapest_presentation import (
 )
 from ..octopus_api import OctopusApiError
 from ..price_bands import PRICE_BAND_NEGATIVE, PRICE_BAND_VERSION, get_price_band
-from ..price_cache import build_rates_cache_key, is_rates_cache_stale
+from ..price_cache import (
+    PRICE_RETRY_DELAYS_SECONDS,
+    build_rates_cache_key,
+    get_price_request_period,
+    is_rates_cache_stale,
+    next_price_release_check,
+    rates_cover_expected_horizon,
+)
 from ..price_formatting import format_gbp, format_unit_price_gbp
 from ..price_logic import build_dual_register_price_windows, build_fixed_start_price_window, extract_product_code
 from ..price_logic import find_cheapest_slot as calculate_cheapest_slot
@@ -67,6 +74,7 @@ from .setup_window import SetupWindow
 
 logger = logging.getLogger(__name__)
 USAGE_BACKGROUND_REFRESH_INTERVAL_SECONDS = 6 * 60 * 60
+PRICE_REFRESH_WATCHDOG_SECONDS = 60
 SUBTLE_ANIMATION_DURATION_MS = 180
 SUBTLE_ANIMATION_FRAME_MS = 16
 MAIN_VIEW_NAMES = frozenset(("prices", "plan", "usage"))
@@ -118,6 +126,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.price_refresh_in_progress = False
         self._price_refresh_queued = False
         self._queued_price_refresh_force = False
+        self._price_synced_at = None
+        self._next_price_refresh_at = None
+        self._price_retry_attempt = 0
+        self._price_refresh_watchdog_id = None
         self.price_summary_mode = "regular"
         self.price_summary_title = "Loading..."
         self.price_summary_description = "Fetching current electricity price"
@@ -147,6 +159,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.connect("notify::default-width", self.on_window_width_changed)
         self.connect("notify::default-height", self.on_window_width_changed)
         self.connect("notify::maximized", self.on_window_state_changed)
+
+        self.network_monitor = Gio.NetworkMonitor.get_default()
+        self.network_monitor.connect("network-changed", self._on_network_changed)
 
         key_controller = Gtk.EventControllerKey.new()
         key_controller.connect("key-pressed", self.on_key_pressed)
@@ -179,19 +194,60 @@ class MainWindow(Adw.ApplicationWindow):
         return False
 
     def schedule_next_data_fetch(self):
-        now = datetime.now(UK_TIMEZONE)
-        next_fetch = now.replace(hour=16, minute=1, second=0, microsecond=0)
-        if now > next_fetch:
-            next_fetch += timedelta(days=1)
-
-        delay = (next_fetch - now).total_seconds()
-        GLib.timeout_add_seconds(int(delay), self._on_data_fetch_timer)
+        self._next_price_refresh_at = next_price_release_check(datetime.now(UK_TIMEZONE))
+        logger.debug("Next scheduled price refresh: %s", self._next_price_refresh_at.isoformat())
+        if self._price_refresh_watchdog_id is None:
+            self._price_refresh_watchdog_id = GLib.timeout_add_seconds(
+                PRICE_REFRESH_WATCHDOG_SECONDS,
+                self._on_data_fetch_timer,
+            )
 
     def _on_data_fetch_timer(self):
-        if not self._needs_setup():
-            self.refresh_price()
-        self.schedule_next_data_fetch()
-        return False
+        now = datetime.now(UK_TIMEZONE)
+        if (
+            self._next_price_refresh_at is not None
+            and now >= self._next_price_refresh_at
+            and not self._needs_setup()
+            and not self.price_refresh_in_progress
+            and self.network_monitor.get_network_available()
+            and self.refresh_price(force=True)
+        ):
+            # The result callback chooses either a retry or tomorrow's release.
+            self._next_price_refresh_at = None
+        return True
+
+    def _on_network_changed(self, _monitor, network_available):
+        if network_available:
+            self._on_data_fetch_timer()
+
+    def _schedule_price_refresh_after_result(self, outcome):
+        now = datetime.now(UK_TIMEZONE)
+        if outcome in {"incomplete", "retryable-error"}:
+            if self._price_retry_attempt < len(PRICE_RETRY_DELAYS_SECONDS):
+                delay = PRICE_RETRY_DELAYS_SECONDS[self._price_retry_attempt]
+                self._price_retry_attempt += 1
+                self._next_price_refresh_at = now + timedelta(seconds=delay)
+                logger.debug(
+                    "Price refresh outcome %s; retry %d scheduled for %s",
+                    outcome,
+                    self._price_retry_attempt,
+                    self._next_price_refresh_at.isoformat(),
+                )
+                if getattr(self, "current_price_data", None) is not None:
+                    self.status_label.set_text(
+                        "The forecast is incomplete. The app will retry automatically."
+                        if outcome == "incomplete"
+                        else "Could not refresh the forecast. The app will retry automatically."
+                    )
+                return
+
+        self._price_retry_attempt = 0
+        self._next_price_refresh_at = next_price_release_check(now)
+        logger.debug("Next scheduled price refresh: %s", self._next_price_refresh_at.isoformat())
+        if outcome == "incomplete" and getattr(self, "current_price_data", None) is not None:
+            self.status_label.set_text(
+                "The forecast remains incomplete. You can try refreshing again later."
+            )
 
     def create_headerbar_widget(self):
         """Create the application's header bar."""
@@ -416,6 +472,12 @@ class MainWindow(Adw.ApplicationWindow):
             "Welcome to Agile Rates",
             "Complete setup to start seeing electricity prices.",
             compact_description="Complete setup to continue.",
+        )
+        self._set_price_empty_state(
+            "Set up electricity prices",
+            "Choose your tariff and region to see current and upcoming prices.",
+            button_label="Open Setup",
+            action_name="app.setup",
         )
         self.present_setup_window()
         return False
@@ -958,8 +1020,22 @@ class MainWindow(Adw.ApplicationWindow):
         self.usage_layout_view.set_layout_name("narrow")
         usage_page_box.prepend(self.usage_layout_view)
 
+        self.price_state_stack = Gtk.Stack.new()
+        self.price_state_stack.set_vexpand(True)
+        self.price_state_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        self.price_state_stack.set_transition_duration(200)
+        self.price_state_stack.add_named(scrolled_content, "content")
+        self.price_state_stack.add_named(self._build_price_loading_page(), "loading")
+        self.price_state_stack.add_named(self._build_price_empty_page(), "empty")
+        self.price_state_stack.set_visible_child_name("loading")
+
         self.main_view_stack = Adw.ViewStack.new()
-        self.main_view_stack.add_titled_with_icon(scrolled_content, "prices", "Prices", "view-list-symbolic")
+        self.main_view_stack.add_titled_with_icon(
+            self.price_state_stack,
+            "prices",
+            "Prices",
+            "view-list-symbolic",
+        )
         self.main_view_stack.add_titled_with_icon(plan_scroll, "plan", "Plan", "alarm-symbolic")
         self.main_view_stack.add_titled_with_icon(self.usage_state_stack, "usage", "Usage", "preferences-system-symbolic")
 
@@ -1270,6 +1346,38 @@ class MainWindow(Adw.ApplicationWindow):
         box.append(usage_empty_button)
 
         return clamp
+
+    def _build_price_empty_page(self):
+        page = Adw.StatusPage.new()
+        page.set_vexpand(True)
+        page.set_icon_name("network-error-symbolic")
+        page.set_title("Prices unavailable")
+        page.set_description(
+            "There are no current or upcoming prices to show. The app will keep trying automatically."
+        )
+
+        self.price_empty_button = Gtk.Button.new_with_label("Try Again")
+        self.price_empty_button.add_css_class("suggested-action")
+        self.price_empty_button.set_halign(Gtk.Align.CENTER)
+        self.price_empty_button.set_action_name("app.refresh")
+        page.set_child(self.price_empty_button)
+
+        self.price_empty_page = page
+        return page
+
+    def _build_price_loading_page(self):
+        page = Adw.StatusPage.new()
+        page.set_vexpand(True)
+        page.set_icon_name("view-refresh-symbolic")
+        page.set_title("Loading prices")
+        page.set_description("Fetching current and upcoming tariff prices.")
+
+        self.price_loading_spinner = Gtk.Spinner.new()
+        self.price_loading_spinner.set_size_request(32, 32)
+        self.price_loading_spinner.set_halign(Gtk.Align.CENTER)
+        page.set_child(self.price_loading_spinner)
+
+        return page
 
     def _build_usage_loading_page(self):
         clamp = Adw.Clamp.new()
@@ -1730,6 +1838,9 @@ class MainWindow(Adw.ApplicationWindow):
         request_id = self._fetch_generation
         self.price_refresh_in_progress = True
 
+        if self.current_price_data is None and not self.chart_prices:
+            self._set_price_loading_state()
+
         current_title = (
             format_unit_price_gbp(self.current_price_data['price_gbp'])
             if self.current_price_data
@@ -1750,30 +1861,43 @@ class MainWindow(Adw.ApplicationWindow):
         thread.start()
         return True
 
-    def _finish_price_refresh(self, _request_id):
+    def _finish_price_refresh(self, request_id, outcome="complete"):
+        is_current = self._is_current_fetch(request_id)
         self.price_refresh_in_progress = False
-        if not self._price_refresh_queued:
+        if self._price_refresh_queued:
+            force = self._queued_price_refresh_force
+            self._price_refresh_queued = False
+            self._queued_price_refresh_force = False
+            self.refresh_price(force=force)
             return False
 
-        force = self._queued_price_refresh_force
-        self._price_refresh_queued = False
-        self._queued_price_refresh_force = False
-        self.refresh_price(force=force)
+        if is_current:
+            self._schedule_price_refresh_after_result(outcome)
         return False
 
     def _is_current_fetch(self, request_id):
         return request_id == self._fetch_generation
 
-    def _apply_processed_prices(self, processed_prices, request_id):
+    def _apply_processed_prices(self, processed_prices, request_id, synced_at=None):
         if not self._is_current_fetch(request_id):
             return False
 
         self.all_prices = processed_prices
+        if synced_at is not None:
+            self._price_synced_at = synced_at
         self.update_current_price()
         return False
 
-    def _show_error_if_current(self, error_message, request_id):
+    def _show_error_if_current(self, error_message, request_id, preserve_current=False):
         if not self._is_current_fetch(request_id):
+            return False
+
+        if preserve_current:
+            self.update_current_price()
+            if self.current_price_data is not None:
+                self.status_label.set_text(
+                    f"{error_message} Existing prices remain available while the app retries."
+                )
             return False
 
         self.show_error(error_message)
@@ -1790,6 +1914,8 @@ class MainWindow(Adw.ApplicationWindow):
             GLib.idle_add(self._finish_price_refresh, request_id)
             return
 
+        outcome = "permanent-error"
+        synced_at = None
         try:
             selected_tariff_code = self.settings.get_string("selected-tariff-code")
             tariff_type = self.settings.get_string("selected-tariff-type")
@@ -1803,9 +1929,11 @@ class MainWindow(Adw.ApplicationWindow):
                 cached_data, cache_mtime_ts = self.cache_manager.get(rates_cache_key)
                 if cached_data and cache_mtime_ts:
                     cache_mtime = datetime.fromtimestamp(cache_mtime_ts, tz=timezone.utc)
-                    if not is_rates_cache_stale(cache_mtime, now):
+                    if not is_rates_cache_stale(cache_mtime, now, cached_data):
                         logger.debug("Rates data loaded from cache.")
                         raw_rates = cached_data
+                        synced_at = cache_mtime
+                        outcome = "complete"
                     else:
                         logger.debug("Stale cache, will refetch.")
 
@@ -1823,7 +1951,17 @@ class MainWindow(Adw.ApplicationWindow):
                     from requests.auth import HTTPBasicAuth
                     auth = HTTPBasicAuth(api_key, '')
 
-                response = requests.get(rates_url, params={'page_size': 1500}, timeout=10, auth=auth)
+                period_from, period_to = get_price_request_period(now)
+                response = requests.get(
+                    rates_url,
+                    params={
+                        'period_from': self._format_octopus_datetime(period_from),
+                        'period_to': self._format_octopus_datetime(period_to),
+                        'page_size': 100,
+                    },
+                    timeout=10,
+                    auth=auth,
+                )
                 if self._handle_tariff_fetch_error(response, request_id):
                     return
 
@@ -1834,22 +1972,45 @@ class MainWindow(Adw.ApplicationWindow):
                     data = response.json()
                     raw_rates = self._filter_half_hour_rates(data.get('results', []))
                 self.cache_manager.set(rates_cache_key, raw_rates)
+                synced_at = now
+                outcome = (
+                    "complete"
+                    if rates_cover_expected_horizon(raw_rates, now)
+                    else "incomplete"
+                )
 
             if not self._is_current_fetch(request_id):
                 return
 
             if raw_rates:
-                self._process_and_set_prices(raw_rates, request_id)
+                self._process_and_set_prices(raw_rates, request_id, synced_at)
             else:
-                GLib.idle_add(self._show_error_if_current, "No price data available from API.", request_id)
+                outcome = "retryable-error"
+                GLib.idle_add(
+                    self._show_error_if_current,
+                    "No price data is currently available from the API.",
+                    request_id,
+                    True,
+                )
 
         except requests.exceptions.RequestException as e:
-            GLib.idle_add(self._show_error_if_current, f"Network error: {type(e).__name__}", request_id)
+            status_code = getattr(getattr(e, "response", None), "status_code", None)
+            outcome = (
+                "retryable-error"
+                if status_code is None or status_code in {408, 429} or status_code >= 500
+                else "permanent-error"
+            )
+            GLib.idle_add(
+                self._show_error_if_current,
+                f"Network error: {type(e).__name__}",
+                request_id,
+                outcome == "retryable-error",
+            )
         except Exception:
             logger.exception("Unexpected price refresh failure")
             GLib.idle_add(self._show_error_if_current, "An unexpected error occurred.", request_id)
         finally:
-            GLib.idle_add(self._finish_price_refresh, request_id)
+            GLib.idle_add(self._finish_price_refresh, request_id, outcome)
 
     def _handle_tariff_fetch_error(self, response, request_id):
         if response.status_code == 400 and self._is_dual_register_response(response):
@@ -1981,8 +2142,15 @@ class MainWindow(Adw.ApplicationWindow):
             css_class=None,
         )
         self.status_label.set_text(description)
+        needs_setup = self._needs_setup()
+        self._set_price_empty_state(
+            title,
+            description,
+            button_label="Open Setup" if needs_setup else "Open Preferences",
+            action_name="app.setup" if needs_setup else "app.preferences",
+        )
         self.header_refresh_button.set_sensitive(True)
-        if self._needs_setup():
+        if needs_setup:
             self.present_setup_window()
         return False
 
@@ -2004,7 +2172,7 @@ class MainWindow(Adw.ApplicationWindow):
             "INTELLIGENT": "Intelligent Go",
         }.get(tariff_type, "an unknown tariff type")
 
-    def _process_and_set_prices(self, raw_rates, request_id):
+    def _process_and_set_prices(self, raw_rates, request_id, synced_at=None):
         """
         Processes raw price data by converting dates and prices, then updates the main price list.
         This centralized processing improves performance by avoiding redundant conversions.
@@ -2025,13 +2193,16 @@ class MainWindow(Adw.ApplicationWindow):
                 continue
 
         processed_prices.sort(key=lambda price: price['valid_from'])
-        GLib.idle_add(self._apply_processed_prices, processed_prices, request_id)
+        GLib.idle_add(self._apply_processed_prices, processed_prices, request_id, synced_at)
 
     def update_current_price(self):
         """
         Finds the current price from the pre-processed list and updates the UI.
         """
         if not self.all_prices:
+            self._show_current_price_unavailable(
+                "No price data is currently available. The app will retry automatically.",
+            )
             return
 
         now_utc = datetime.now(timezone.utc)
@@ -2052,7 +2223,41 @@ class MainWindow(Adw.ApplicationWindow):
             current_index_in_chart = 0 # Current price is always the first in the chart view
             self.update_display(current_rate, self.chart_prices, current_index_in_chart)
         else:
-            self.show_error("No current price data found. Rates may not be published yet.")
+            future_prices = [price for price in self.all_prices if price['valid_to'] > now_utc]
+            chart_slot_count = get_chart_slot_count(
+                self.get_width() or self.settings.get_int("window-width")
+            )
+            self.chart_prices = future_prices[:chart_slot_count]
+            self._show_current_price_unavailable(
+                "No rate covers the current half-hour. The app will retry automatically.",
+                self.chart_prices,
+            )
+
+    def _show_current_price_unavailable(self, message, chart_prices=None):
+        self.current_price_data = None
+        self._set_price_summary(
+            "Current price unavailable",
+            "Waiting for current tariff data.",
+            compact_description="Waiting for tariff data.",
+            css_class=None,
+        )
+        self._set_last_updated_label(self.time_label, self._price_synced_at)
+        chart_prices = chart_prices or []
+        self._update_price_charts(chart_prices, -1)
+        if chart_prices:
+            self._set_price_content_state()
+        else:
+            self._set_price_empty_state(
+                "Prices unavailable",
+                message,
+            )
+        if self.main_view_stack.get_visible_child_name() == "plan":
+            self.find_cheapest_slot(
+                self.duration_spin_button.get_value(),
+                self.start_within_spin_button.get_value_as_int(),
+            )
+        self.status_label.set_text(message)
+        self.header_refresh_button.set_sensitive(True)
 
     def update_display(self, current_rate, chart_prices, current_index):
         """
@@ -2074,23 +2279,9 @@ class MainWindow(Adw.ApplicationWindow):
             compact_description="",
             css_class=css_class,
         )
-        self._set_last_updated_label(self.time_label, datetime.now(UK_TIMEZONE))
-        self.price_chart.set_compact_mode(
-            is_compact_width(self.get_width()),
-            self.get_width() or self.settings.get_int("window-width"),
-            len(chart_prices),
-        )
-        self.price_chart.set_prices(chart_prices, current_index)
-        plan_chart_width = get_plan_chart_width(
-            self.get_width() or self.settings.get_int("window-width"),
-            get_content_margin(self.get_width() or self.settings.get_int("window-width")),
-        )
-        self.plan_price_chart.set_compact_mode(
-            is_compact_width(plan_chart_width),
-            plan_chart_width,
-            len(chart_prices),
-        )
-        self.plan_price_chart.set_prices(chart_prices, current_index)
+        self._set_last_updated_label(self.time_label, self._price_synced_at)
+        self._set_price_content_state()
+        self._update_price_charts(chart_prices, current_index)
         if self.main_view_stack.get_visible_child_name() == "plan":
             self.find_cheapest_slot(
                 self.duration_spin_button.get_value(),
@@ -2107,6 +2298,24 @@ class MainWindow(Adw.ApplicationWindow):
         self._update_usage_insights()
         self.header_refresh_button.set_sensitive(True)
 
+    def _update_price_charts(self, chart_prices, current_index):
+        self.price_chart.set_compact_mode(
+            is_compact_width(self.get_width()),
+            self.get_width() or self.settings.get_int("window-width"),
+            len(chart_prices),
+        )
+        self.price_chart.set_prices(chart_prices, current_index)
+        plan_chart_width = get_plan_chart_width(
+            self.get_width() or self.settings.get_int("window-width"),
+            get_content_margin(self.get_width() or self.settings.get_int("window-width")),
+        )
+        self.plan_price_chart.set_compact_mode(
+            is_compact_width(plan_chart_width),
+            plan_chart_width,
+            len(chart_prices),
+        )
+        self.plan_price_chart.set_prices(chart_prices, current_index)
+
     def show_error(self, error_message):
         """
         Displays an error state in the UI.
@@ -2118,6 +2327,11 @@ class MainWindow(Adw.ApplicationWindow):
             css_class=None,
         )
         self.status_label.set_text(error_message)
+        if not self.all_prices:
+            self._set_price_empty_state(
+                "Prices could not load",
+                error_message,
+            )
         self.toast_overlay.add_toast(Adw.Toast.new(f"Error: {error_message}"))
         self.header_refresh_button.set_sensitive(True)
 
@@ -2490,6 +2704,28 @@ class MainWindow(Adw.ApplicationWindow):
         self.usage_empty_title.set_text(title)
         self.usage_empty_description.set_text(description)
         self.usage_state_stack.set_visible_child_name("empty")
+
+    def _set_price_empty_state(
+        self,
+        title,
+        description,
+        button_label="Try Again",
+        action_name="app.refresh",
+    ):
+        self.price_loading_spinner.stop()
+        self.price_empty_page.set_title(title)
+        self.price_empty_page.set_description(description)
+        self.price_empty_button.set_label(button_label)
+        self.price_empty_button.set_action_name(action_name)
+        self.price_state_stack.set_visible_child_name("empty")
+
+    def _set_price_content_state(self):
+        self.price_loading_spinner.stop()
+        self.price_state_stack.set_visible_child_name("content")
+
+    def _set_price_loading_state(self):
+        self.price_loading_spinner.start()
+        self.price_state_stack.set_visible_child_name("loading")
 
     def _set_usage_content_state(self):
         self.usage_loading_spinner.stop()
