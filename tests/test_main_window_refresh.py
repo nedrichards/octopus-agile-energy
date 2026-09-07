@@ -102,7 +102,7 @@ class PriceRefreshCoordinationTests(unittest.TestCase):
         window.refresh_price.assert_not_called()
         self.assertEqual(window._next_price_refresh_at, due_at)
 
-    def test_transient_failure_uses_bounded_retry_sequence(self):
+    def test_transient_failure_backs_off_until_next_release(self):
         now = datetime(2026, 7, 25, 16, 30, tzinfo=timezone.utc)
         window = SimpleNamespace(
             _price_retry_attempt=0,
@@ -115,7 +115,7 @@ class PriceRefreshCoordinationTests(unittest.TestCase):
         ):
             mocked_datetime.now.return_value = now
             next_release.return_value = now + timedelta(days=1)
-            for attempt, delay in enumerate((120, 300, 600, 1200, 1800, 3600), start=1):
+            for attempt, delay in enumerate((120, 300, 600, 1200, 1800, 3600, 7200, 14400, 28800, 57600), start=1):
                 MainWindow._schedule_price_refresh_after_result(window, "retryable-error")
                 self.assertEqual(window._price_retry_attempt, attempt)
                 self.assertEqual(window._next_price_refresh_at, now + timedelta(seconds=delay))
@@ -124,6 +124,36 @@ class PriceRefreshCoordinationTests(unittest.TestCase):
 
         self.assertEqual(window._price_retry_attempt, 0)
         self.assertEqual(window._next_price_refresh_at, now + timedelta(days=1))
+
+    def test_incomplete_retry_does_not_delay_release_and_resets_backoff(self):
+        now = datetime(2026, 7, 25, 15, 0, tzinfo=timezone.utc)
+        window = SimpleNamespace(_price_retry_attempt=6, current_price_data={}, status_label=Mock())
+        with patch("src.ui.main_window.datetime") as mocked_datetime:
+            mocked_datetime.now.return_value = now
+            MainWindow._schedule_price_refresh_after_result(window, "incomplete")
+        self.assertEqual(window._next_price_refresh_at, now + timedelta(minutes=1))
+        self.assertEqual(window._price_retry_attempt, 0)
+        window.status_label.set_text.assert_called_once_with(
+            "The forecast is incomplete. The app will retry automatically."
+        )
+
+    def test_success_resets_extended_backoff(self):
+        window = SimpleNamespace(_price_retry_attempt=8)
+        MainWindow._schedule_price_refresh_after_result(window, "complete")
+        self.assertEqual(window._price_retry_attempt, 0)
+
+    def test_retry_delay_is_elapsed_time_across_clock_changes(self):
+        from src.uk_time import UK_TIMEZONE
+
+        for now in (
+            datetime(2026, 3, 29, 0, 30, tzinfo=timezone.utc),
+            datetime(2026, 10, 25, 0, 30, tzinfo=timezone.utc),
+        ):
+            with self.subTest(now=now), patch("src.ui.main_window.datetime") as mocked_datetime:
+                mocked_datetime.now.return_value = now.astimezone(UK_TIMEZONE)
+                window = SimpleNamespace(_price_retry_attempt=6)
+                MainWindow._schedule_price_refresh_after_result(window, "retryable-error")
+                self.assertEqual(window._next_price_refresh_at, now + timedelta(hours=2))
 
     def test_due_watchdog_does_not_fetch_while_offline(self):
         now = datetime(2026, 7, 25, 16, 30, tzinfo=timezone.utc)

@@ -30,7 +30,6 @@ from .application_id import get_application_id, is_development_build
 from .ui.main_window import MainWindow
 from .ui.styles import get_css
 
-
 LAUNCHABLE_MAIN_VIEWS = frozenset(("prices", "plan", "usage"))
 
 
