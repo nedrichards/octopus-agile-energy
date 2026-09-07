@@ -25,12 +25,17 @@ def expected_rates_horizon(now: datetime) -> datetime:
     return local_horizon.astimezone(timezone.utc)
 
 
-def rates_cover_expected_horizon(rates, now: datetime) -> bool:
+def rates_cover_expected_horizon(rates, now: datetime, tariff_type: str = "") -> bool:
     """Return whether rates continuously cover now through the expected horizon."""
     now_utc = now.astimezone(timezone.utc)
     minute = 0 if now_utc.minute < 30 else 30
     cursor = now_utc.replace(minute=minute, second=0, microsecond=0)
     horizon = expected_rates_horizon(now)
+    if tariff_type == "AGILE":
+        # Agile's published day ends at 23:00 GB time, not midnight.
+        # Keep the request period wider so any extra published rates are retained.
+        local_horizon = horizon.astimezone(UK_TIMEZONE)
+        horizon = (local_horizon - timedelta(hours=1)).astimezone(timezone.utc)
     intervals = []
     for rate in rates or ():
         try:
@@ -82,7 +87,7 @@ def get_price_request_period(now: datetime) -> tuple[datetime, datetime]:
     return period_from, expected_rates_horizon(now)
 
 
-def is_rates_cache_stale(cache_mtime: datetime, now: datetime, rates=None) -> bool:
+def is_rates_cache_stale(cache_mtime: datetime, now: datetime, rates=None, tariff_type: str = "") -> bool:
     local_now = now.astimezone(UK_TIMEZONE)
     release_time = local_now.replace(hour=PRICE_RELEASE_HOUR, minute=0, second=0, microsecond=0)
     written_before_release = (
@@ -90,5 +95,5 @@ def is_rates_cache_stale(cache_mtime: datetime, now: datetime, rates=None) -> bo
         and cache_mtime.astimezone(UK_TIMEZONE) < release_time
     )
     return written_before_release or (
-        rates is not None and not rates_cover_expected_horizon(rates, now)
+        rates is not None and not rates_cover_expected_horizon(rates, now, tariff_type)
     )

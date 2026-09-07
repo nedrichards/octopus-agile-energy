@@ -59,6 +59,26 @@ class PriceCacheTests(unittest.TestCase):
 
         self.assertFalse(rates_cover_expected_horizon(rates, now))
 
+    def test_agile_publication_boundary_and_missing_slots(self):
+        for now in (
+            datetime(2026, 9, 7, 10, tzinfo=timezone.utc),
+            datetime(2026, 9, 7, 16, tzinfo=timezone.utc),
+            datetime(2026, 1, 7, 17, tzinfo=timezone.utc),
+            datetime(2026, 3, 28, 17, tzinfo=timezone.utc),
+            datetime(2026, 10, 24, 17, tzinfo=timezone.utc),
+        ):
+            with self.subTest(now=now):
+                end = expected_rates_horizon(now) - timedelta(hours=1)
+                rates = self.build_half_hour_rates(now, end)
+                self.assertTrue(rates_cover_expected_horizon(rates, now, "AGILE"))
+                self.assertFalse(is_rates_cache_stale(now, now, rates, "AGILE"))
+                self.assertFalse(rates_cover_expected_horizon(rates, now, "GO"))
+                for missing in (0, len(rates) // 2, len(rates) - 1):
+                    with self.subTest(missing=missing):
+                        partial = rates[:missing] + rates[missing + 1:]
+                        self.assertFalse(rates_cover_expected_horizon(partial, now, "AGILE"))
+                        self.assertTrue(is_rates_cache_stale(now, now, partial, "AGILE"))
+
     def test_horizon_is_incomplete_when_internal_half_hour_is_missing(self):
         now = datetime(2026, 7, 25, 15, 30, tzinfo=timezone.utc)
         rates = [

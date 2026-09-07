@@ -1929,7 +1929,7 @@ class MainWindow(Adw.ApplicationWindow):
                 cached_data, cache_mtime_ts = self.cache_manager.get(rates_cache_key)
                 if cached_data and cache_mtime_ts:
                     cache_mtime = datetime.fromtimestamp(cache_mtime_ts, tz=timezone.utc)
-                    if not is_rates_cache_stale(cache_mtime, now, cached_data):
+                    if not is_rates_cache_stale(cache_mtime, now, cached_data, tariff_type):
                         logger.debug("Rates data loaded from cache.")
                         raw_rates = cached_data
                         synced_at = cache_mtime
@@ -1975,7 +1975,7 @@ class MainWindow(Adw.ApplicationWindow):
                 synced_at = now
                 outcome = (
                     "complete"
-                    if rates_cover_expected_horizon(raw_rates, now)
+                    if rates_cover_expected_horizon(raw_rates, now, tariff_type)
                     else "incomplete"
                 )
 
