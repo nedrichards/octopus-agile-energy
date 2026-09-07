@@ -57,6 +57,7 @@ install_data(
     'ui/main_window.py',
     'ui/preferences_window.py',
     'ui/price_chart.py',
+    'ui/paid_rate_chart.py',
     'ui/setup_window.py',
     'ui/styles.py',
     'ui/custom_spin_button.py',

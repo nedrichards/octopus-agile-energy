@@ -162,6 +162,17 @@ The selected workspace, Plan duration, and search window are remembered between 
 
 For a one-off launch into a particular workspace, use `--tab prices`, `--tab plan`, or `--tab usage`. This does not replace the workspace remembered for normal launches.
 
+The rolling 30-day price chart in Usage offers 6-month, 12-month, 24-month,
+and 5-year views when enough history exists and they show distinct periods,
+alongside All available. Shorter histories show their available span without
+a period selector. Each daily point divides the preceding 30 days' matched
+energy charges by their consumption; standing charges are excluded. Windows
+with missing readings or rates appear as gaps. Click or drag sideways across the chart, or use Left,
+Right, Home, and End to inspect dates. The first history refresh after upgrading
+backfills historical half-hour readings and tariffs and can take longer than
+normal; subsequent refreshes use an overlap. Only daily cost totals are retained
+for the longer history, alongside the existing consumption archive.
+
 ### Account scope
 
 Accounts with several properties or independent active electricity supplies are not currently supported. Account auto-detection uses the first active electricity tariff agreement returned by the Octopus API. Usage history uses the first active electricity meter point for which consumption is available and, where that meter point lists several meters, chooses the meter with the most returned samples. The app does not aggregate properties or independent supplies, and the selected tariff and usage may therefore depend on the API ordering for such accounts. Choose the tariff manually if necessary, but do not treat the usage or spend views as whole-account totals.

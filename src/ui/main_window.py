@@ -68,6 +68,7 @@ from .adaptive_layout import (
     is_usage_wide_layout,
 )
 from .custom_spin_button import CustomSpinButton
+from .paid_rate_chart import PaidRateChart
 from .preferences_window import PreferencesWindow
 from .price_chart import PriceChartWidget
 from .setup_window import SetupWindow
@@ -222,32 +223,32 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _schedule_price_refresh_after_result(self, outcome):
         now = datetime.now(UK_TIMEZONE)
+        next_release = next_price_release_check(now)
         if outcome in {"incomplete", "retryable-error"}:
-            if self._price_retry_attempt < len(PRICE_RETRY_DELAYS_SECONDS):
-                delay = PRICE_RETRY_DELAYS_SECONDS[self._price_retry_attempt]
-                self._price_retry_attempt += 1
-                self._next_price_refresh_at = now + timedelta(seconds=delay)
-                logger.debug(
-                    "Price refresh outcome %s; retry %d scheduled for %s",
-                    outcome,
-                    self._price_retry_attempt,
-                    self._next_price_refresh_at.isoformat(),
+            attempt = self._price_retry_attempt
+            if attempt < len(PRICE_RETRY_DELAYS_SECONDS):
+                delay = PRICE_RETRY_DELAYS_SECONDS[attempt]
+            else:
+                # Double beyond the initial sequence; a day is enough to reach
+                # the next release, even across the autumn clock change.
+                delay = PRICE_RETRY_DELAYS_SECONDS[-1] * 2 ** min(
+                    attempt - len(PRICE_RETRY_DELAYS_SECONDS) + 1, 5
                 )
-                if getattr(self, "current_price_data", None) is not None:
-                    self.status_label.set_text(
-                        "The forecast is incomplete. The app will retry automatically."
-                        if outcome == "incomplete"
-                        else "Could not refresh the forecast. The app will retry automatically."
-                    )
-                return
+            retry_at = now.astimezone(timezone.utc) + timedelta(seconds=delay)
+            self._next_price_refresh_at = min(retry_at, next_release)
+            self._price_retry_attempt = 0 if retry_at >= next_release else attempt + 1
+            logger.debug("Next price retry: %s", self._next_price_refresh_at.isoformat())
+            if getattr(self, "current_price_data", None) is not None:
+                self.status_label.set_text(
+                    "The forecast is incomplete. The app will retry automatically."
+                    if outcome == "incomplete"
+                    else "Could not refresh the forecast. The app will retry automatically."
+                )
+            return
 
         self._price_retry_attempt = 0
-        self._next_price_refresh_at = next_price_release_check(now)
+        self._next_price_refresh_at = next_release
         logger.debug("Next scheduled price refresh: %s", self._next_price_refresh_at.isoformat())
-        if outcome == "incomplete" and getattr(self, "current_price_data", None) is not None:
-            self.status_label.set_text(
-                "The forecast remains incomplete. You can try refreshing again later."
-            )
 
     def create_headerbar_widget(self):
         """Create the application's header bar."""
@@ -776,6 +777,13 @@ class MainWindow(Adw.ApplicationWindow):
         usage_chart_box.append(usage_selected_day_box)
         self._update_usage_chart_accessible_summary()
 
+        paid_rate_group = Adw.PreferencesGroup()
+        paid_rate_group.set_title("Rolling 30-day price paid")
+        paid_rate_group.set_description("Your usage-weighted energy price, excluding standing charges.")
+        self.paid_rate_chart = PaidRateChart()
+        paid_rate_group.add(self.paid_rate_chart)
+        usage_content_box.append(paid_rate_group)
+
         usage_group = Adw.PreferencesGroup()
         usage_group.set_title("Usage")
         usage_content_box.append(usage_group)
@@ -838,14 +846,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.cheap_rate_row.add_suffix(self.cheap_rate_label)
         usage_patterns_group.add(self.cheap_rate_row)
 
-        self.average_unit_rate_row = Adw.ActionRow.new()
-        self.average_unit_rate_row.set_title("Average unit rate paid")
-        self.average_unit_rate_row.set_subtitle("Waiting for matched historical rates.")
-        self.average_unit_rate_row.add_prefix(Gtk.Image.new_from_icon_name("accessories-calculator-symbolic"))
-        self.average_unit_rate_label = Gtk.Label.new("—")
-        self.average_unit_rate_row.add_suffix(self.average_unit_rate_label)
-        usage_patterns_group.add(self.average_unit_rate_row)
-
         spending_group = Adw.PreferencesGroup()
         spending_group.set_title("Estimated Spend")
         spending_group.set_description("Waiting for historical usage and rate data.")
@@ -888,7 +888,6 @@ class MainWindow(Adw.ApplicationWindow):
             self.baseline_load_row,
             self.peak_usage_row,
             self.cheap_rate_row,
-            self.average_unit_rate_row,
             self.cost_daily_row,
             self.cost_total_daily_row,
             self.cost_trend_row,
@@ -2504,8 +2503,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.peak_usage_row.set_subtitle(insight["peak_detail"])
         self.cheap_rate_label.set_text(insight["cheap_rate_text"])
         self.cheap_rate_row.set_subtitle(insight["cheap_rate_detail"])
-        self.average_unit_rate_label.set_text(insight["average_unit_text"])
-        self.average_unit_rate_row.set_subtitle(insight["average_unit_detail"])
+        self.paid_rate_chart.set_history(insight.get("paid_rate_history", []))
         self.cost_daily_label.set_text(insight["daily_cost_text"])
         self.cost_total_daily_label.set_text(insight["daily_total_cost_text"])
         self.cost_trend_label.set_text(insight["cost_trend_text"])
@@ -2893,8 +2891,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.peak_usage_row.set_subtitle("Waiting for usage samples.")
         self.cheap_rate_label.set_text("—")
         self.cheap_rate_row.set_subtitle("Waiting for matched historical rates.")
-        self.average_unit_rate_label.set_text("—")
-        self.average_unit_rate_row.set_subtitle("Waiting for matched historical rates.")
+        self.paid_rate_chart.set_history([])
         self.cost_daily_label.set_text("—")
         self.cost_total_daily_label.set_text("—")
         self.cost_trend_label.set_text("—")

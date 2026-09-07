@@ -48,8 +48,10 @@ def fetch_daily_usage_archive(account_data, period_from=None, now=None):
     now = now or datetime.now(timezone.utc)
     if period_from is None:
         period_from = now - timedelta(days=USAGE_ARCHIVE_DAYS)
-    samples = _fetch_usage_samples(account_data, period_from, now, group_by="day")
-    return build_daily_usage_archive(samples)
+    samples = _fetch_usage_samples(account_data, period_from, now)
+    costs = {day["date"]: day for day in build_historical_usage_costs(account_data, samples)}
+    return [dict(day, **{key: value for key, value in costs.get(day["date"], {}).items()
+                        if key != "date"}) for day in build_daily_usage_archive(samples)]
 
 
 def _fetch_usage_samples(account_data, period_from, now, group_by=None):
@@ -72,7 +74,7 @@ def _fetch_usage_samples(account_data, period_from, now, group_by=None):
                     "period_from": period_from_text,
                     "period_to": period_to_text,
                     "order_by": "period",
-                    "page_size": 500 if group_by else 250,
+                    "page_size": 500 if group_by else 1500,
                 }
                 if group_by:
                     query["group_by"] = group_by
@@ -135,6 +137,8 @@ def get_usage_archive_refresh_start(cached_data, now=None):
     if not cached_data:
         return archive_start
 
+    if not cached_data.get("cost_archive_backfilled"):
+        return archive_start
     archive_dates = []
     for record in cached_data.get("daily_usage_archive", []):
         try:
@@ -196,6 +200,7 @@ def merge_usage_history(
             fresh_daily_archive if fresh_daily_archive is not None else build_daily_usage_archive(fresh_samples),
             now,
         ),
+        "cost_archive_backfilled": bool(fresh_daily_archive is not None or cached_data.get("cost_archive_backfilled")),
         "cache_version": USAGE_CACHE_VERSION,
         "price_band_version": PRICE_BAND_VERSION,
         "synced_at": now.isoformat(),
@@ -231,7 +236,8 @@ def _parse_sample_start(sample):
 def fetch_all_consumption_pages(initial_url):
     samples = []
     next_url = initial_url
-    max_pages = 40
+    # Up to five years of half-hour readings (about 88,000 records).
+    max_pages = 80
     pages_fetched = 0
     seen_urls = set()
 
@@ -330,7 +336,7 @@ def fetch_historical_tariff_records(product_code, tariff_code, endpoint, period_
 def fetch_all_tariff_pages(initial_url):
     records = []
     next_url = initial_url
-    max_pages = 40
+    max_pages = 80
     pages_fetched = 0
     seen_urls = set()
 

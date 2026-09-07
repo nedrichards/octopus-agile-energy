@@ -200,6 +200,7 @@ class UsageHistoryTests(unittest.TestCase):
 
     def test_archive_refresh_overlaps_latest_grouped_day(self):
         cached_data = {
+            "cost_archive_backfilled": True,
             "samples": [],
             "daily_costs": [],
             "daily_usage_archive": [{"date": "2026-07-24", "kwh": 2.0}],
@@ -211,7 +212,18 @@ class UsageHistoryTests(unittest.TestCase):
 
         self.assertEqual(refresh_start, datetime(2026, 7, 16, 23, 0, tzinfo=timezone.utc))
 
-    def test_daily_archive_requests_local_day_grouping(self):
+    def test_consumption_only_archive_gets_full_cost_backfill(self):
+        cached_data = {
+            "samples": [], "daily_costs": [],
+            "daily_usage_archive": [{"date": "2026-07-24", "kwh": 2}],
+            "cache_version": USAGE_CACHE_VERSION, "price_band_version": PRICE_BAND_VERSION,
+        }
+        self.assertEqual(get_usage_archive_refresh_start(cached_data, self.now),
+                         self.now - timedelta(days=USAGE_ARCHIVE_DAYS))
+        merged = merge_usage_history(cached_data, [], [], self.now, fresh_daily_archive=[])
+        self.assertTrue(merged["cost_archive_backfilled"])
+
+    def test_daily_archive_matches_half_hour_costs(self):
         account_data = {
             "properties": [{
                 "electricity_meter_points": [{
@@ -223,20 +235,23 @@ class UsageHistoryTests(unittest.TestCase):
         }
         grouped = [{
             "interval_start": "2026-07-24T00:00:00+01:00",
-            "interval_end": "2026-07-25T00:00:00+01:00",
+            "interval_end": "2026-07-24T00:30:00+01:00",
             "consumption": 8.5,
         }]
 
-        with patch("src.usage_history.fetch_all_consumption_pages", return_value=grouped) as fetch:
+        costs = [{"date": "2026-07-24", "energy_cost_gbp": 1.2, "matched_kwh": 8.5,
+                  "sample_count": 1, "missing_rate_count": 0}]
+        with (patch("src.usage_history.fetch_all_consumption_pages", return_value=grouped) as fetch,
+              patch("src.usage_history.build_historical_usage_costs", return_value=costs)):
             archive = fetch_daily_usage_archive(account_data, now=self.now)
 
         query = parse_qs(urlparse(fetch.call_args.args[0]).query)
-        self.assertEqual(query["group_by"], ["day"])
+        self.assertNotIn("group_by", query)
         self.assertEqual(
             query["period_from"],
             [(self.now - timedelta(days=USAGE_ARCHIVE_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")],
         )
-        self.assertEqual(archive, [{"date": "2026-07-24", "kwh": 8.5}])
+        self.assertEqual(archive, [dict(costs[0], kwh=8.5)])
 
     def test_fetch_recent_usage_uses_explicit_incremental_start(self):
         account_data = {

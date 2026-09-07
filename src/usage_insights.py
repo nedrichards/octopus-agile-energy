@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+import calendar
+from datetime import date, datetime, timedelta, timezone
 
 from .price_bands import (
     HIGH_PRICE_THRESHOLD_GBP,
@@ -126,8 +127,117 @@ def build_usage_dashboard_data(samples, synced_at, daily_costs=None, daily_archi
     parsed_samples = _parse_samples(samples)
     insight = _build_usage_insight_data(parsed_samples, synced_at)
     insight.update(_build_usage_pattern_insights(parsed_samples, daily_costs))
+    trailing_rate = build_trailing_paid_rate(daily_costs or [], synced_at)
+    insight["average_unit_text"] = trailing_rate["text"]
+    insight["average_unit_detail"] = trailing_rate["detail"]
     insight["seasonal"] = build_seasonal_usage_insight(daily_archive or [], synced_at)
+    insight["paid_rate_history"] = build_paid_rate_history([*(daily_archive or []), *(daily_costs or [])], synced_at)
     return insight
+
+
+def paid_rate_period_options(history):
+    """Offer only fully spanned, distinct views, followed by all available data."""
+    valid = [(day, value) for day, value in history if value is not None]
+    if not valid:
+        return [(None, "All available")], ""
+    first, last = date.fromisoformat(valid[0][0]), date.fromisoformat(valid[-1][0])
+    days = (last - first).days + 1
+    following = last + timedelta(days=1)
+    months = (following.year - first.year) * 12 + following.month - first.month
+    months -= following.day < first.day
+    span = f"{days} day{'s' if days != 1 else ''}" if months < 6 else f"{months} months"
+    options = []
+    seen = set()
+    for duration, label in ((6, "6 months"), (12, "12 months"), (24, "24 months"), (60, "5 years")):
+        year, month = divmod(last.year * 12 + last.month - 1 - duration, 12)
+        cutoff = date(year, month + 1, min(last.day, calendar.monthrange(year, month + 1)[1]))
+        starts = [day for day, _ in valid if day > cutoff.isoformat()]
+        if first <= cutoff and starts and starts[0] != valid[0][0] and starts[0] not in seen:
+            options.append((duration, label))
+            seen.add(starts[0])
+    options.append((None, f"All available · {span}"))
+    return options, f"Available history · {span}"
+
+
+def select_paid_rate_period(history, months):
+    """Trim unavailable edges while retaining calendar gaps inside the period."""
+    if not history:
+        return [], "Refresh usage history to load matched prices."
+    if months is None:
+        valid = [index for index, (_day, value) in enumerate(history) if value is not None]
+        if not valid:
+            return [], "Each point needs 30 days of matched usage and prices."
+        points = history[valid[0]:valid[-1] + 1]
+        return points, "Gaps mark missing usage or prices." if any(value is None for _, value in points) else ""
+    end = date.fromisoformat(history[-1][0])
+    year, month = divmod(end.year * 12 + end.month - 1 - months, 12)
+    start = date(year, month + 1, min(end.day, calendar.monthrange(year, month + 1)[1]))
+    requested = [point for point in history if start.isoformat() < point[0] <= end.isoformat()]
+    valid = [index for index, (_day, value) in enumerate(requested) if value is not None]
+    if not valid:
+        return [], "No complete 30-day averages in this period. Each point needs 30 days of matched usage and prices."
+    points = requested[valid[0]:valid[-1] + 1]
+    messages = []
+    if len(valid) < (end - start).days:
+        first, last = (date.fromisoformat(points[index][0]) for index in (0, -1))
+        messages.append(f"Available {first:%d %b %Y}–{last:%d %b %Y}; the full selected period isn’t available yet.")
+    if any(value is None for _day, value in points):
+        messages.append("Gaps mark missing usage or prices.")
+    return points, " ".join(messages)
+
+
+def build_paid_rate_history(daily_costs, synced_at):
+    """Daily trailing 30-day energy rates; None explicitly marks incomplete windows."""
+    end = latest_complete_local_day(synced_at)
+    if end is None:
+        return []
+    by_date = {day.get("date"): day for day in daily_costs}
+    points = []
+    window = []
+    for offset in range(5 * 366 + 29, -1, -1):
+        day = end - timedelta(days=offset)
+        record = by_date.get(day.isoformat(), {})
+        valid = (is_complete_usage_day(day.isoformat(), record.get("sample_count", 0), synced_at)
+                 and record.get("missing_rate_count", 0) == 0
+                 and "energy_cost_gbp" in record and "matched_kwh" in record)
+        window.append(record if valid else None)
+        window = window[-30:]
+        rate = None
+        if len(window) == 30 and all(item is not None for item in window):
+            kwh = sum(float(item["matched_kwh"]) for item in window)
+            if kwh > 0:
+                rate = 100 * sum(float(item["energy_cost_gbp"]) for item in window) / kwh
+        if offset <= 5 * 366:
+            points.append((day.isoformat(), rate))
+    return points
+
+
+def build_trailing_paid_rate(daily_costs, synced_at):
+    """Usage-weighted energy rate for the 30 GB dates before synchronization."""
+    end = latest_complete_local_day(synced_at)
+    if end is None:
+        return _insight_empty("Refresh usage history to calculate the last 30 days.")
+    start = end - timedelta(days=29)
+    days = {}
+    for day in daily_costs:
+        day_text = day.get("date", "")
+        if not isinstance(day_text, str) or not start.isoformat() <= day_text <= end.isoformat():
+            continue
+        if not is_complete_usage_day(day_text, day.get("sample_count", 0), synced_at):
+            continue
+        if day.get("missing_rate_count", 0) or "energy_cost_gbp" not in day:
+            continue
+        days[day_text] = day
+    kwh = sum(float(day.get("matched_kwh", day.get("kwh", 0)) or 0) for day in days.values())
+    cost = sum(float(day["energy_cost_gbp"] or 0) for day in days.values())
+    period = f"{start:%d %b %Y}–{end:%d %b %Y}"
+    coverage = f"{len(days)}/30 complete days with matched rates."
+    detail = f"{period} · {coverage} Usage-weighted; excludes standing charges."
+    if kwh <= 0:
+        return _insight_empty(f"{detail} Needs non-zero matched usage.")
+    if len(days) < 30:
+        detail += " Incomplete days excluded."
+    return {"text": f"{cost / kwh * 100:.1f}p/kWh", "detail": detail}
 
 
 def _build_usage_pattern_insights(parsed_samples, daily_costs=None):

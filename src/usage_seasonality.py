@@ -44,7 +44,10 @@ def merge_daily_usage_archive(cached_archive, fresh_archive, now=None):
         except (TypeError, ValueError):
             continue
         if day >= cutoff:
-            by_date[day] = {"date": day.isoformat(), "kwh": kwh}
+            by_date[day] = {"date": day.isoformat(), "kwh": kwh,
+                           **{key: record[key] for key in (
+                               "energy_cost_gbp", "matched_kwh", "sample_count", "missing_rate_count"
+                           ) if key in record}}
     return [by_date[day] for day in sorted(by_date)]
 
 
