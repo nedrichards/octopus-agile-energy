@@ -67,6 +67,18 @@
   </screenshots>
 
   <releases>
+    <release version="1.0.27" date="2026-09-07">
+      <description>
+        <p>Explore how your energy price changes over time with a clearer Usage history.</p>
+        <ul>
+          <li>Show a rolling 30-day, usage-weighted average price paid across available history</li>
+          <li>Offer useful history periods as data becomes available, with inline coverage messages and gaps</li>
+          <li>Scrub the history chart with a mouse, trackpad, touch, or keyboard</li>
+          <li>Keep recovering incomplete forecasts with exponential backoff until the next release</li>
+          <li>Update the bundled idna dependency and enforce Python lint checks in CI</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.26" date="2026-09-04">
       <description>
         <p>This release keeps price forecasts fresh and makes unavailable or clock-change data clearer.</p>
