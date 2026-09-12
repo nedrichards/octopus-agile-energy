@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from src.ui.preferences_window import PreferencesWindow
+from src.ui.preferences_window import PreferencesDialog
 from src.ui.setup_window import SetupWindow
 
 
@@ -15,19 +15,32 @@ class PreferencesCredentialTests(unittest.TestCase):
             api_key_entry=Mock(),
         )
 
-        PreferencesWindow.on_api_key_changed(window, Mock())
+        PreferencesDialog.on_api_key_changed(window, Mock())
 
         self.assertTrue(window._api_key_dirty)
         store_api_key.assert_not_called()
 
         window.api_key_entry.get_text.return_value = " secret-key "
         store_api_key.return_value = True
-        self.assertTrue(PreferencesWindow._save_api_key_entry(window))
+        self.assertTrue(PreferencesDialog._save_api_key_entry(window))
         self.assertFalse(window._api_key_dirty)
         store_api_key.assert_called_once_with("secret-key")
 
-        self.assertTrue(PreferencesWindow._save_api_key_entry(window))
+        self.assertTrue(PreferencesDialog._save_api_key_entry(window))
         store_api_key.assert_called_once_with("secret-key")
+
+    def test_close_cancels_location_and_saves_credentials(self):
+        location_portal = Mock()
+        window = SimpleNamespace(
+            location_portal=location_portal,
+            _save_api_key_entry=Mock(),
+        )
+
+        PreferencesDialog.on_closed(window, None)
+
+        location_portal.cancel.assert_called_once_with()
+        self.assertIsNone(window.location_portal)
+        window._save_api_key_entry.assert_called_once_with()
 
 
 class SetupCredentialTests(unittest.TestCase):

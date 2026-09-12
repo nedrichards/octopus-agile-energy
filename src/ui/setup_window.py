@@ -16,15 +16,15 @@ from ..region_location import LocationPortal
 from ..secrets_manager import clear_api_key, get_api_key, store_api_key
 from ..usage_history import get_account_data
 from ..utils import CacheManager
-from .preferences_window import PreferencesWindow
+from .preferences_window import PreferencesDialog
 
 logger = logging.getLogger(__name__)
 
 
 class SetupWindow(Adw.Window):
-    TARIFF_TYPES = PreferencesWindow.TARIFF_TYPES
-    TARIFF_TYPE_CODES = PreferencesWindow.TARIFF_TYPE_CODES
-    TARIFF_CODE_TO_NAME = PreferencesWindow.TARIFF_CODE_TO_NAME
+    TARIFF_TYPES = PreferencesDialog.TARIFF_TYPES
+    TARIFF_TYPE_CODES = PreferencesDialog.TARIFF_TYPE_CODES
+    TARIFF_CODE_TO_NAME = PreferencesDialog.TARIFF_CODE_TO_NAME
     REGION_CODE_TO_NAME = SHARED_REGION_CODE_TO_NAME
 
     def __init__(self, settings, parent, on_complete=None, **kwargs):
@@ -686,14 +686,14 @@ class SetupWindow(Adw.Window):
         return None
 
     def _extract_active_tariff_code(self, account_data):
-        return PreferencesWindow._extract_active_tariff_code(self, account_data)
+        return PreferencesDialog._extract_active_tariff_code(self, account_data)
 
     def _infer_tariff_type_from_code(self, tariff_code):
-        return PreferencesWindow._infer_tariff_type_from_code(self, tariff_code)
+        return PreferencesDialog._infer_tariff_type_from_code(self, tariff_code)
 
     @staticmethod
     def _contains_token(value, token):
-        return PreferencesWindow._contains_token(value, token)
+        return PreferencesDialog._contains_token(value, token)
 
     def _get_selected_string(self, combo_row):
         selected = combo_row.get_selected_item()

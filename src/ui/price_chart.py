@@ -214,8 +214,6 @@ class PriceChartWidget(Gtk.Overlay):
 
         width = self.get_width()
         if width <= 0:
-            width = self.get_allocated_width()
-        if width <= 0:
             return None
 
         chart_width = width - self.margin_left - self.margin_right

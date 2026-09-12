@@ -69,7 +69,7 @@ from .adaptive_layout import (
 )
 from .custom_spin_button import CustomSpinButton
 from .paid_rate_chart import PaidRateChart
-from .preferences_window import PreferencesWindow
+from .preferences_window import PreferencesDialog
 from .price_chart import PriceChartWidget
 from .setup_window import SetupWindow
 
@@ -407,8 +407,7 @@ class MainWindow(Adw.ApplicationWindow):
         """
         Displays the About dialog.
         """
-        about_dialog = Adw.AboutWindow(
-            transient_for=self,
+        about_dialog = Adw.AboutDialog(
             application_name="Agile Rates",
             application_icon="com.nedrichards.octopusagile",
             developer_name="Nick Richards",
@@ -429,7 +428,7 @@ class MainWindow(Adw.ApplicationWindow):
             "Electricity-region boundary data is separately licensed under the "
             "Northern Powergrid Open Data Licence v1.0. Northern Powergrid does not endorse this application.",
         )
-        about_dialog.present()
+        about_dialog.present(self)
 
     def on_visibility_change(self, *args):
         if self.is_visible():
@@ -448,10 +447,10 @@ class MainWindow(Adw.ApplicationWindow):
         Opens the Preferences window.
         """
         if not self.preferences_window:
-            self.preferences_window = PreferencesWindow(settings=self.settings, parent=self)
-            self.preferences_window.connect("hide", self.on_preferences_hidden)
+            self.preferences_window = PreferencesDialog(settings=self.settings)
+            self.preferences_window.connect("closed", self.on_preferences_hidden)
 
-        self.preferences_window.present()
+        self.preferences_window.present(self)
 
     def on_setup_action(self, action, param):
         self.present_setup_window()
@@ -3471,7 +3470,7 @@ class MainWindow(Adw.ApplicationWindow):
         if not self.usage_chart_points:
             return None
 
-        width = self.usage_chart_area.get_width() or self.usage_chart_area.get_allocated_width()
+        width = self.usage_chart_area.get_width()
         margin_left = getattr(self, "usage_chart_margin_left", 45)
         margin_right = getattr(self, "usage_chart_margin_right", 15)
         chart_width = width - margin_left - margin_right

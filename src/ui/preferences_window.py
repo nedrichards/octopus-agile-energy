@@ -36,7 +36,7 @@ from ..utils import CacheManager
 
 logger = logging.getLogger(__name__)
 
-class PreferencesWindow(Adw.PreferencesWindow):
+class PreferencesDialog(Adw.PreferencesDialog):
     TARIFF_TYPES: ClassVar[list[str]] = ["Agile", "Go", "Intelligent Go"]
     TARIFF_TYPE_CODES: ClassVar[dict[str, str]] = {
         "Agile": "AGILE",
@@ -54,11 +54,9 @@ class PreferencesWindow(Adw.PreferencesWindow):
         return token in parts
 
 
-    def __init__(self, settings, parent, **kwargs):
+    def __init__(self, settings, **kwargs):
         super().__init__(**kwargs)
         self.set_title("Preferences")
-        self.set_transient_for(parent)
-        self.set_modal(True)
 
         self.settings = settings
         self.cache_manager = CacheManager()
@@ -76,7 +74,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
         self.setup_ui()
         self.load_tariffs_and_regions() # Initiate loading of tariff data
 
-        self.connect("close-request", self.on_close_request)
+        self.connect("closed", self.on_closed)
 
     def setup_ui(self):
         page = Adw.PreferencesPage.new()
@@ -189,8 +187,6 @@ class PreferencesWindow(Adw.PreferencesWindow):
         self.usage_status.set_wrap(True)
         self.usage_status.set_accessible_role(Gtk.AccessibleRole.STATUS)
         api_group.add(self.usage_status)
-
-        self.present()
 
     def on_api_key_changed(self, entry):
         self._api_key_dirty = True
@@ -680,13 +676,11 @@ class PreferencesWindow(Adw.PreferencesWindow):
         item = combo_row.get_selected_item()
         return item.get_string() if item else ""
 
-    def on_close_request(self, window):
+    def on_closed(self, _dialog):
         """
-        Handles the close request by hiding the window instead of destroying it.
+        Saves pending changes and cancels portal work after the dialog closes.
         """
         if self.location_portal is not None:
             self.location_portal.cancel()
             self.location_portal = None
         self._save_api_key_entry()
-        self.hide()
-        return True
