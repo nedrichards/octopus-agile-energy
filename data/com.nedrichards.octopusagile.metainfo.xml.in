@@ -67,6 +67,15 @@
   </screenshots>
 
   <releases>
+    <release version="1.0.28" date="2026-09-13">
+      <description>
+        <p>This release prepares Agile Rates for newer GNOME platform releases.</p>
+        <ul>
+          <li>Use modern adaptive dialogs for Preferences and About</li>
+          <li>Replace deprecated GTK widget sizing calls</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.27" date="2026-09-07">
       <description>
         <p>Explore how your energy price changes over time with a clearer Usage history.</p>
