@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 from src.region_location import (
     DNO_NAME_TO_REGION_CODE,
@@ -114,3 +115,29 @@ def test_cancelling_a_portal_request_prevents_late_callbacks():
     portal.cancel()
 
     assert portal._finished
+
+
+def test_location_callback_defers_boundary_loading_to_one_worker():
+    portal = LocationPortal(Mock(), Mock())
+    portal.session_path = "/test/session"
+    parameters = Mock()
+    parameters.unpack.return_value = ("/test/session", {"Latitude": 51.5, "Longitude": -0.1})
+    with patch("src.region_location.load_region_features") as load, \
+            patch("src.region_location.threading.Thread") as thread:
+        portal._on_location_signal(None, None, "LocationUpdated", parameters)
+        portal._on_location_signal(None, None, "LocationUpdated", parameters)
+        load.assert_not_called()
+        thread.return_value.start.assert_called_once()
+
+
+def test_portal_proxy_creation_is_async_and_cancellation_discards_completion():
+    portal = LocationPortal(Mock(), Mock())
+    ready = Mock()
+    with patch("src.region_location.Gio.DBusProxy.new_for_bus") as create, \
+            patch("src.region_location.Gio.DBusProxy.new_for_bus_finish") as finish:
+        portal._create_proxy("test.interface", "/test/object", ready)
+        ready.assert_not_called()
+        finish.assert_not_called()
+        portal.cancel()
+        create.call_args.args[7](None, Mock(), None)
+        ready.assert_not_called()

@@ -13,9 +13,9 @@ from ..octopus_api import OctopusApiError, get_json
 from ..price_logic import build_region_to_tariffs_map
 from ..region_location import REGION_CODE_TO_NAME as SHARED_REGION_CODE_TO_NAME
 from ..region_location import LocationPortal
-from ..secrets_manager import clear_api_key, get_api_key, store_api_key
+from ..secrets_manager import get_api_key_async, save_api_key_async
 from ..usage_history import get_account_data
-from ..utils import CacheManager
+from ..utils import CacheManager, weak_callback
 from .preferences_window import PreferencesDialog
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,14 @@ class SetupWindow(Adw.Window):
         self.settings = settings
         self.parent_window = parent
         self.on_complete = on_complete
-        self.cache_manager = CacheManager()
+        self._api_key_available = False
+        self._account_key_dirty = False
+        self._credentials_loading = True
+        self._credential_save_pending = False
+        self._credential_save_callbacks = []
+        self._credential_revision = 0
+        self._closed = False
+        self.cache_manager = CacheManager(initialize=False)
         self.all_regions = sorted(self.REGION_CODE_TO_NAME.values())
         self.region_to_tariffs = {}
         self._load_generation = 0
@@ -45,8 +52,9 @@ class SetupWindow(Adw.Window):
         self._manual_api_key_dirty = False
 
         self.setup_ui()
+        get_api_key_async(weak_callback(self._apply_existing_api_key))
         self.load_tariffs_and_regions()
-        self.connect("close-request", self.on_close_request)
+        self.connect("close-request", weak_callback(self.on_close_request))
 
     def setup_ui(self):
         root = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -54,13 +62,13 @@ class SetupWindow(Adw.Window):
         self.back_button = Gtk.Button.new_from_icon_name("go-previous-symbolic")
         self.back_button.set_tooltip_text("Back")
         self.back_button.add_css_class("flat")
-        self.back_button.connect("clicked", self.on_back_clicked)
+        self.back_button.connect("clicked", weak_callback(self.on_back_clicked))
         header.pack_start(self.back_button)
         root.append(header)
 
         self.stack = Gtk.Stack.new()
         self.stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
-        self.stack.connect("notify::visible-child-name", self.on_page_changed)
+        self.stack.connect("notify::visible-child-name", weak_callback(self.on_page_changed))
         root.append(self.stack)
 
         self.stack.add_named(self._build_welcome_page(), "welcome")
@@ -105,11 +113,11 @@ class SetupWindow(Adw.Window):
 
         full_button = Gtk.Button.new_with_label("Use My Account")
         full_button.add_css_class("suggested-action")
-        full_button.connect("clicked", lambda _button: self.stack.set_visible_child_name("account"))
+        full_button.connect("clicked", weak_callback(self._show_account_page))
         box.append(full_button)
 
         manual_button = Gtk.Button.new_with_label("Choose Tariff Manually")
-        manual_button.connect("clicked", lambda _button: self.stack.set_visible_child_name("manual"))
+        manual_button.connect("clicked", weak_callback(self._show_manual_page))
         box.append(manual_button)
 
         details = Gtk.Label.new(
@@ -179,9 +187,7 @@ class SetupWindow(Adw.Window):
 
         self.api_key_entry = Adw.PasswordEntryRow.new()
         self.api_key_entry.set_title("API Key")
-        existing_key = get_api_key()
-        if existing_key:
-            self.api_key_entry.set_text(existing_key)
+        self._account_key_changed_handler = self.api_key_entry.connect("changed", weak_callback(self._on_account_key_changed))
         credentials.add(self.api_key_entry)
 
         self.account_entry = Adw.EntryRow.new()
@@ -207,12 +213,12 @@ class SetupWindow(Adw.Window):
         box.append(button_box)
 
         skip_button = Gtk.Button.new_with_label("Set Up Manually")
-        skip_button.connect("clicked", lambda _button: self.stack.set_visible_child_name("manual"))
+        skip_button.connect("clicked", weak_callback(self._show_manual_page))
         button_box.append(skip_button)
 
         self.validate_button = Gtk.Button.new_with_label("Check Account")
         self.validate_button.add_css_class("suggested-action")
-        self.validate_button.connect("clicked", self.on_validate_account_clicked)
+        self.validate_button.connect("clicked", weak_callback(self.on_validate_account_clicked))
         button_box.append(self.validate_button)
 
         return page
@@ -235,19 +241,19 @@ class SetupWindow(Adw.Window):
         current_type_name = self.TARIFF_CODE_TO_NAME.get(current_type, "Agile")
         if current_type_name in self.TARIFF_TYPES:
             self.tariff_type_row.set_selected(self.TARIFF_TYPES.index(current_type_name))
-        self.tariff_type_row.connect("notify::selected", self.on_tariff_type_selected)
+        self.tariff_type_row.connect("notify::selected", weak_callback(self.on_tariff_type_selected))
         group.add(self.tariff_type_row)
 
         self.region_model = Gtk.StringList.new(self.all_regions)
         self.region_row = Adw.ComboRow.new()
         self.region_row.set_title("Region")
         self.region_row.set_model(self.region_model)
-        self.region_row.connect("notify::selected", self.on_region_selected)
+        self.region_row.connect("notify::selected", weak_callback(self.on_region_selected))
         group.add(self.region_row)
 
         self.location_button = Gtk.Button.new_with_label("Use My Location")
         self.location_button.set_tooltip_text("Find my electricity region")
-        self.location_button.connect("clicked", self.on_location_suggestion_clicked)
+        self.location_button.connect("clicked", weak_callback(self.on_location_suggestion_clicked))
         group.add(self.location_button)
 
         self.location_status = Gtk.Label.new(
@@ -263,7 +269,7 @@ class SetupWindow(Adw.Window):
         self.tariff_row = Adw.ComboRow.new()
         self.tariff_row.set_title("Tariff")
         self.tariff_row.set_model(self.tariff_model)
-        self.tariff_row.connect("notify::selected", self.on_tariff_selected)
+        self.tariff_row.connect("notify::selected", weak_callback(self.on_tariff_selected))
         group.add(self.tariff_row)
 
         self.manual_api_group = Adw.PreferencesGroup.new()
@@ -281,20 +287,17 @@ class SetupWindow(Adw.Window):
         self.manual_api_group.add(manual_api_link)
 
         account_setup_button = Gtk.Button.new_with_label("Use Account Setup Instead")
-        account_setup_button.connect("clicked", lambda _button: self.stack.set_visible_child_name("account"))
+        account_setup_button.connect("clicked", weak_callback(self._show_account_page))
         self.manual_api_group.add(account_setup_button)
 
         self.manual_api_key_entry = Adw.PasswordEntryRow.new()
         self.manual_api_key_entry.set_title("API Key")
-        existing_key = get_api_key()
-        if existing_key:
-            self.manual_api_key_entry.set_text(existing_key)
-        self.manual_api_key_entry.connect("changed", self.on_manual_api_key_changed)
+        self._manual_key_changed_handler = self.manual_api_key_entry.connect("changed", weak_callback(self.on_manual_api_key_changed))
         self.manual_api_group.add(self.manual_api_key_entry)
 
         self.manual_api_reload_button = Gtk.Button.new_with_label("Load Intelligent Go Tariffs")
         self.manual_api_reload_button.set_margin_top(8)
-        self.manual_api_reload_button.connect("clicked", self.on_manual_api_reload_clicked)
+        self.manual_api_reload_button.connect("clicked", weak_callback(self.on_manual_api_reload_clicked))
         self.manual_api_group.add(self.manual_api_reload_button)
 
         self.manual_api_status = Gtk.Label.new("")
@@ -315,7 +318,7 @@ class SetupWindow(Adw.Window):
 
         self.manual_finish_button = Gtk.Button.new_with_label("Start Using App")
         self.manual_finish_button.add_css_class("suggested-action")
-        self.manual_finish_button.connect("clicked", self.on_manual_finish_clicked)
+        self.manual_finish_button.connect("clicked", weak_callback(self.on_manual_finish_clicked))
         button_box.append(self.manual_finish_button)
 
         self._update_manual_api_section()
@@ -339,7 +342,7 @@ class SetupWindow(Adw.Window):
         self.finish_button = Gtk.Button.new_with_label("Start Using App")
         self.finish_button.add_css_class("suggested-action")
         self.finish_button.set_hexpand(True)
-        self.finish_button.connect("clicked", self.on_finish_clicked)
+        self.finish_button.connect("clicked", weak_callback(self.on_finish_clicked))
         box.append(self.finish_button)
         return page
 
@@ -400,8 +403,17 @@ class SetupWindow(Adw.Window):
         if self.location_portal is not None:
             self.location_portal.cancel()
             self.location_portal = None
-        self._save_manual_api_key_entry()
+        if self._manual_api_key_dirty or self._credential_save_pending:
+            self._save_manual_api_key_entry(self._close_after_credential_save)
+            return True
+        self._closed = True
         return False
+
+    def _close_after_credential_save(self, saved):
+        if saved:
+            self.close()
+        else:
+            self.manual_status.set_label("Could not save the API key to the password store.")
 
     def on_tariff_selected(self, _row, _pspec):
         selected_region_code = self.settings.get_string("selected-region-code")
@@ -410,6 +422,33 @@ class SetupWindow(Adw.Window):
         if 0 <= selected_index < len(tariffs):
             self.settings.set_string("selected-tariff-code", tariffs[selected_index]["code"])
 
+    def _show_account_page(self, _button):
+        self.stack.set_visible_child_name("account")
+
+    def _show_manual_page(self, _button):
+        self.stack.set_visible_child_name("manual")
+
+    def _on_account_key_changed(self, _entry):
+        self._account_key_dirty = True
+
+    def _apply_existing_api_key(self, api_key):
+        self._credentials_loading = False
+        if self._closed or self._credential_revision:
+            return
+        # A late lookup must not replace text the user has already entered.
+        if not self._manual_api_key_dirty:
+            self.manual_api_key_entry.handler_block(self._manual_key_changed_handler)
+            self.manual_api_key_entry.set_text(api_key or "")
+            self.manual_api_key_entry.handler_unblock(self._manual_key_changed_handler)
+        if not self._account_key_dirty:
+            self.api_key_entry.handler_block(self._account_key_changed_handler)
+            self.api_key_entry.set_text(api_key or "")
+            self.api_key_entry.handler_unblock(self._account_key_changed_handler)
+        self._api_key_available = bool(api_key)
+        self._update_manual_api_section()
+        if self.settings.get_string("selected-tariff-type") == "INTELLIGENT":
+            self.load_tariffs_and_regions()
+
     def on_manual_api_key_changed(self, entry):
         self._manual_api_key_dirty = True
         if entry.get_text().strip():
@@ -417,21 +456,48 @@ class SetupWindow(Adw.Window):
         else:
             self.manual_api_status.set_label("Enter an API key to load Intelligent Go tariffs.")
 
-    def _save_manual_api_key_entry(self):
+    def _save_manual_api_key_entry(self, on_saved):
+        self._credential_save_callbacks.append(on_saved)
+        if self._credential_save_pending:
+            return
         if not self._manual_api_key_dirty:
-            return True
+            self._finish_manual_credential_save(True)
+            return
+        self._credential_save_pending = True
         api_key = self.manual_api_key_entry.get_text().strip()
-        saved = store_api_key(api_key) if api_key else clear_api_key()
-        if saved:
-            self._manual_api_key_dirty = False
-        self._update_manual_api_section()
-        return saved
+
+        def finished(saved):
+            self._credential_save_pending = False
+            if saved:
+                self._credential_revision += 1
+                self._api_key_available = bool(api_key)
+                if api_key != self.manual_api_key_entry.get_text().strip():
+                    callbacks = self._credential_save_callbacks
+                    self._credential_save_callbacks = []
+                    for callback in callbacks:
+                        self._save_manual_api_key_entry(callback)
+                    return
+                self._manual_api_key_dirty = False
+            self._update_manual_api_section()
+            self._finish_manual_credential_save(saved)
+
+        save_api_key_async(api_key, finished)
+
+    def _finish_manual_credential_save(self, saved):
+        callbacks = self._credential_save_callbacks
+        self._credential_save_callbacks = []
+        for callback in callbacks:
+            callback(saved)
 
     def on_manual_api_reload_clicked(self, _button):
-        if not self._save_manual_api_key_entry():
+        self._save_manual_api_key_entry(self._reload_manual_tariffs_after_save)
+
+    def _reload_manual_tariffs_after_save(self, saved):
+        if not saved:
             self.manual_api_status.set_label("Could not save the API key to the password store.")
             return
-        self.load_tariffs_and_regions()
+        if not self._closed:
+            self.load_tariffs_and_regions()
 
     def on_validate_account_clicked(self, _button):
         api_key = self.api_key_entry.get_text().strip()
@@ -440,16 +506,22 @@ class SetupWindow(Adw.Window):
             self.account_status.set_label("Enter both your API key and account number.")
             return
 
-        if not store_api_key(api_key):
-            self.account_status.set_label("Could not save the API key to the password store.")
-            return
-        self.settings.set_string("octopus-account-number", account_number)
         self.validate_button.set_sensitive(False)
-        self.account_status.set_label("Checking account and detecting tariff...")
 
-        thread = threading.Thread(target=self._validate_account, args=(account_number,))
-        thread.daemon = True
-        thread.start()
+        def saved(success):
+            if not success:
+                self.validate_button.set_sensitive(True)
+                self.account_status.set_label("Could not save the API key to the password store.")
+                return
+            self._credential_revision += 1
+            self._api_key_available = True
+            if self._closed:
+                return
+            self.settings.set_string("octopus-account-number", account_number)
+            self.account_status.set_label("Checking account and detecting tariff...")
+            threading.Thread(target=self._validate_account, args=(account_number,), daemon=True).start()
+
+        save_api_key_async(api_key, saved)
 
     def _validate_account(self, account_number):
         try:
@@ -491,7 +563,10 @@ class SetupWindow(Adw.Window):
         return False
 
     def on_manual_finish_clicked(self, _button):
-        if not self._save_manual_api_key_entry():
+        self._save_manual_api_key_entry(self._finish_manual_setup_after_save)
+
+    def _finish_manual_setup_after_save(self, saved):
+        if not saved:
             self.manual_status.set_label("Could not save the API key to the password store.")
             return
         selected_tariff = self.settings.get_string("selected-tariff-code")
@@ -499,7 +574,7 @@ class SetupWindow(Adw.Window):
             self.manual_status.set_label("Choose a tariff before continuing.")
             return
 
-        if self.settings.get_string("selected-tariff-type") == "INTELLIGENT" and not get_api_key():
+        if self.settings.get_string("selected-tariff-type") == "INTELLIGENT" and not self._api_key_available:
             self.manual_status.set_label("Add your API key before using Intelligent Go.")
             return
         if (
@@ -524,6 +599,12 @@ class SetupWindow(Adw.Window):
         self.stack.set_visible_child_name("complete")
 
     def on_finish_clicked(self, _button):
+        self._save_manual_api_key_entry(self._finish_setup_after_save)
+
+    def _finish_setup_after_save(self, saved):
+        if not saved:
+            self.manual_status.set_label("Could not save the API key to the password store.")
+            return
         if self.on_complete:
             self.on_complete()
         self.close()
@@ -532,7 +613,10 @@ class SetupWindow(Adw.Window):
         self._load_generation += 1
         request_id = self._load_generation
         self._update_manual_api_section()
-        if self.settings.get_string("selected-tariff-type") == "INTELLIGENT" and not get_api_key():
+        if self.settings.get_string("selected-tariff-type") == "INTELLIGENT" and self._credentials_loading:
+            self.manual_status.set_label("Loading saved credentials...")
+            return
+        if self.settings.get_string("selected-tariff-type") == "INTELLIGENT" and not self._api_key_available:
             self.region_to_tariffs = {}
             self.settings.set_string("selected-tariff-code", "")
             self.tariff_model = Gtk.StringList.new(["API key required"])
@@ -652,7 +736,7 @@ class SetupWindow(Adw.Window):
             self.manual_finish_button.set_sensitive(True)
             return
 
-        has_key = bool(get_api_key())
+        has_key = self._api_key_available
         self.manual_api_reload_button.set_sensitive(has_key)
         self.manual_finish_button.set_sensitive(has_key and bool(self.settings.get_string("selected-tariff-code")))
         if not has_key and not self.manual_api_status.get_label():

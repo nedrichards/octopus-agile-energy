@@ -22,7 +22,7 @@ from ..region_location import (
 from ..region_location import (
     LocationPortal,
 )
-from ..secrets_manager import clear_api_key, get_api_key, store_api_key
+from ..secrets_manager import get_api_key_async, save_api_key_async
 from ..usage_history import (
     build_historical_usage_costs,
     fetch_daily_usage_archive,
@@ -32,7 +32,7 @@ from ..usage_history import (
     get_usage_refresh_start,
     merge_usage_history,
 )
-from ..utils import CacheManager
+from ..utils import CacheManager, weak_callback
 
 logger = logging.getLogger(__name__)
 
@@ -59,10 +59,13 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self.set_title("Preferences")
 
         self.settings = settings
-        self.cache_manager = CacheManager()
+        self._credential_revision = 0
+        self._closed = False
+        self.cache_manager = CacheManager(initialize=False)
         self.usage_cache_manager = CacheManager(
             cache_dir_name="octopus-agile-usage",
             cache_expiry_days=450,
+            initialize=False,
         )
         # self.all_regions now stores full names for display in dropdown
         self.all_regions = sorted(self.REGION_CODE_TO_NAME.values())
@@ -70,11 +73,14 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self._load_generation = 0
         self.location_portal = None
         self._api_key_dirty = False
+        self._credential_save_pending = False
+        self._credential_save_callbacks = []
 
         self.setup_ui()
+        get_api_key_async(weak_callback(self._apply_existing_api_key))
         self.load_tariffs_and_regions() # Initiate loading of tariff data
 
-        self.connect("closed", self.on_closed)
+        self.connect("closed", weak_callback(self.on_closed))
 
     def setup_ui(self):
         page = Adw.PreferencesPage.new()
@@ -100,7 +106,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         if current_type_name in self.TARIFF_TYPES:
             self.tariff_type_row.set_selected(self.TARIFF_TYPES.index(current_type_name))
 
-        self.tariff_type_handler_id = self.tariff_type_row.connect("notify::selected", self.on_tariff_type_selected)
+        self.tariff_type_handler_id = self.tariff_type_row.connect("notify::selected", weak_callback(self.on_tariff_type_selected))
 
         # Region selection
         self.region_model = Gtk.StringList.new(self.all_regions)
@@ -108,12 +114,12 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self.region_row.set_title("Region")
         self.region_row.set_model(self.region_model)
         group.add(self.region_row)
-        self.region_handler_id = self.region_row.connect("notify::selected", self.on_region_selected)
+        self.region_handler_id = self.region_row.connect("notify::selected", weak_callback(self.on_region_selected))
 
         self.location_button = Gtk.Button.new_with_label("Use My Location")
         self.location_button.set_margin_top(12)
         self.location_button.set_tooltip_text("Find my electricity region")
-        self.location_button.connect("clicked", self.on_location_suggestion_clicked)
+        self.location_button.connect("clicked", weak_callback(self.on_location_suggestion_clicked))
         group.add(self.location_button)
 
         self.location_status = Gtk.Label.new(
@@ -132,7 +138,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self.tariff_row.set_title("Tariff")
         self.tariff_row.set_model(self.tariff_model)
         group.add(self.tariff_row)
-        self.tariff_handler_id = self.tariff_row.connect("notify::selected", self.on_tariff_selected)
+        self.tariff_handler_id = self.tariff_row.connect("notify::selected", weak_callback(self.on_tariff_selected))
 
         # API Key Section
         api_group = Adw.PreferencesGroup.new()
@@ -143,12 +149,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self.api_key_entry = Adw.PasswordEntryRow.new()
         self.api_key_entry.set_title("API Key")
 
-        # Load existing key securely
-        existing_key = get_api_key()
-        if existing_key:
-            self.api_key_entry.set_text(existing_key)
-
-        self.api_key_entry.connect("changed", self.on_api_key_changed)
+        self._key_changed_handler = self.api_key_entry.connect("changed", weak_callback(self.on_api_key_changed))
         api_group.add(self.api_key_entry)
 
         self.account_number_row = Adw.ActionRow.new()
@@ -158,7 +159,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self.account_number_entry.set_hexpand(True)
         self.account_number_entry.set_placeholder_text("A-12345678")
         self.account_number_entry.set_text(self.settings.get_string("octopus-account-number"))
-        self.account_number_entry.connect("changed", self.on_account_number_changed)
+        self.account_number_entry.connect("changed", weak_callback(self.on_account_number_changed))
         self.account_number_row.add_suffix(self.account_number_entry)
         self.account_number_row.set_activatable_widget(self.account_number_entry)
         api_group.add(self.account_number_row)
@@ -166,7 +167,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self.auto_detect_button = Gtk.Button.new_with_label("Auto-detect tariff from account")
         self.auto_detect_button.set_margin_top(8)
         self.auto_detect_button.set_margin_bottom(4)
-        self.auto_detect_button.connect("clicked", self.on_auto_detect_clicked)
+        self.auto_detect_button.connect("clicked", weak_callback(self.on_auto_detect_clicked))
         api_group.add(self.auto_detect_button)
 
         self.auto_detect_status = Gtk.Label.new("")
@@ -178,7 +179,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
 
         self.refresh_usage_button = Gtk.Button.new_with_label("Refresh usage history")
         self.refresh_usage_button.set_margin_top(8)
-        self.refresh_usage_button.connect("clicked", self.on_refresh_usage_clicked)
+        self.refresh_usage_button.connect("clicked", weak_callback(self.on_refresh_usage_clicked))
         api_group.add(self.refresh_usage_button)
 
         self.usage_status = Gtk.Label.new("")
@@ -188,45 +189,86 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self.usage_status.set_accessible_role(Gtk.AccessibleRole.STATUS)
         api_group.add(self.usage_status)
 
+    def _apply_existing_api_key(self, api_key):
+        if self._closed or self._credential_revision:
+            return
+        if api_key and not self._api_key_dirty:
+            self.api_key_entry.handler_block(self._key_changed_handler)
+            self.api_key_entry.set_text(api_key)
+            self.api_key_entry.handler_unblock(self._key_changed_handler)
+
     def on_api_key_changed(self, entry):
         self._api_key_dirty = True
         self._set_auto_detect_status("API key changed. It will be saved before the next account action.")
 
-    def _save_api_key_entry(self):
+    def _save_api_key_entry(self, on_saved):
+        self._credential_save_callbacks.append(on_saved)
+        if self._credential_save_pending:
+            return
         if not self._api_key_dirty:
-            return True
+            self._finish_credential_save(True)
+            return
+        self._credential_save_pending = True
         text = self.api_key_entry.get_text().strip()
-        saved = store_api_key(text) if text else clear_api_key()
-        if saved:
-            self._api_key_dirty = False
-        return saved
+
+        def finished(saved):
+            self._credential_save_pending = False
+            if saved:
+                self._credential_revision += 1
+                if text != self.api_key_entry.get_text().strip():
+                    callbacks = self._credential_save_callbacks
+                    self._credential_save_callbacks = []
+                    for callback in callbacks:
+                        self._save_api_key_entry(callback)
+                    return
+                self._api_key_dirty = False
+            self._finish_credential_save(saved)
+
+        save_api_key_async(text, finished)
+
+    def _finish_credential_save(self, saved):
+        callbacks = self._credential_save_callbacks
+        self._credential_save_callbacks = []
+        for callback in callbacks:
+            callback(saved)
+
+    def when_credentials_saved(self, callback):
+        if self._credential_save_pending:
+            self._credential_save_callbacks.append(callback)
+        else:
+            callback(not self._api_key_dirty)
 
     def on_tariff_type_selected(self, dropdown, pspec):
-        api_key_saved = self._save_api_key_entry()
         selected_display_name = self._get_selected_string(self.tariff_type_row)
         selected_type_code = self.TARIFF_TYPE_CODES.get(selected_display_name, "AGILE")
         self.settings.set_string("selected-tariff-type", selected_type_code)
 
-        if not api_key_saved and selected_type_code == "INTELLIGENT":
-            self._set_auto_detect_status("Could not save the API key to the password store.")
-            return
+        def saved(success):
+            if selected_type_code != self.settings.get_string("selected-tariff-type"):
+                return
+            if not success and selected_type_code == "INTELLIGENT":
+                self._set_auto_detect_status("Could not save the API key to the password store.")
+                return
+            if not self._closed:
+                self.load_tariffs_and_regions()
 
-        # Trigger reload of tariffs
-        self.load_tariffs_and_regions()
+        self._save_api_key_entry(saved)
 
     def on_account_number_changed(self, entry):
         self.settings.set_string("octopus-account-number", entry.get_text().strip())
 
     def on_auto_detect_clicked(self, _button):
-        if not self._save_api_key_entry():
-            self._set_auto_detect_status("Could not save the API key to the password store.")
-            return
         self.auto_detect_button.set_sensitive(False)
-        self._set_auto_detect_status("Detecting tariff from account...")
+        self._save_api_key_entry(self._start_auto_detect_after_save)
 
-        thread = threading.Thread(target=self._auto_detect_from_account)
-        thread.daemon = True
-        thread.start()
+    def _start_auto_detect_after_save(self, saved):
+        if not saved or self._closed:
+            self.auto_detect_button.set_sensitive(True)
+            if not saved:
+                self._set_auto_detect_status("Could not save the API key to the password store.")
+            return
+        self._set_auto_detect_status("Detecting tariff from account...")
+        threading.Thread(target=self._auto_detect_from_account, daemon=True).start()
 
     def _set_auto_detect_button_state(self, sensitive):
         self.auto_detect_button.set_sensitive(sensitive)
@@ -237,14 +279,17 @@ class PreferencesDialog(Adw.PreferencesDialog):
         return False
 
     def on_refresh_usage_clicked(self, _button):
-        if not self._save_api_key_entry():
-            self._set_usage_status("Could not save the API key to the password store.")
-            return
         self.refresh_usage_button.set_sensitive(False)
+        self._save_api_key_entry(self._start_usage_refresh_after_save)
+
+    def _start_usage_refresh_after_save(self, saved):
+        if not saved or self._closed:
+            self.refresh_usage_button.set_sensitive(True)
+            if not saved:
+                self._set_usage_status("Could not save the API key to the password store.")
+            return
         self._set_usage_status("Refreshing usage history...")
-        thread = threading.Thread(target=self._refresh_usage_history)
-        thread.daemon = True
-        thread.start()
+        threading.Thread(target=self._refresh_usage_history, daemon=True).start()
 
     def _set_usage_status(self, message):
         self.usage_status.set_label(message)
@@ -677,10 +722,11 @@ class PreferencesDialog(Adw.PreferencesDialog):
         return item.get_string() if item else ""
 
     def on_closed(self, _dialog):
+        self._closed = True
         """
         Saves pending changes and cancels portal work after the dialog closes.
         """
         if self.location_portal is not None:
             self.location_portal.cancel()
             self.location_portal = None
-        self._save_api_key_entry()
+        self._save_api_key_entry(lambda _saved: None)

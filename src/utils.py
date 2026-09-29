@@ -3,23 +3,49 @@ import json
 import logging
 import os
 import tempfile
+import threading
 import time
+import weakref
 from contextlib import suppress
 
 from gi.repository import GLib
 
 logger = logging.getLogger(__name__)
 
+
+def weak_callback(callback):
+    """Let native widget callbacks refer to their Python owner without a cycle."""
+    reference = weakref.WeakMethod(callback)
+
+    def invoke(*args):
+        method = reference()
+        if method is not None:
+            return method(*args)
+        return None
+
+    return invoke
+
+
 class CacheManager:
     """
     Manages simple file-based caching for network requests.
     """
-    def __init__(self, cache_dir_name="octopus-agile-app", cache_expiry_days=7):
+    def __init__(self, cache_dir_name="octopus-agile-app", cache_expiry_days=7, initialize=True):
         self.cache_dir = os.path.join(GLib.get_user_cache_dir(), cache_dir_name)
         self.cache_expiry_days = cache_expiry_days
         self._memory_cache = {}
-        self._ensure_cache_dir()
-        self.cleanup()
+        self._initialization_lock = threading.Lock()
+        self._initialized = False
+        if initialize:
+            self._ensure_initialized()
+
+    def _ensure_initialized(self):
+        # UI owners can defer disk setup and expiry scans to their first worker.
+        with self._initialization_lock:
+            if not self._initialized:
+                self._ensure_cache_dir()
+                self.cleanup()
+                self._initialized = True
 
     def _ensure_cache_dir(self):
         """Ensures the cache directory exists."""
@@ -41,8 +67,10 @@ class CacheManager:
         Returns a tuple: (data, modification_time_as_timestamp).
         Returns (None, None) if not found or on error.
         """
+        self._ensure_initialized()
         filepath = self._get_cache_filepath(key)
         if not os.path.exists(filepath):
+            self._memory_cache.pop(filepath, None)
             return None, None
 
         try:
@@ -74,6 +102,7 @@ class CacheManager:
             logger.warning("Refusing to cache an empty response")
             return
 
+        self._ensure_initialized()
         filepath = self._get_cache_filepath(key)
         file_descriptor = None
         temp_filepath = None

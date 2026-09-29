@@ -54,6 +54,38 @@ def get_api_key() -> str | None:
         logger.error("Failed to lookup API key from secret service: %s", type(exc).__name__)
         return None
 
+
+def get_api_key_async(on_ready):
+    """Load credentials without blocking construction of a GTK dialog."""
+    def finished(_source, result, _user_data):
+        try:
+            password = Secret.password_lookup_finish(result)
+        except GLib.Error as exc:
+            logger.error("Failed to lookup API key from secret service: %s", type(exc).__name__)
+            password = None
+        on_ready(password)
+
+    Secret.password_lookup(SECRET_SCHEMA, SECRET_ATTRIBUTES, None, finished, None)
+
+
+def save_api_key_async(api_key, on_saved):
+    """Store or clear a credential without blocking GTK account actions."""
+    def finished(_source, result, _user_data):
+        try:
+            saved = (Secret.password_store_finish(result) if api_key
+                     else Secret.password_clear_finish(result))
+            # Clearing an already empty store is a successful user operation.
+            on_saved(bool(saved) if api_key else True)
+        except GLib.Error as exc:
+            logger.error("Failed to save API key in secret service: %s", type(exc).__name__)
+            on_saved(False)
+
+    if api_key:
+        Secret.password_store(SECRET_SCHEMA, SECRET_ATTRIBUTES, Secret.COLLECTION_DEFAULT,
+                              "Octopus Energy API Key", api_key, None, finished, None)
+    else:
+        Secret.password_clear(SECRET_SCHEMA, SECRET_ATTRIBUTES, None, finished, None)
+
 def clear_api_key() -> bool:
     """
     Removes the API key from the system keyring.

@@ -132,7 +132,45 @@ def build_usage_dashboard_data(samples, synced_at, daily_costs=None, daily_archi
     insight["average_unit_detail"] = trailing_rate["detail"]
     insight["seasonal"] = build_seasonal_usage_insight(daily_archive or [], synced_at)
     insight["paid_rate_history"] = build_paid_rate_history([*(daily_archive or []), *(daily_costs or [])], synced_at)
+    insight["paid_rate_presentation"] = build_paid_rate_presentation(insight["paid_rate_history"])
     return insight
+
+
+def build_paid_rate_presentation(history):
+    """Prepare period choices and scale-independent geometry off the GTK thread."""
+    options, span = paid_rate_period_options(history)
+    available, _ = select_paid_rate_period(history, None)
+    periods = {}
+    for months, _label in options:
+        points, coverage = select_paid_rate_period(available or history, months)
+        values = [value for _day, value in points if value is not None]
+        low = min(values, default=0)
+        high = max(values, default=0)
+        padding = max(1, (high - low) * 0.15)
+        low, high = low - padding, high + padding
+        segments, segment = [], []
+        descriptions = []
+        for index, (day, value) in enumerate(points):
+            text = f"30 days to {date.fromisoformat(day):%d %b %Y}"
+            if value is None:
+                text += " · Incomplete coverage"
+                if segment:
+                    segments.append(segment)
+                    segment = []
+            else:
+                segment.append((index / max(1, len(points) - 1), (high - value) / (high - low)))
+            descriptions.append((f"{value:.1f}p/kWh" if value is not None else "—", text))
+        if segment:
+            segments.append(segment)
+        periods[months] = {
+            "points": points,
+            "coverage": coverage,
+            "bounds": (low, high),
+            "segments": segments,
+            "descriptions": descriptions,
+            "edge_labels": [f"{date.fromisoformat(day):%d %b %Y}" for day, _ in points[::max(1, len(points) - 1)]],
+        }
+    return {"options": options, "span": span, "periods": periods}
 
 
 def paid_rate_period_options(history):

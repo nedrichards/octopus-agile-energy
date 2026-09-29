@@ -27,6 +27,7 @@ from ..price_chart_presentation import (
 )
 from ..price_formatting import format_gbp, format_unit_price_gbp
 from ..time_formatting import format_uk_time, format_uk_time_window
+from ..utils import weak_callback
 from .adaptive_layout import (
     get_chart_content_width,
     get_chart_height,
@@ -78,38 +79,39 @@ class PriceChartWidget(Gtk.Overlay):
         self._base_area = Gtk.DrawingArea.new()
         self._base_area.set_hexpand(True)
         self._base_area.set_vexpand(True)
-        self._base_area.set_draw_func(self._draw_static_chart)
+        self._base_area.set_draw_func(weak_callback(self._draw_static_chart))
         self.set_child(self._base_area)
 
         self._interaction_area = Gtk.DrawingArea.new()
         self._interaction_area.set_hexpand(True)
         self._interaction_area.set_vexpand(True)
         self._interaction_area.set_can_target(False)
-        self._interaction_area.set_draw_func(self._draw_interaction_chart)
+        self._interaction_area.set_draw_func(weak_callback(self._draw_interaction_chart))
         self.add_overlay(self._interaction_area)
         self.set_accessible_role(Gtk.AccessibleRole.SLIDER)
         self.set_focusable(True)
         self.set_focus_on_click(True)
-        self.connect("destroy", self._on_destroy)
+        self.connect("destroy", weak_callback(self._on_destroy))
+        self.connect("unrealize", weak_callback(self._on_destroy))
 
         motion_controller = Gtk.EventControllerMotion.new()
-        motion_controller.connect('motion', self.on_motion)
-        motion_controller.connect('leave', self.on_leave)
+        motion_controller.connect('motion', weak_callback(self.on_motion))
+        motion_controller.connect('leave', weak_callback(self.on_leave))
         self.add_controller(motion_controller)
 
         key_controller = Gtk.EventControllerKey.new()
-        key_controller.connect("key-pressed", self.on_key_pressed)
+        key_controller.connect("key-pressed", weak_callback(self.on_key_pressed))
         self.add_controller(key_controller)
 
         click_controller = Gtk.GestureClick.new()
-        click_controller.connect('pressed', self.on_click)
+        click_controller.connect('pressed', weak_callback(self.on_click))
         self.add_controller(click_controller)
 
         self._update_accessible_summary()
 
     def set_horizontal_adjustment(self, adjustment):
         self.horizontal_adjustment = adjustment
-        adjustment.connect("value-changed", self._on_horizontal_adjustment_changed)
+        adjustment.connect("value-changed", weak_callback(self._on_horizontal_adjustment_changed))
 
     def _on_horizontal_adjustment_changed(self, _adjustment):
         self._queue_interaction_draw()
@@ -158,6 +160,8 @@ class PriceChartWidget(Gtk.Overlay):
         Updates the price data and current price index for the chart.
         Queues a redraw to reflect the new data.
         """
+        if prices == self.prices and current_index == self.current_price_index:
+            return
         previous_times = [price['valid_from'] for price in self.prices]
         selected_time = (
             self.prices[self.selected_index]['valid_from']
@@ -196,6 +200,8 @@ class PriceChartWidget(Gtk.Overlay):
         """
         Sets the time range to highlight on the chart.
         """
+        if (start_time, end_time, label) == (self.highlight_start_time, self.highlight_end_time, self.highlight_label):
+            return
         self.highlight_start_time = start_time
         self.highlight_end_time = end_time
         self.highlight_label = label
@@ -203,6 +209,8 @@ class PriceChartWidget(Gtk.Overlay):
         self._queue_static_draw()
 
     def set_comparison_range(self, start_time, end_time):
+        if (start_time, end_time) == (self.comparison_start_time, self.comparison_end_time):
+            return
         self.comparison_start_time = start_time
         self.comparison_end_time = end_time
         self._update_accessible_summary()

@@ -1,10 +1,11 @@
 """A separate, keyboard-accessible rolling energy-price history chart."""
-from datetime import date
+import weakref
 
 import cairo
 from gi.repository import Adw, Gdk, Gtk, Pango, PangoCairo
 
-from ..usage_insights import paid_rate_period_options, select_paid_rate_period
+from ..usage_insights import build_paid_rate_presentation
+from ..utils import weak_callback
 
 
 class PaidRateChart(Gtk.Box):
@@ -12,6 +13,10 @@ class PaidRateChart(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         self.add_css_class("card")
         self.history = []
+        self._presentation = build_paid_rate_presentation([])
+        self._static_surface = None
+        self._style_handlers = []
+        self._style_finalizer = weakref.finalize(self, self._disconnect_style_handlers, self._style_handlers)
         self.points = []
         self.selected = 0
         self.period_options = [(None, "All available")]
@@ -19,7 +24,7 @@ class PaidRateChart(Gtk.Box):
         self.period = Gtk.DropDown.new_from_strings(["All available"])
         self.period.set_valign(Gtk.Align.START)
         self.period.set_tooltip_text("Rolling price history period")
-        self.period.connect("notify::selected", self._update)
+        self.period.connect("notify::selected", weak_callback(self._update))
         header = Adw.WrapBox(child_spacing=12, line_spacing=8)
         summary = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True)
         self.value = Gtk.Label(label="—", xalign=0)
@@ -35,29 +40,36 @@ class PaidRateChart(Gtk.Box):
         self.history_span.add_css_class("dim-label")
         header.append(self.history_span)
         self.append(header)
+        overlay = Gtk.Overlay()
+        self._base_area = Gtk.DrawingArea()
+        self._base_area.set_hexpand(True)
+        self._base_area.set_content_height(200)
+        self._base_area.set_draw_func(weak_callback(self._draw))
+        overlay.set_child(self._base_area)
         self.area = Gtk.DrawingArea()
         self.area.set_content_height(200)
         self.area.set_hexpand(True)
         self.area.set_focusable(True)
         self.area.set_tooltip_text("Drag sideways to inspect dates. Left/Right moves by day; Home/End jumps to the edges.")
-        self.area.set_draw_func(self._draw)
+        self.area.set_draw_func(weak_callback(self._draw_selection))
         keys = Gtk.EventControllerKey()
-        keys.connect("key-pressed", self._key)
+        keys.connect("key-pressed", weak_callback(self._key))
         self.area.add_controller(keys)
         click = Gtk.GestureClick()
-        click.connect("pressed", self._click)
+        click.connect("pressed", weak_callback(self._click))
         self.area.add_controller(click)
         self._drag_start_x = None
         self._scrubbing = False
         drag = Gtk.GestureDrag.new()
         drag.set_button(Gdk.BUTTON_PRIMARY)
-        drag.connect("drag-begin", self._drag_begin)
-        drag.connect("drag-update", self._drag_update)
-        drag.connect("drag-end", self._drag_end)
-        drag.connect("cancel", self._drag_cancel)
+        drag.connect("drag-begin", weak_callback(self._drag_begin))
+        drag.connect("drag-update", weak_callback(self._drag_update))
+        drag.connect("drag-end", weak_callback(self._drag_end))
+        drag.connect("cancel", weak_callback(self._drag_cancel))
         self.area.add_controller(drag)
         drag.group(click)
-        self.append(self.area)
+        overlay.add_overlay(self.area)
+        self.append(overlay)
         self.coverage_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         icon = Gtk.Image.new_from_icon_name("dialog-information-symbolic")
         icon.set_valign(Gtk.Align.START)
@@ -68,15 +80,41 @@ class PaidRateChart(Gtk.Box):
         self.coverage_box.add_css_class("dim-label")
         self.append(self.coverage_box)
         style = Adw.StyleManager.get_default()
-        for prop in ("dark", "high-contrast", "accent-color"):
-            style.connect(f"notify::{prop}", lambda *_: self.area.queue_draw())
-        self.connect("notify::root", lambda *_: self.area.queue_draw())
+        # The process-wide style manager must not keep an unparented chart alive.
+        chart_ref = weakref.ref(self)
 
-    def set_history(self, history):
+        def style_changed(*_args):
+            chart = chart_ref()
+            if chart is not None:
+                chart._invalidate_static()
+
+        for prop in ("dark", "high-contrast", "accent-color"):
+            self._style_handlers.append((style, style.connect(f"notify::{prop}", style_changed)))
+        self.connect("notify::root", weak_callback(self._invalidate_static))
+        self.connect("destroy", weak_callback(self._on_destroy))
+
+    @staticmethod
+    def _disconnect_style_handlers(handlers):
+        for source, handler in handlers:
+            source.disconnect(handler)
+        handlers.clear()
+
+    def _on_destroy(self, *_args):
+        self._style_finalizer()
+        self._static_surface = None
+
+    def _invalidate_static(self, *_args):
+        self._static_surface = None
+        self._base_area.queue_draw()
+        self.area.queue_draw()
+
+    def set_history(self, history, presentation=None):
         index = self.period.get_selected()
         previous = self.period_options[index][0] if index < len(self.period_options) else None
         self.history = history
-        self.period_options, span = paid_rate_period_options(history)
+        self._presentation = presentation if presentation is not None else build_paid_rate_presentation(history)
+        self.period_options = self._presentation["options"]
+        span = self._presentation["span"]
         self._changing_periods = True
         self.period.set_model(Gtk.StringList.new([label for _months, label in self.period_options]))
         selected = next((i for i, (months, _) in enumerate(self.period_options) if months == previous),
@@ -94,22 +132,20 @@ class PaidRateChart(Gtk.Box):
         index = self.period.get_selected()
         if index >= len(self.period_options):
             return
-        available, _ = select_paid_rate_period(self.history, None)
         months = self.period_options[index][0]
-        self.points, coverage = select_paid_rate_period(available or self.history, months)
+        self._period_data = self._presentation["periods"][months]
+        self.points = self._period_data["points"]
+        coverage = self._period_data["coverage"]
         self.coverage.set_text(coverage)
         self.coverage_box.set_visible(bool(coverage))
         self.area.set_visible(len(self.points) > 1)
         self.selected = max(0, len(self.points) - 1)
+        self._invalidate_static()
         self._describe()
 
     def _describe(self):
         if self.points:
-            day, rate = self.points[self.selected]
-            value = f"{rate:.1f}p/kWh" if rate is not None else "—"
-            text = f"30 days to {date.fromisoformat(day):%d %b %Y}"
-            if rate is None:
-                text += " · Incomplete coverage"
+            value, text = self._period_data["descriptions"][self.selected]
         else:
             value = "—"
             text = "Not enough matched history"
@@ -170,15 +206,27 @@ class PaidRateChart(Gtk.Box):
         self._scrubbing = False
 
     def _draw(self, area, cr, width, height):
+        if not self.points:
+            return
+        color = area.get_color()
+        found, accent = area.get_style_context().lookup_color("accent_color")
+        key = (width, height, area.get_scale_factor(),
+               color.red, color.green, color.blue,
+               found, accent.red, accent.green, accent.blue,
+               area.get_pango_context().get_serial())
+        if self._static_surface is None or self._static_surface[0] != key:
+            surface = cairo.RecordingSurface(cairo.CONTENT_COLOR_ALPHA, (0, 0, width, height))
+            self._draw_contents(area, cairo.Context(surface), width, height)
+            self._static_surface = (key, surface)
+        cr.set_source_surface(self._static_surface[1])
+        cr.paint()
+
+    def _draw_contents(self, area, cr, width, height):
         color = area.get_color()
         fg = (color.red, color.green, color.blue)
         found, accent = area.get_style_context().lookup_color("accent_color")
         rgb = (accent.red, accent.green, accent.blue) if found else fg
-        values = [value for _day, value in self.points if value is not None]
-        if not values:
-            return
-        padding = max(1, (max(values) - min(values)) * 0.15)
-        low, high = min(values) - padding, max(values) + padding
+        low, high = self._period_data["bounds"]
         left, top, plot_width, plot_height = 52, 18, max(1, width - 68), height - 48
         def label(text, x, y, align=0):
             layout = area.create_pango_layout(text)
@@ -198,21 +246,10 @@ class PaidRateChart(Gtk.Box):
             cr.line_to(left + plot_width, y)
             cr.stroke()
             label(f"{value:.1f}p", left - 8, y - 8, 1)
-        for index, align in ((0, 0), (len(self.points) - 1, 1)):
-            label(f"{date.fromisoformat(self.points[index][0]):%d %b %Y}",
-                  left + plot_width * align, height - 20, align)
-        segments, segment = [], []
-        for index, (_day, value) in enumerate(self.points):
-            if value is None:
-                if segment:
-                    segments.append(segment)
-                    segment = []
-                continue
-            x = left + index / max(1, len(self.points) - 1) * plot_width
-            y = top + (high - value) / (high - low) * plot_height
-            segment.append((x, y))
-        if segment:
-            segments.append(segment)
+        for text, align in zip(self._period_data["edge_labels"], (0, 1), strict=False):
+            label(text, left + plot_width * align, height - 20, align)
+        segments = [[(left + x * plot_width, top + y * plot_height) for x, y in segment]
+                    for segment in self._period_data["segments"]]
         for segment in segments:
             cr.move_to(segment[0][0], top + plot_height)
             for x, y in segment:
@@ -234,6 +271,15 @@ class PaidRateChart(Gtk.Box):
             if len(segment) == 1:
                 cr.arc(*segment[0], 3, 0, 6.2832)
                 cr.fill()
+    def _draw_selection(self, area, cr, width, height):
+        if not self.points:
+            return
+        color = area.get_color()
+        fg = (color.red, color.green, color.blue)
+        found, accent = area.get_style_context().lookup_color("accent_color")
+        rgb = (accent.red, accent.green, accent.blue) if found else fg
+        low, high = self._period_data["bounds"]
+        left, top, plot_width, plot_height = 52, 18, max(1, width - 68), height - 48
         x = left + self.selected / max(1, len(self.points) - 1) * plot_width
         cr.set_source_rgba(*fg, 0.3)
         cr.set_line_width(1)

@@ -306,14 +306,15 @@ class PlanWorkspaceTests(unittest.TestCase):
         stack = Mock()
         stack.get_visible_child_name.return_value = "prices"
         window = SimpleNamespace(
-            _refresh_adaptive_layout=Mock(return_value=False),
+            _queue_adaptive_layout=Mock(),
             best_slot_start_time=None,
             settings=Mock(),
         )
 
         MainWindow.on_visible_tab_changed(window, stack, None)
 
-        idle_add.assert_called_once_with(window._refresh_adaptive_layout)
+        window._queue_adaptive_layout.assert_called_once_with()
+        idle_add.assert_not_called()
         window.settings.set_string.assert_called_once_with("selected-main-view", "prices")
 
     def test_saved_workspace_is_restored_when_valid(self):
@@ -360,11 +361,11 @@ class PlanWorkspaceTests(unittest.TestCase):
         window._update_plan_comparison.assert_called_once_with()
 
     def test_window_size_notification_remeasures_the_adaptive_layout(self):
-        window = SimpleNamespace(_refresh_adaptive_layout=Mock())
+        window = SimpleNamespace(_queue_adaptive_layout=Mock())
 
         MainWindow.on_window_width_changed(window, None, None)
 
-        window._refresh_adaptive_layout.assert_called_once_with()
+        window._queue_adaptive_layout.assert_called_once_with()
 
 
 class UsageRefreshTests(unittest.TestCase):
@@ -385,7 +386,7 @@ class UsageRefreshTests(unittest.TestCase):
             ("24-months", 24),
             ("5-years", 60),
         ):
-            window = SimpleNamespace(usage_period_mode=mode)
+            window = SimpleNamespace(usage_period_mode=mode, usage_graph_mode="kwh")
             points, dates, unit, daily_data, rolling = MainWindow._get_usage_chart_series(
                 window,
                 insight,

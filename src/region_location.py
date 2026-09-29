@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import math
 import secrets
+import threading
 from collections.abc import Iterable
 from contextlib import suppress
 from pathlib import Path
@@ -240,34 +241,37 @@ class LocationPortal:
         self.session_proxy = None
         self.request_proxy = None
         self._finished = False
+        self._lookup_in_progress = False
+
+    def _create_proxy(self, interface, path, on_ready):
+        def finished(_source, result, _user_data):
+            if self._finished:
+                return
+            try:
+                proxy = Gio.DBusProxy.new_for_bus_finish(result)
+                on_ready(proxy)
+            except GLib.Error:
+                self._fail("Location services are unavailable. Choose your region manually.")
+
+        Gio.DBusProxy.new_for_bus(
+            Gio.BusType.SESSION, Gio.DBusProxyFlags.NONE, None,
+            self.BUS_NAME, path, interface, None, finished, None,
+        )
 
     def start(self):
-        try:
-            self.proxy = Gio.DBusProxy.new_for_bus_sync(
-                Gio.BusType.SESSION,
-                Gio.DBusProxyFlags.NONE,
-                None,
-                self.BUS_NAME,
-                self.OBJECT_PATH,
-                self.LOCATION_INTERFACE,
-                None,
-            )
-            self.proxy.connect("g-signal", self._on_location_signal)
-            options = {
-                "session_handle_token": GLib.Variant("s", self._token()),
-                "accuracy": GLib.Variant("u", 5),  # XDG portal EXACT accuracy.
-            }
-            self.proxy.call(
-                "CreateSession",
-                GLib.Variant("(a{sv})", (options,)),
-                Gio.DBusCallFlags.NONE,
-                -1,
-                None,
-                self._on_create_session_finished,
-                None,
-            )
-        except GLib.Error:
-            self._fail("Location services are unavailable. Choose your region manually.")
+        self._create_proxy(self.LOCATION_INTERFACE, self.OBJECT_PATH, self._on_location_proxy_ready)
+
+    def _on_location_proxy_ready(self, proxy):
+        self.proxy = proxy
+        self.proxy.connect("g-signal", self._on_location_signal)
+        options = {
+            "session_handle_token": GLib.Variant("s", self._token()),
+            "accuracy": GLib.Variant("u", 5),  # XDG portal EXACT accuracy.
+        }
+        self.proxy.call(
+            "CreateSession", GLib.Variant("(a{sv})", (options,)),
+            Gio.DBusCallFlags.NONE, -1, None, self._on_create_session_finished, None,
+        )
 
     @staticmethod
     def _token() -> str:
@@ -278,46 +282,31 @@ class LocationPortal:
             return
         try:
             self.session_path = proxy.call_finish(result).unpack()[0]
-            self.session_proxy = Gio.DBusProxy.new_for_bus_sync(
-                Gio.BusType.SESSION,
-                Gio.DBusProxyFlags.NONE,
-                None,
-                self.BUS_NAME,
-                self.session_path,
-                self.SESSION_INTERFACE,
-                None,
-            )
-            self.session_proxy.connect("g-signal", self._on_session_signal)
-            options = {"handle_token": GLib.Variant("s", self._token())}
-            self.proxy.call(
-                "Start",
-                GLib.Variant("(osa{sv})", (self.session_path, "", options)),
-                Gio.DBusCallFlags.NONE,
-                -1,
-                None,
-                self._on_start_finished,
-                None,
-            )
+            self._create_proxy(self.SESSION_INTERFACE, self.session_path, self._on_session_proxy_ready)
         except GLib.Error:
             self._fail("Could not start location services. Choose your region manually.")
+
+    def _on_session_proxy_ready(self, proxy):
+        self.session_proxy = proxy
+        self.session_proxy.connect("g-signal", self._on_session_signal)
+        options = {"handle_token": GLib.Variant("s", self._token())}
+        self.proxy.call(
+            "Start", GLib.Variant("(osa{sv})", (self.session_path, "", options)),
+            Gio.DBusCallFlags.NONE, -1, None, self._on_start_finished, None,
+        )
 
     def _on_start_finished(self, proxy, result, _user_data):
         if self._finished:
             return
         try:
             request_path = proxy.call_finish(result).unpack()[0]
-            self.request_proxy = Gio.DBusProxy.new_for_bus_sync(
-                Gio.BusType.SESSION,
-                Gio.DBusProxyFlags.NONE,
-                None,
-                self.BUS_NAME,
-                request_path,
-                self.REQUEST_INTERFACE,
-                None,
-            )
-            self.request_proxy.connect("g-signal", self._on_request_signal)
+            self._create_proxy(self.REQUEST_INTERFACE, request_path, self._on_request_proxy_ready)
         except GLib.Error:
             self._fail("Could not request your location. Choose your region manually.")
+
+    def _on_request_proxy_ready(self, proxy):
+        self.request_proxy = proxy
+        self.request_proxy.connect("g-signal", self._on_request_signal)
 
     def _on_request_signal(self, _proxy, _sender, signal_name, parameters):
         if signal_name != "Response" or self._finished:
@@ -348,21 +337,33 @@ class LocationPortal:
             if is_clearly_outside_uk(latitude, longitude):
                 self._fail(OUTSIDE_UK_MESSAGE)
                 return
-            region_code = find_region_for_coordinates(latitude, longitude)
+            if self._lookup_in_progress:
+                return
+            self._lookup_in_progress = True
+            threading.Thread(
+                target=self._resolve_region_background,
+                args=(latitude, longitude, accuracy), daemon=True,
+            ).start()
+        except (ValueError, TypeError):
+            self._fail("Could not obtain a usable location. Choose your region manually.")
+
+    def _resolve_region_background(self, latitude, longitude, accuracy):
+        try:
+            features = load_region_features()
+            region_code = find_region_for_coordinates(latitude, longitude, features)
             if region_code is None:
-                self._fail(
-                    "This location isn't within the Great Britain electricity regions supported by the app. "
-                    "Choose your region manually."
-                )
-                return
-            if isinstance(accuracy, (float, int)) and is_near_region_boundary(
-                latitude, longitude, float(accuracy)
+                message = ("This location isn't within the Great Britain electricity regions supported by the app. "
+                           "Choose your region manually.")
+            elif isinstance(accuracy, (float, int)) and is_near_region_boundary(
+                latitude, longitude, float(accuracy), features,
             ):
-                self._fail("This location is close to a region boundary. Confirm or choose your region manually.")
+                message = "This location is close to a region boundary. Confirm or choose your region manually."
+            else:
+                GLib.idle_add(self._finish, region_code)
                 return
-            self._finish(region_code)
         except (OSError, ValueError, TypeError):
-            self._fail("Could not read the bundled region data. Choose your region manually.")
+            message = "Could not read the bundled region data. Choose your region manually."
+        GLib.idle_add(self._fail, message)
 
     def _finish(self, region_code: str):
         if self._finished:

@@ -2,13 +2,29 @@ import os
 import stat
 import tempfile
 import unittest
+import weakref
 from pathlib import Path
 from unittest.mock import patch
 
-from src.utils import CacheManager
+from src.utils import CacheManager, weak_callback
 
 
 class CacheManagerTests(unittest.TestCase):
+    def test_deferred_cache_construction_does_not_touch_disk(self):
+        with patch("src.utils.os.makedirs", side_effect=AssertionError("UI disk I/O")), \
+                patch("src.utils.os.listdir", side_effect=AssertionError("UI expiry scan")):
+            cache = CacheManager(initialize=False)
+        self.assertFalse(cache._initialized)
+
+    def test_deleted_file_releases_its_in_memory_payload(self):
+        with tempfile.TemporaryDirectory() as temp_dir, \
+                patch("src.utils.GLib.get_user_cache_dir", return_value=temp_dir):
+            cache = CacheManager()
+            cache.set("usage", {"samples": [1]})
+            Path(cache._get_cache_filepath("usage")).unlink()
+            self.assertEqual(cache.get("usage"), (None, None))
+            self.assertFalse(cache._memory_cache)
+
     def test_cache_directory_and_files_are_private(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             with patch("src.utils.GLib.get_user_cache_dir", return_value=temp_dir):
@@ -46,6 +62,21 @@ class CacheManagerTests(unittest.TestCase):
                     self.assertEqual(cache.get("rates")[0], {"results": [1]})
 
             self.assertEqual(json_load.call_count, 1)
+
+
+class WeakCallbackTests(unittest.TestCase):
+    def test_native_callback_does_not_keep_its_owner_alive(self):
+        class Owner:
+            def callback(self, value):
+                return value
+
+        owner = Owner()
+        reference = weakref.ref(owner)
+        callback = weak_callback(owner.callback)
+        self.assertEqual(callback(7), 7)
+        del owner
+        self.assertIsNone(reference())
+        self.assertIsNone(callback(7))
 
 
 if __name__ == "__main__":
