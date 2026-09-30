@@ -102,6 +102,12 @@ PYTHONPATH=/tmp/octopusagile-test-tools:$PWD/build-dir/files/lib/python3.13/site
 
 The Python minor-version directory follows the GNOME SDK and can change when the runtime is upgraded. The authoritative `flatpak-builder` command above runs the Meson unit suite automatically without this extra setup.
 
+The Flatpak Meson suite also runs a real GTK startup check on an isolated
+Broadway display. It constructs the main window and maps Prices, Plan, and Usage
+at narrow and wide sizes, using temporary settings and cache directories with
+network and keyring work disabled. This check runs in the development Flatpak CI
+build and catches widget construction errors that mocked unit tests cannot.
+
 ### Profiling
 
 Install your distribution's Sysprof package, then capture a representative run of the development Flatpak. Exercise the workspace switcher, chart selection, window resizing, and usage view before closing the app so Sysprof finishes the capture.
