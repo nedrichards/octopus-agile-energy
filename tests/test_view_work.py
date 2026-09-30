@@ -35,7 +35,7 @@ class ViewWorkTests(unittest.TestCase):
             window = SimpleNamespace(_usage_loading_delay_id=42, usage_loading_spinner=Mock(),
                                      usage_state_stack=Mock(), usage_empty_title=Mock(),
                                      usage_empty_description=Mock())
-            window._cancel_usage_loading_delay = lambda: MainWindow._cancel_usage_loading_delay(window)
+            window._cancel_usage_loading_delay = lambda window=window: MainWindow._cancel_usage_loading_delay(window)
             with patch("src.ui.main_window.GLib.source_remove") as remove:
                 if state == "content":
                     MainWindow._set_usage_content_state(window)
