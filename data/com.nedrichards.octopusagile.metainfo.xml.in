@@ -67,6 +67,17 @@
   </screenshots>
 
   <releases>
+    <release version="1.0.31" date="2026-09-30">
+      <description>
+        <p>This release improves usage refresh recovery and keeps your choices stable while data loads.</p>
+        <ul>
+          <li>Recheck usage history automatically and recover after network failures</li>
+          <li>Restore refresh feedback and report failures while keeping saved history available</li>
+          <li>Preserve the inspected date when rolling price history updates</li>
+          <li>Prevent delayed account detection from overwriting newer tariff choices</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.30" date="2026-09-30">
       <description>
         <p>This release smooths workspace navigation and usage history startup.</p>
