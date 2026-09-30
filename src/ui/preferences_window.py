@@ -71,6 +71,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self.all_regions = sorted(self.REGION_CODE_TO_NAME.values())
         self.region_to_tariffs = {} # To be populated by API data for these regions
         self._load_generation = 0
+        self._auto_detect_generation = 0
         self.location_portal = None
         self._api_key_dirty = False
         self._credential_save_pending = False
@@ -268,7 +269,14 @@ class PreferencesDialog(Adw.PreferencesDialog):
                 self._set_auto_detect_status("Could not save the API key to the password store.")
             return
         self._set_auto_detect_status("Detecting tariff from account...")
-        threading.Thread(target=self._auto_detect_from_account, daemon=True).start()
+        self._auto_detect_generation += 1
+        threading.Thread(target=self._auto_detect_from_account,
+                         args=(self._auto_detect_generation, self._auto_detect_context()), daemon=True).start()
+
+    def _auto_detect_context(self):
+        return tuple(self.settings.get_string(key).strip() for key in (
+            "octopus-account-number", "selected-tariff-code", "selected-region-code", "selected-tariff-type",
+        )) + (self._credential_revision, self.api_key_entry.get_text())
 
     def _set_auto_detect_button_state(self, sensitive):
         self.auto_detect_button.set_sensitive(sensitive)
@@ -299,47 +307,45 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self.refresh_usage_button.set_sensitive(sensitive)
         return False
 
-    def _auto_detect_from_account(self):
+    def _auto_detect_from_account(self, request_id, context):
+        result = None
+        error = None
         try:
-            account_number = self.settings.get_string("octopus-account-number").strip()
+            account_number = context[0]
             if not account_number:
-                GLib.idle_add(self._show_load_error, "Add your account number to use auto-detect.")
-                GLib.idle_add(self._set_auto_detect_status, "Add your account number, then try auto-detect again.")
-                GLib.idle_add(self._set_auto_detect_button_state, True)
-                return
-
-            account_data = get_account_data(account_number)
-            tariff_code = self._extract_active_tariff_code(account_data)
-            if not tariff_code:
-                GLib.idle_add(self._show_load_error, "Could not find an active electricity tariff on your account.")
-                GLib.idle_add(self._set_auto_detect_status, "No active electricity tariff agreement found on this account.")
-                GLib.idle_add(self._set_auto_detect_button_state, True)
-                return
-
-            inferred_region_code = f"_{tariff_code.split('-')[-1]}" if "-" in tariff_code else ""
-            inferred_tariff_type = self._infer_tariff_type_from_code(tariff_code)
-
-            GLib.idle_add(
-                self._apply_auto_detected_tariff,
-                tariff_code,
-                inferred_region_code,
-                inferred_tariff_type,
-            )
-        except OctopusApiError as e:
-            GLib.idle_add(self._show_load_error, f"{e} Could not auto-detect tariff.")
-            GLib.idle_add(self._set_auto_detect_status, "Auto-detect failed. Check API key/account number and try again.")
-            GLib.idle_add(self._set_auto_detect_button_state, True)
+                error = "Add your account number, then try auto-detect again."
+            else:
+                account_data = get_account_data(account_number)
+                tariff_code = self._extract_active_tariff_code(account_data)
+                if tariff_code:
+                    result = (tariff_code, f"_{tariff_code.split('-')[-1]}" if "-" in tariff_code else "",
+                              self._infer_tariff_type_from_code(tariff_code))
+                else:
+                    error = "No active electricity tariff agreement found on this account."
+        except OctopusApiError:
+            error = "Auto-detect failed. Check API key/account number and try again."
         except requests.exceptions.RequestException:
-            GLib.idle_add(self._show_load_error, "Network error. Could not auto-detect tariff.")
-            GLib.idle_add(self._set_auto_detect_status, "Network error while auto-detecting tariff. Please retry.")
-            GLib.idle_add(self._set_auto_detect_button_state, True)
+            error = "Network error while auto-detecting tariff. Please retry."
         except Exception:
             logger.exception("Unexpected tariff auto-detection failure")
-            GLib.idle_add(self._show_load_error, "An unexpected error occurred while detecting the tariff.")
-            GLib.idle_add(self._set_auto_detect_status, "Unexpected error while auto-detecting tariff.")
-            GLib.idle_add(self._set_auto_detect_button_state, True)
+            error = "Unexpected error while auto-detecting tariff."
+        GLib.idle_add(self._finish_auto_detect, request_id, context, result, error)
+
+    def _finish_auto_detect(self, request_id, context, result, error):
+        if self._closed or request_id != self._auto_detect_generation:
+            return False
+        if context != self._auto_detect_context():
+            self._set_auto_detect_status("Settings changed. Run auto-detect again to use your current choices.")
+        elif result:
+            return self._apply_auto_detected_tariff(*result)
+        else:
+            self._set_auto_detect_status(error)
+        self._set_auto_detect_button_state(True)
+        return False
 
     def _apply_auto_detected_tariff(self, tariff_code, inferred_region_code, inferred_tariff_type):
+        if self._closed:
+            return False
         self.settings.set_string("selected-tariff-code", tariff_code)
         if inferred_region_code in self.REGION_CODE_TO_NAME:
             self.settings.set_string("selected-region-code", inferred_region_code)
@@ -723,6 +729,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
 
     def on_closed(self, _dialog):
         self._closed = True
+        self._auto_detect_generation = getattr(self, "_auto_detect_generation", 0) + 1
         """
         Saves pending changes and cancels portal work after the dialog closes.
         """

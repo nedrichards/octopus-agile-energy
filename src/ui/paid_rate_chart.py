@@ -129,6 +129,8 @@ class PaidRateChart(Gtk.Box):
     def _update(self, *_args):
         if self._changing_periods:
             return
+        selected_date = (self.points[self.selected][0]
+                         if hasattr(self, "points") and 0 <= self.selected < len(self.points) else None)
         index = self.period.get_selected()
         if index >= len(self.period_options):
             return
@@ -139,7 +141,8 @@ class PaidRateChart(Gtk.Box):
         self.coverage.set_text(coverage)
         self.coverage_box.set_visible(bool(coverage))
         self.area.set_visible(len(self.points) > 1)
-        self.selected = max(0, len(self.points) - 1)
+        self.selected = next((i for i, point in enumerate(self.points) if point[0] == selected_date),
+                             max(0, len(self.points) - 1))
         self._invalidate_static()
         self._describe()
 

@@ -80,6 +80,7 @@ from .setup_window import SetupWindow
 
 logger = logging.getLogger(__name__)
 USAGE_BACKGROUND_REFRESH_INTERVAL_SECONDS = 6 * 60 * 60
+USAGE_RETRY_INTERVAL_SECONDS = 5 * 60
 PRICE_REFRESH_WATCHDOG_SECONDS = 60
 SUBTLE_ANIMATION_DURATION_MS = 180
 MAIN_VIEW_NAMES = frozenset(("prices", "plan", "usage"))
@@ -147,6 +148,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.price_summary_css_class = None
         self.usage_refresh_in_progress = False
         self.usage_refresh_attempted = False
+        self._usage_refresh_retry_after = 0
+        self._usage_synced_at = None
         self.usage_graph_mode = "kwh"
         self.usage_period_mode = "recent"
         self.usage_chart_selected_index = -1
@@ -218,6 +221,8 @@ class MainWindow(Adw.ApplicationWindow):
         if self._closed:
             return False
         self.update_current_price()
+        if self.main_view_stack.get_visible_child_name() == "usage":
+            self.refresh_usage_history_background()
         self.schedule_next_ui_update()
         return False
 
@@ -247,6 +252,9 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_network_changed(self, _monitor, network_available):
         if network_available:
             self._on_data_fetch_timer()
+            self._usage_refresh_retry_after = 0
+            if self.main_view_stack.get_visible_child_name() == "usage":
+                self.refresh_usage_history_background()
 
     def _schedule_price_refresh_after_result(self, outcome):
         now = datetime.now(UK_TIMEZONE)
@@ -476,6 +484,8 @@ class MainWindow(Adw.ApplicationWindow):
             self._refresh_adaptive_layout()
             if not self._needs_setup():
                 self.refresh_price()
+                if self.main_view_stack.get_visible_child_name() == "usage":
+                    self.refresh_usage_history_background()
 
     def on_quit_action(self, action, param):
         """
@@ -491,6 +501,9 @@ class MainWindow(Adw.ApplicationWindow):
             self.preferences_window = PreferencesDialog(settings=self.settings)
             self._connect_signal(self.preferences_window, "closed", self.on_preferences_hidden)
 
+        if self.preferences_window._closed:
+            self.preferences_window._set_auto_detect_button_state(True)
+            self.preferences_window._set_auto_detect_status("")
         self.preferences_window._closed = False
         self.preferences_window.present(self)
 
@@ -507,6 +520,7 @@ class MainWindow(Adw.ApplicationWindow):
         if self._closed:
             return
         self.usage_refresh_attempted = False
+        self._usage_refresh_retry_after = 0
         self._update_usage_insights()
         self.refresh_usage_history_background()
         self.refresh_price(force=True)
@@ -581,6 +595,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def on_usage_account_changed(self, _settings, _key):
         self.usage_refresh_attempted = False
+        self._usage_refresh_retry_after = 0
         if not self.preferences_window or not self.preferences_window.is_visible():
             self._update_usage_insights()
             self.refresh_usage_history_background()
@@ -2841,6 +2856,7 @@ class MainWindow(Adw.ApplicationWindow):
         return False
 
     def _set_usage_updated_label(self, synced_at):
+        self._usage_synced_at = synced_at
         self._set_last_updated_label(self.usage_updated_label, synced_at)
 
     def _set_usage_refreshing_label(self):
@@ -2866,13 +2882,16 @@ class MainWindow(Adw.ApplicationWindow):
             return "Unknown"
 
     def refresh_usage_history_background(self, force=False):
-        if self._closed or self.usage_refresh_in_progress or (self.usage_refresh_attempted and not force):
+        if self._closed or self.usage_refresh_in_progress:
+            return False
+        if not force and time.monotonic() < self._usage_refresh_retry_after:
             return False
         account_number = self.settings.get_string("octopus-account-number").strip()
         if not account_number:
             return False
         self.usage_refresh_in_progress = True
         self.usage_refresh_attempted = True
+        self._usage_refresh_retry_after = time.monotonic() + USAGE_RETRY_INTERVAL_SECONDS
         if force:
             self._set_usage_refreshing_label()
         thread = threading.Thread(
@@ -2906,7 +2925,10 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _refresh_usage_history_background(self, account_number, force=False):
         try:
-            if not get_api_key() or (not force and self._usage_cache_is_fresh(account_number)):
+            if not get_api_key():
+                GLib.idle_add(self._finish_usage_history_background_refresh, False, True)
+                return
+            if not force and self._usage_cache_is_fresh(account_number):
                 GLib.idle_add(self._finish_usage_history_background_refresh, False)
                 return
             cached_data, _cache_mtime = self._get_usage_cache(f"octopus_usage_{account_number}")
@@ -2936,16 +2958,16 @@ class MainWindow(Adw.ApplicationWindow):
                 self.usage_cache_manager.set(cache_key, refreshed_data)
                 GLib.idle_add(self._finish_usage_history_background_refresh, True)
             else:
-                GLib.idle_add(self._finish_usage_history_background_refresh, False)
+                GLib.idle_add(self._finish_usage_history_background_refresh, False, True)
         except OctopusApiError as exc:
             logger.debug("Background usage refresh failed: %s", type(exc).__name__)
-            GLib.idle_add(self._finish_usage_history_background_refresh, False)
+            GLib.idle_add(self._finish_usage_history_background_refresh, False, True)
         except requests.exceptions.RequestException as exc:
             logger.debug("Background usage refresh network error: %s", type(exc).__name__)
-            GLib.idle_add(self._finish_usage_history_background_refresh, False)
+            GLib.idle_add(self._finish_usage_history_background_refresh, False, True)
         except Exception as exc:  # ruff: ignore[BLE001] Background task boundary reports unexpected failures.
             logger.debug("Unexpected background usage refresh error: %s", type(exc).__name__)
-            GLib.idle_add(self._finish_usage_history_background_refresh, False)
+            GLib.idle_add(self._finish_usage_history_background_refresh, False, True)
 
     def _build_historical_usage_costs_for_cache(self, account_data, usage_samples):
         try:
@@ -2973,10 +2995,18 @@ class MainWindow(Adw.ApplicationWindow):
             logger.debug("Unexpected seasonal usage error: %s", type(exc).__name__)
         return None
 
-    def _finish_usage_history_background_refresh(self, updated):
+    def _finish_usage_history_background_refresh(self, updated, failed=False):
         self.usage_refresh_in_progress = False
         if self._closed:
             return False
+        if self._refresh_button_waiting_for_usage:
+            self._set_usage_updated_label(self._usage_synced_at)
+            if failed:
+                self.toast_overlay.add_toast(Adw.Toast.new(
+                    "Usage could not refresh. Your last saved history is still available."
+                    if self._usage_dashboard_insight is not None
+                    else "Usage could not refresh. Check your connection and account access, then try again."
+                ))
         if updated or self.main_view_stack.get_visible_child_name() == "usage":
             self._update_usage_insights()
         if self._refresh_button_waiting_for_usage:
