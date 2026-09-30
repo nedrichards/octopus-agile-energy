@@ -5,6 +5,15 @@ from src import secrets_manager
 
 
 class AsyncSecretTests(unittest.TestCase):
+    def test_lookup_can_distinguish_keyring_failure_from_a_missing_key(self):
+        error = secrets_manager.GLib.Error("Unavailable")
+        with patch.object(secrets_manager.Secret, "password_lookup_sync", side_effect=error):
+            self.assertIsNone(secrets_manager.get_api_key())
+            with self.assertRaises(secrets_manager.GLib.Error):
+                secrets_manager.get_api_key(raise_on_error=True)
+        with patch.object(secrets_manager.Secret, "password_lookup_sync", return_value=None):
+            self.assertIsNone(secrets_manager.get_api_key(raise_on_error=True))
+
     def test_lookup_uses_native_async_call_and_only_finishes_in_callback(self):
         ready = Mock()
         with patch.object(secrets_manager.Secret, "password_lookup") as lookup, \

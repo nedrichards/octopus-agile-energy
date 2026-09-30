@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from gi.repository import GLib
 from src.ui.main_window import MainWindow
 from src.ui.paid_rate_chart import PaidRateChart
 from src.ui.price_chart import PriceChartWidget
@@ -12,6 +13,48 @@ from src.usage_presentation import add_usage_cost_insights, get_usage_chart_seri
 
 
 class ViewWorkTests(unittest.TestCase):
+    def test_usage_loading_waits_for_startup_delay(self):
+        window = SimpleNamespace(_usage_loading_delay_id=42, usage_loading_spinner=Mock(),
+                                 usage_state_stack=Mock())
+        MainWindow._set_usage_loading_state(window)
+        window.usage_loading_spinner.start.assert_not_called()
+        window.usage_state_stack.set_visible_child_name.assert_not_called()
+
+    def test_usage_delay_only_shows_loading_when_still_pending_and_open(self):
+        for closed, state in ((False, "pending"), (False, "content"), (True, "pending")):
+            window = SimpleNamespace(_closed=closed, _usage_loading_delay_id=42,
+                                     usage_state_stack=Mock(), _set_usage_loading_state=Mock())
+            window.usage_state_stack.get_visible_child_name.return_value = state
+            self.assertFalse(MainWindow._show_delayed_usage_loading(window))
+            self.assertIsNone(window._usage_loading_delay_id)
+            self.assertEqual(window._set_usage_loading_state.call_count,
+                             int(not closed and state == "pending"))
+
+    def test_fast_usage_result_cancels_loading_before_showing_content_or_setup(self):
+        for state in ("content", "empty"):
+            window = SimpleNamespace(_usage_loading_delay_id=42, usage_loading_spinner=Mock(),
+                                     usage_state_stack=Mock(), usage_empty_title=Mock(),
+                                     usage_empty_description=Mock())
+            window._cancel_usage_loading_delay = lambda: MainWindow._cancel_usage_loading_delay(window)
+            with patch("src.ui.main_window.GLib.source_remove") as remove:
+                if state == "content":
+                    MainWindow._set_usage_content_state(window)
+                else:
+                    MainWindow._set_usage_empty_state(window, "Missing key", "Add a key")
+            remove.assert_called_once_with(42)
+            self.assertIsNone(window._usage_loading_delay_id)
+            window.usage_state_stack.set_visible_child_name.assert_called_once_with(state)
+
+    def test_usage_worker_distinguishes_missing_key_from_keyring_failure(self):
+        for key, error, state in ((None, None, "key-required"),
+                                  (None, GLib.Error("Unavailable"), "keyring-error")):
+            window = SimpleNamespace(_apply_usage_dashboard_result=Mock())
+            with patch("src.ui.main_window.get_api_key", return_value=key, side_effect=error) as lookup, \
+                    patch("src.ui.main_window.GLib.idle_add") as idle:
+                MainWindow._load_usage_dashboard_background(window, 1, "", "", (), None)
+            lookup.assert_called_once_with(raise_on_error=True)
+            self.assertEqual(idle.call_args.args[3]["state"], state)
+
     def test_usage_transition_only_starts_worker_and_never_reads_keyring_or_cache(self):
         window = SimpleNamespace(
             _closed=False, _usage_analysis_generation=0, _usage_analysis_in_progress=False,
@@ -82,12 +125,13 @@ class ViewWorkTests(unittest.TestCase):
             _closed=False, _fetch_generation=1, _usage_analysis_generation=2, _plan_generation=3,
             _signal_handlers=[], _draw_areas=[], _owned_actions=[],
             _ui_update_timer_id=4, _price_refresh_watchdog_id=5, _layout_refresh_id=6,
+            _usage_loading_delay_id=10,
             _fade_animation_sources={1: (widget, 7)}, network_monitor=monitor,
             _network_handler_id=8, _style_handlers=[(style, 9)],
         )
         with patch("src.ui.main_window.GLib.source_remove") as remove:
             MainWindow._on_destroy(window)
-        self.assertEqual([call.args[0] for call in remove.call_args_list], [4, 5, 6])
+        self.assertEqual([call.args[0] for call in remove.call_args_list], [4, 5, 6, 10])
         widget.remove_tick_callback.assert_called_once_with(7)
         monitor.disconnect.assert_called_once_with(8)
         style.disconnect.assert_called_once_with(9)

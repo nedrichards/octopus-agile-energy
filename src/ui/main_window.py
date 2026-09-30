@@ -162,6 +162,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._usage_analysis_generation = 0
         self._usage_analysis_in_progress = False
         self._usage_analysis_queued = False
+        self._usage_loading_delay_id = None
         self._usage_chart_surface = None
         self._plan_generation = 0
         self._plan_in_progress = False
@@ -656,6 +657,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.usage_state_stack.add_named(self._build_usage_empty_page(), "empty")
         self.usage_state_stack.add_named(self._build_usage_loading_page(), "loading")
         self.usage_state_stack.add_named(usage_scroll, "content")
+        self.usage_state_stack.add_named(Gtk.Box.new(Gtk.Orientation.VERTICAL, 0), "pending")
+        self.usage_state_stack.set_visible_child_name("pending")
+        self._usage_loading_delay_id = GLib.timeout_add(200, self._show_delayed_usage_loading)
 
         # Planning page. It stacks on compact and regular windows, then becomes
         # a chart-and-controls workspace when enough width is available.
@@ -1082,6 +1086,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.price_state_stack.set_visible_child_name("loading")
 
         self.main_view_stack = Adw.ViewStack.new()
+        self.main_view_stack.set_enable_transitions(True)
+        self.main_view_stack.set_transition_duration(150)
         self.main_view_stack.add_titled_with_icon(
             self.price_state_stack,
             "prices",
@@ -1369,7 +1375,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._plan_generation += 1
         self._plan_queued = None
         self._usage_analysis_queued = False
-        for name in ("_ui_update_timer_id", "_price_refresh_watchdog_id", "_layout_refresh_id"):
+        for name in ("_ui_update_timer_id", "_price_refresh_watchdog_id", "_layout_refresh_id",
+                     "_usage_loading_delay_id"):
             source = getattr(self, name, None)
             if source:
                 GLib.source_remove(source)
@@ -2546,7 +2553,13 @@ class MainWindow(Adw.ApplicationWindow):
     def _load_usage_dashboard_background(self, generation, account_number, tariff_code, prices, previous_signature):
         result = {"state": "empty"}
         try:
-            if not get_api_key():
+            try:
+                api_key = get_api_key(raise_on_error=True)
+            except GLib.Error:
+                result["state"] = "keyring-error"
+                GLib.idle_add(self._apply_usage_dashboard_result, generation, tariff_code, result)
+                return
+            if not api_key:
                 result["state"] = "key-required"
             elif not account_number:
                 result["state"] = "account-required"
@@ -2619,6 +2632,9 @@ class MainWindow(Adw.ApplicationWindow):
                 elif state == "account-required":
                     self._set_usage_empty_state("Usage history needs your account number",
                         "Add your Octopus account number in Preferences to show usage history and spend.")
+                elif state == "keyring-error":
+                    self._set_usage_empty_state("Unable to access your saved API key",
+                        "Unlock your keyring or check that the password service is available, then refresh usage history again.")
                 elif state == "empty" and (self.usage_refresh_in_progress or not self.usage_refresh_attempted):
                     self._set_usage_loading_state()
                 else:
@@ -2774,6 +2790,7 @@ class MainWindow(Adw.ApplicationWindow):
 
 
     def _set_usage_empty_state(self, title, description):
+        self._cancel_usage_loading_delay()
         self.usage_loading_spinner.stop()
         self.usage_empty_title.set_text(title)
         self.usage_empty_description.set_text(description)
@@ -2802,12 +2819,26 @@ class MainWindow(Adw.ApplicationWindow):
         self.price_state_stack.set_visible_child_name("loading")
 
     def _set_usage_content_state(self):
+        self._cancel_usage_loading_delay()
         self.usage_loading_spinner.stop()
         self.usage_state_stack.set_visible_child_name("content")
 
     def _set_usage_loading_state(self):
+        if self._usage_loading_delay_id:
+            return
         self.usage_loading_spinner.start()
         self.usage_state_stack.set_visible_child_name("loading")
+
+    def _cancel_usage_loading_delay(self):
+        if self._usage_loading_delay_id:
+            GLib.source_remove(self._usage_loading_delay_id)
+            self._usage_loading_delay_id = None
+
+    def _show_delayed_usage_loading(self):
+        self._usage_loading_delay_id = None
+        if not self._closed and self.usage_state_stack.get_visible_child_name() == "pending":
+            self._set_usage_loading_state()
+        return False
 
     def _set_usage_updated_label(self, synced_at):
         self._set_last_updated_label(self.usage_updated_label, synced_at)

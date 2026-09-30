@@ -39,9 +39,10 @@ def store_api_key(api_key: str) -> bool:
         logger.error("Failed to store API key in secret service: %s", type(exc).__name__)
         return False
 
-def get_api_key() -> str | None:
+def get_api_key(*, raise_on_error=False) -> str | None:
     """
     Retrieves the API key from the system keyring.
+    Set raise_on_error to distinguish unavailable credentials from a missing key.
     """
     try:
         password = Secret.password_lookup_sync(
@@ -52,6 +53,8 @@ def get_api_key() -> str | None:
         return password
     except GLib.Error as exc:
         logger.error("Failed to lookup API key from secret service: %s", type(exc).__name__)
+        if raise_on_error:
+            raise
         return None
 
 
