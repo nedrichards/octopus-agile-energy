@@ -67,6 +67,16 @@
   </screenshots>
 
   <releases>
+    <release version="1.0.30" date="2026-09-30">
+      <description>
+        <p>This release smooths workspace navigation and usage history startup.</p>
+        <ul>
+          <li>Crossfade between Prices, Plan, and Usage while respecting reduced motion</li>
+          <li>Avoid flashing account setup messages while saved credentials load</li>
+          <li>Show a loading indicator only when startup takes longer, and distinguish keyring access failures from missing credentials</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.29" date="2026-09-30">
       <description>
         <p>This release keeps the interface responsive while updating charts and workspace views.</p>
