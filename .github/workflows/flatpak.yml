@@ -46,7 +46,7 @@ jobs:
           echo "artifact=${artifact}" >> "$GITHUB_OUTPUT"
 
       - name: Build Flatpak
-        uses: flatpak/flatpak-github-actions/flatpak-builder@v6.7
+        uses: flatpak/flatpak-github-actions/flatpak-builder@v6.8
         with:
           bundle: ${{ steps.metadata.outputs.bundle }}
           manifest-path: com.nedrichards.octopusagile.Devel.json
