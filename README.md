@@ -214,3 +214,6 @@ The application source code is licensed under GNU GPL version 3. The GeoJSON dat
 ## AI Assistance
 
 Development of this project has been assisted by a variety of AI coding tools.
+
+Dependency checks, CI artifacts, and release packaging are described in
+[Maintenance](docs/maintenance.md).

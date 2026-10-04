@@ -1,92 +1,46 @@
 name: Publish Release Flatpaks
 run-name: Publish Flatpaks for ${{ inputs.tag }}
-
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing release tag to package, for example v1.0.26
+        description: Existing vX.Y.Z release tag to package
         required: true
         type: string
-
 permissions:
   contents: read
-
 concurrency:
   group: release-flatpak-${{ inputs.tag }}
   cancel-in-progress: false
-
 jobs:
   verify:
     name: Verify release source
     runs-on: ubuntu-24.04
     outputs:
       commit: ${{ steps.release.outputs.commit }}
+      checkout: ${{ steps.release.outputs.checkout }}
+      manifest: ${{ steps.release.outputs.manifest }}
       version: ${{ steps.release.outputs.version }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ github.sha }}
-
-      - name: Match production manifest to tag
+          persist-credentials: false
+      - name: Verify tag and prepare exact release source
         id: release
-        shell: bash
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           RELEASE_TAG: ${{ inputs.tag }}
           WORKFLOW_REF: ${{ github.ref }}
-        run: |
-          python3 - <<'PY'
-          import json
-          import os
-          import re
-          import subprocess
-          import sys
-
-          default_ref = f"refs/heads/{os.environ['DEFAULT_BRANCH']}"
-          if os.environ["WORKFLOW_REF"] != default_ref:
-              sys.exit(
-                  "Release publication must be dispatched from the default branch: "
-                  f"expected={default_ref}, actual={os.environ['WORKFLOW_REF']}"
-              )
-
-          tag = os.environ["RELEASE_TAG"]
-          if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag):
-              sys.exit(f"Invalid release tag: {tag!r}")
-
-          try:
-              tag_commit = subprocess.check_output(
-                  ["git", "rev-list", "-n", "1", tag], text=True
-              ).strip()
-          except subprocess.CalledProcessError:
-              sys.exit(f"Release tag does not exist: {tag}")
-
-          with open("com.nedrichards.octopusagile.json", encoding="utf-8") as manifest_file:
-              manifest = json.load(manifest_file)
-          app_module = next(
-              module for module in manifest["modules"] if module["name"] == "octopusagile"
-          )
-          source = next(item for item in app_module["sources"] if item["type"] == "git")
-          manifest_commit = source["commit"]
-
-          if manifest_commit != tag_commit:
-              sys.exit(
-                  "Production manifest does not match the requested release tag: "
-                  f"manifest={manifest_commit}, {tag}={tag_commit}"
-              )
-
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"commit={tag_commit}\n")
-              output.write(f"version={tag.removeprefix('v')}\n")
-          PY
-
-      - name: Show verified release
-        env:
-          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
-          RELEASE_TAG: ${{ inputs.tag }}
-        run: echo "Building ${RELEASE_TAG} from verified commit ${RELEASE_COMMIT}"
-
+        run: python3 scripts/ci/prepare-release.py com.nedrichards.octopusagile.json
+      - name: Preserve verified manifest
+        uses: actions/upload-artifact@v7
+        with:
+          name: verified-release-manifest
+          path: ${{ steps.release.outputs.manifest }}
+          if-no-files-found: error
+          retention-days: 1
   build:
     name: Build ${{ matrix.variant.arch }} bundle
     needs: verify
@@ -105,18 +59,21 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.sha }}
-
-      - name: Build release bundle
-        uses: flatpak/flatpak-github-actions/flatpak-builder@v6.7
+          ref: ${{ needs.verify.outputs.checkout }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v7
+        with:
+          name: verified-release-manifest
+          path: .
+      - name: Build and test release bundle
+        uses: flatpak/flatpak-github-actions/flatpak-builder@v6.8
         with:
           arch: ${{ matrix.variant.arch }}
           bundle: Agile-Rates-${{ inputs.tag }}-${{ matrix.variant.arch }}.flatpak
-          manifest-path: com.nedrichards.octopusagile.json
-          cache-key: release-flatpak-${{ inputs.tag }}
+          manifest-path: ${{ needs.verify.outputs.manifest }}
+          cache-key: release-flatpak-${{ needs.verify.outputs.commit }}
           run-tests: true
           upload-artifact: false
-
       - name: Upload release bundle
         uses: actions/upload-artifact@v7
         with:
@@ -124,7 +81,6 @@ jobs:
           path: Agile-Rates-${{ inputs.tag }}-${{ matrix.variant.arch }}.flatpak
           if-no-files-found: error
           retention-days: 1
-
   publish:
     name: Publish GitHub release
     needs: [verify, build]
@@ -132,18 +88,20 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Download release bundles
-        uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v7
         with:
           pattern: Agile-Rates-${{ inputs.tag }}-*
           path: dist
           merge-multiple: true
-
-      - name: Create checksums
+      - name: Verify both bundles and create checksums
         working-directory: dist
-        run: sha256sum -- *.flatpak > SHA256SUMS
-
-      - name: Create draft release with assets
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          test -s "Agile-Rates-${RELEASE_TAG}-x86_64.flatpak"
+          test -s "Agile-Rates-${RELEASE_TAG}-aarch64.flatpak"
+          sha256sum -- *.flatpak > SHA256SUMS
+      - name: Create draft release with verified assets
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
@@ -154,26 +112,21 @@ jobs:
             exit 1
           fi
           gh release create "$RELEASE_TAG" dist/*.flatpak dist/SHA256SUMS \
-            --repo "$GITHUB_REPOSITORY" \
-            --draft \
-            --generate-notes \
-            --title "Agile Rates ${RELEASE_VERSION}" \
-            --verify-tag
-
+            --repo "$GITHUB_REPOSITORY" --draft --generate-notes \
+            --title "Agile-Rates ${RELEASE_VERSION}" --verify-tag
       - name: Publish verified release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
         run: gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
-
-      - name: Add release to workflow summary
+      - name: Summarize release
         env:
           RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_COMMIT: ${{ needs.verify.outputs.commit }}
         run: |
           {
-            echo "### Published release"
-            echo
-            printf -- '- Tag: %s\n' "$RELEASE_TAG"
-            printf -- '- Commit: %s\n' '${{ needs.verify.outputs.commit }}'
-            printf -- '- Release: https://github.com/%s/releases/tag/%s\n' "$GITHUB_REPOSITORY" "$RELEASE_TAG"
+            echo '### Published release'
+            echo "Tag: ${RELEASE_TAG}"
+            echo "Source commit: ${RELEASE_COMMIT}"
+            echo "Release: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${RELEASE_TAG}"
           } >> "$GITHUB_STEP_SUMMARY"

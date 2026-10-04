@@ -1,5 +1,4 @@
 [tool.ruff]
-required-version = "==0.16.3"
 line-length = 120
 target-version = "py310"
 src = ["src", "tests"]

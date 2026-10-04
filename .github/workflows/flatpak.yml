@@ -12,6 +12,7 @@ concurrency:
   cancel-in-progress: true
 
 on:
+  workflow_dispatch:
   push:
     branches: [ "main" ]
   pull_request:
@@ -50,6 +51,8 @@ jobs:
           bundle: ${{ steps.metadata.outputs.bundle }}
           manifest-path: com.nedrichards.octopusagile.Devel.json
           cache-key: flatpak-builder-${{ github.sha }}
+          run-tests: true
+          keep-build-dirs: true
           upload-artifact: false
 
       - name: Upload development bundle
@@ -80,3 +83,11 @@ jobs:
             printf -- '- Retention: 14 days\n'
             printf '\nAfter extracting the artifact:\n\n```console\nflatpak install --user ./%s\n```\n' "$BUNDLE_NAME"
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve Flatpak test logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: flatpak-test-logs-${{ github.sha }}
+          path: .flatpak-builder/build/**/meson-logs/testlog.*
+          if-no-files-found: warn
+          retention-days: 14
