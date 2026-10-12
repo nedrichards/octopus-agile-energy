@@ -6,7 +6,7 @@ import logging
 import math
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import cairo
 import requests
@@ -16,6 +16,7 @@ from ..find_cheapest_presentation import (
     build_find_cheapest_presentation,
     build_fixed_start_presentation,
 )
+from ..markup import markup
 from ..octopus_api import OctopusApiError
 from ..price_bands import PRICE_BAND_NEGATIVE, PRICE_BAND_VERSION, get_price_band
 from ..price_cache import (
@@ -269,7 +270,7 @@ class MainWindow(Adw.ApplicationWindow):
                 delay = PRICE_RETRY_DELAYS_SECONDS[-1] * 2 ** min(
                     attempt - len(PRICE_RETRY_DELAYS_SECONDS) + 1, 5
                 )
-            retry_at = now.astimezone(timezone.utc) + timedelta(seconds=delay)
+            retry_at = now.astimezone(UTC) + timedelta(seconds=delay)
             self._next_price_refresh_at = min(retry_at, next_release)
             self._price_retry_attempt = 0 if retry_at >= next_release else attempt + 1
             logger.debug("Next price retry: %s", self._next_price_refresh_at.isoformat())
@@ -1777,7 +1778,7 @@ class MainWindow(Adw.ApplicationWindow):
     def find_cheapest_slot(self, duration_hours, start_within_hours):
         if self._closed:
             return
-        now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+        now = datetime.now(UTC).replace(second=0, microsecond=0)
         prices = tuple(self.all_prices)
         signature = (duration_hours, start_within_hours, now, self.plan_comparison_start_time,
                      self._get_price_data_signature(prices))
@@ -2092,14 +2093,14 @@ class MainWindow(Adw.ApplicationWindow):
             tariff_type = self.settings.get_string("selected-tariff-type")
             product_code = extract_product_code(selected_tariff_code)
 
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             rates_cache_key = build_rates_cache_key(selected_tariff_code, now)
 
             raw_rates = None
             if not force:
                 cached_data, cache_mtime_ts = self.cache_manager.get(rates_cache_key)
                 if cached_data and cache_mtime_ts:
-                    cache_mtime = datetime.fromtimestamp(cache_mtime_ts, tz=timezone.utc)
+                    cache_mtime = datetime.fromtimestamp(cache_mtime_ts, tz=UTC)
                     if not is_rates_cache_stale(cache_mtime, now, cached_data, tariff_type):
                         logger.debug("Rates data loaded from cache.")
                         raw_rates = cached_data
@@ -2240,8 +2241,8 @@ class MainWindow(Adw.ApplicationWindow):
         filtered_rates_dict = {}
         for rate in rates:
             try:
-                valid_from = datetime.fromisoformat(rate['valid_from'].replace('Z', '+00:00'))
-                valid_to = datetime.fromisoformat(rate['valid_to'].replace('Z', '+00:00'))
+                valid_from = datetime.fromisoformat(rate['valid_from'])
+                valid_to = datetime.fromisoformat(rate['valid_to'])
             except (AttributeError, KeyError, TypeError, ValueError):
                 continue
             if valid_to - valid_from == timedelta(minutes=30):
@@ -2272,7 +2273,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     @staticmethod
     def _format_octopus_datetime(value):
-        return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def _get_price_setup_issue(self, check_api_key=False):
         tariff_code = self.settings.get_string("selected-tariff-code")
@@ -2360,8 +2361,8 @@ class MainWindow(Adw.ApplicationWindow):
                 if not math.isfinite(price_gbp):
                     raise ValueError("Price must be finite")
                 processed_prices.append({
-                    'valid_from': datetime.fromisoformat(rate['valid_from'].replace('Z', '+00:00')),
-                    'valid_to': datetime.fromisoformat(rate['valid_to'].replace('Z', '+00:00')),
+                    'valid_from': datetime.fromisoformat(rate['valid_from']),
+                    'valid_to': datetime.fromisoformat(rate['valid_to']),
                     'price_gbp': price_gbp,
                 })
             except (AttributeError, KeyError, TypeError, ValueError) as exc:
@@ -2381,7 +2382,7 @@ class MainWindow(Adw.ApplicationWindow):
             )
             return
 
-        now_utc = datetime.now(timezone.utc)
+        now_utc = datetime.now(UTC)
         current_rate = None
         for rate in self.all_prices:
             if rate['valid_from'] <= now_utc < rate['valid_to']:
@@ -2531,9 +2532,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.price_card_description.set_text(self.price_summary_description)
         self.price_card_description.set_visible(bool(self.price_summary_description))
 
-        escaped_title = GLib.markup_escape_text(self.price_summary_title)
         self.compact_price_title.set_markup(
-            f"<span size='xx-large' weight='bold'>{escaped_title}</span>"
+            markup(t"<span size='xx-large' weight='bold'>{self.price_summary_title}</span>")
         )
         self.compact_price_description.set_text(self.price_summary_compact_description)
         self.compact_price_description.set_visible(bool(self.price_summary_compact_description))
@@ -2864,8 +2864,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _set_last_updated_label(self, label_widget, updated_at):
         label = self._format_last_updated(updated_at)
-        escaped_label = GLib.markup_escape_text(label)
-        label_widget.set_markup(f"<span size='small'>Last updated: {escaped_label}</span>")
+        label_widget.set_markup(markup(t"<span size='small'>Last updated: {label}</span>"))
 
     def _format_last_updated(self, updated_at):
         if not updated_at:
@@ -2873,9 +2872,9 @@ class MainWindow(Adw.ApplicationWindow):
 
         try:
             if isinstance(updated_at, str):
-                updated_at = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+                updated_at = datetime.fromisoformat(updated_at)
             if updated_at.tzinfo is None:
-                updated_at = updated_at.replace(tzinfo=timezone.utc)
+                updated_at = updated_at.replace(tzinfo=UTC)
             local_dt = updated_at.astimezone(UK_TIMEZONE)
             return local_dt.strftime("%d %b %Y, %H:%M")
         except (TypeError, ValueError):
@@ -2933,7 +2932,7 @@ class MainWindow(Adw.ApplicationWindow):
                 return
             cached_data, _cache_mtime = self._get_usage_cache(f"octopus_usage_{account_number}")
             account_data = get_account_data(account_number)
-            refresh_started_at = datetime.now(timezone.utc)
+            refresh_started_at = datetime.now(UTC)
             refresh_start = get_usage_refresh_start(cached_data, refresh_started_at)
             fresh_samples = fetch_recent_usage_samples(
                 account_data,
@@ -2951,7 +2950,7 @@ class MainWindow(Adw.ApplicationWindow):
                     cached_data,
                     fresh_samples,
                     fresh_daily_costs,
-                    now=datetime.now(timezone.utc),
+                    now=datetime.now(UTC),
                     fresh_daily_archive=fresh_daily_archive,
                 )
                 cache_key = f"octopus_usage_{account_number}"
@@ -3429,7 +3428,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         day = self.usage_chart_daily_data[index]
         date = day.get("date") or self.usage_chart_dates[index]
-        lines = [f"<b>{GLib.markup_escape_text(self._format_usage_period_label(date))}</b>"]
+        lines = [markup(t"<b>{self._format_usage_period_label(date)}</b>")]
 
         kwh = day.get("kwh")
         if kwh is not None:

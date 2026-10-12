@@ -1,6 +1,6 @@
 import sys
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -64,7 +64,7 @@ class PriceRefreshCoordinationTests(unittest.TestCase):
         window._schedule_price_refresh_after_result.assert_not_called()
 
     def test_due_watchdog_starts_forced_refresh(self):
-        now = datetime(2026, 7, 25, 16, 30, tzinfo=timezone.utc)
+        now = datetime(2026, 7, 25, 16, 30, tzinfo=UTC)
         window = SimpleNamespace(
             _next_price_refresh_at=now - timedelta(minutes=1),
             _needs_setup=Mock(return_value=False),
@@ -83,7 +83,7 @@ class PriceRefreshCoordinationTests(unittest.TestCase):
         self.assertIsNone(window._next_price_refresh_at)
 
     def test_due_watchdog_waits_for_in_flight_refresh(self):
-        now = datetime(2026, 7, 25, 16, 30, tzinfo=timezone.utc)
+        now = datetime(2026, 7, 25, 16, 30, tzinfo=UTC)
         due_at = now - timedelta(minutes=1)
         window = SimpleNamespace(
             _next_price_refresh_at=due_at,
@@ -103,7 +103,7 @@ class PriceRefreshCoordinationTests(unittest.TestCase):
         self.assertEqual(window._next_price_refresh_at, due_at)
 
     def test_transient_failure_backs_off_until_next_release(self):
-        now = datetime(2026, 7, 25, 16, 30, tzinfo=timezone.utc)
+        now = datetime(2026, 7, 25, 16, 30, tzinfo=UTC)
         window = SimpleNamespace(
             _price_retry_attempt=0,
             _next_price_refresh_at=None,
@@ -126,7 +126,7 @@ class PriceRefreshCoordinationTests(unittest.TestCase):
         self.assertEqual(window._next_price_refresh_at, now + timedelta(days=1))
 
     def test_incomplete_retry_does_not_delay_release_and_resets_backoff(self):
-        now = datetime(2026, 7, 25, 15, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 7, 25, 15, 0, tzinfo=UTC)
         window = SimpleNamespace(_price_retry_attempt=6, current_price_data={}, status_label=Mock())
         with patch("src.ui.main_window.datetime") as mocked_datetime:
             mocked_datetime.now.return_value = now
@@ -146,8 +146,8 @@ class PriceRefreshCoordinationTests(unittest.TestCase):
         from src.uk_time import UK_TIMEZONE
 
         for now in (
-            datetime(2026, 3, 29, 0, 30, tzinfo=timezone.utc),
-            datetime(2026, 10, 25, 0, 30, tzinfo=timezone.utc),
+            datetime(2026, 3, 29, 0, 30, tzinfo=UTC),
+            datetime(2026, 10, 25, 0, 30, tzinfo=UTC),
         ):
             with self.subTest(now=now), patch("src.ui.main_window.datetime") as mocked_datetime:
                 mocked_datetime.now.return_value = now.astimezone(UK_TIMEZONE)
@@ -156,7 +156,7 @@ class PriceRefreshCoordinationTests(unittest.TestCase):
                 self.assertEqual(window._next_price_refresh_at, now + timedelta(hours=2))
 
     def test_due_watchdog_does_not_fetch_while_offline(self):
-        now = datetime(2026, 7, 25, 16, 30, tzinfo=timezone.utc)
+        now = datetime(2026, 7, 25, 16, 30, tzinfo=UTC)
         due_at = now - timedelta(minutes=1)
         window = SimpleNamespace(
             _next_price_refresh_at=due_at,
@@ -189,7 +189,7 @@ class PriceProcessingTests(unittest.TestCase):
         )
 
     def test_future_only_prices_remain_visible_in_unavailable_state(self):
-        now = datetime(2026, 7, 25, 15, 30, tzinfo=timezone.utc)
+        now = datetime(2026, 7, 25, 15, 30, tzinfo=UTC)
         future_price = {
             "valid_from": now + timedelta(minutes=30),
             "valid_to": now + timedelta(hours=1),
@@ -248,7 +248,7 @@ class PriceProcessingTests(unittest.TestCase):
 
         processed = idle_add.call_args.args[1]
         self.assertEqual([price["price_gbp"] for price in processed], [0.1, 0.2])
-        self.assertEqual(processed[0]["valid_from"], datetime(2026, 7, 1, tzinfo=timezone.utc))
+        self.assertEqual(processed[0]["valid_from"], datetime(2026, 7, 1, tzinfo=UTC))
 
     def test_error_detail_ignores_non_object_json(self):
         response = Mock()

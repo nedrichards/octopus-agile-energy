@@ -5,7 +5,7 @@ gi.require_version('Adw', '1')
 import logging
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import ClassVar
 
 import requests
@@ -368,7 +368,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         return get_account_data(account_number)
 
     def _extract_active_tariff_code(self, account_data):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         for property_data in account_data.get("properties", []):
             for meter_point in property_data.get("electricity_meter_points", []):
@@ -380,8 +380,8 @@ class PreferencesDialog(Adw.PreferencesDialog):
                     if not tariff_code or not valid_from:
                         continue
 
-                    start = datetime.fromisoformat(valid_from.replace("Z", "+00:00"))
-                    end = datetime.fromisoformat(valid_to.replace("Z", "+00:00")) if valid_to else None
+                    start = datetime.fromisoformat(valid_from)
+                    end = datetime.fromisoformat(valid_to) if valid_to else None
 
                     if start <= now and (end is None or now < end):
                         return tariff_code
@@ -396,7 +396,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
             cached_data, _cache_mtime = self.usage_cache_manager.get(cache_key)
             if not cached_data:
                 cached_data, _cache_mtime = self.cache_manager.get(cache_key)
-            refresh_started_at = datetime.now(timezone.utc)
+            refresh_started_at = datetime.now(UTC)
             refresh_start = get_usage_refresh_start(cached_data, refresh_started_at)
             fresh_samples = self._fetch_recent_usage_samples(
                 account_data,
@@ -417,7 +417,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
                 cached_data,
                 fresh_samples,
                 fresh_daily_costs,
-                now=datetime.now(timezone.utc),
+                now=datetime.now(UTC),
                 fresh_daily_archive=fresh_daily_archive,
             )
             self.usage_cache_manager.set(cache_key, refreshed_data)

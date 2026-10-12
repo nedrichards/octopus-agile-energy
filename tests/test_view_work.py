@@ -1,6 +1,6 @@
 """Regression checks for blocking work, stale results, and retained redraws."""
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -154,7 +154,7 @@ class ViewWorkTests(unittest.TestCase):
         chart._base_area.queue_draw.assert_not_called()
 
     def test_paid_rate_worker_geometry_preserves_gaps_and_periods(self):
-        start = datetime(2025, 1, 1, tzinfo=timezone.utc)
+        start = datetime(2025, 1, 1, tzinfo=UTC)
         history = [((start + timedelta(days=i)).date().isoformat(), None if i == 365 else 10.0)
                    for i in range(600)]
         result = build_paid_rate_presentation(history)

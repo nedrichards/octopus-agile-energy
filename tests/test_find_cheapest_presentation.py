@@ -3,7 +3,7 @@ import sys
 import time
 import unittest
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -35,8 +35,8 @@ def utc_process_timezone():
 
 class FindCheapestPresentationTests(unittest.TestCase):
     def test_repeated_autumn_window_is_unambiguous(self):
-        start = datetime(2025, 10, 26, 0, 0, tzinfo=timezone.utc)
-        end = datetime(2025, 10, 26, 1, 0, tzinfo=timezone.utc)
+        start = datetime(2025, 10, 26, 0, 0, tzinfo=UTC)
+        end = datetime(2025, 10, 26, 1, 0, tzinfo=UTC)
 
         self.assertEqual(
             format_time_window(start, end),
@@ -45,8 +45,8 @@ class FindCheapestPresentationTests(unittest.TestCase):
 
     def test_builds_fixed_start_comparison_for_more_expensive_window(self):
         slot = {
-            "start": datetime(2025, 5, 25, 15, 0, tzinfo=timezone.utc),
-            "end": datetime(2025, 5, 25, 16, 30, tzinfo=timezone.utc),
+            "start": datetime(2025, 5, 25, 15, 0, tzinfo=UTC),
+            "end": datetime(2025, 5, 25, 16, 30, tzinfo=UTC),
             "average_price_gbp": 0.173,
         }
 
@@ -59,8 +59,8 @@ class FindCheapestPresentationTests(unittest.TestCase):
 
     def test_fixed_start_comparison_can_be_cheaper_outside_search_window(self):
         slot = {
-            "start": datetime(2025, 5, 25, 23, 0, tzinfo=timezone.utc),
-            "end": datetime(2025, 5, 26, 0, 0, tzinfo=timezone.utc),
+            "start": datetime(2025, 5, 25, 23, 0, tzinfo=UTC),
+            "end": datetime(2025, 5, 26, 0, 0, tzinfo=UTC),
             "average_price_gbp": 0.10,
         }
 
@@ -69,8 +69,8 @@ class FindCheapestPresentationTests(unittest.TestCase):
         self.assertEqual(presentation["comparison_text"], "4.2p/kWh less")
 
     def test_builds_user_visible_rows_for_negative_price_appliance_window(self):
-        day_start = datetime(2025, 5, 25, 0, 0, tzinfo=timezone.utc)
-        now = datetime(2025, 5, 25, 10, 17, tzinfo=timezone.utc)
+        day_start = datetime(2025, 5, 25, 0, 0, tzinfo=UTC)
+        now = datetime(2025, 5, 25, 10, 17, tzinfo=UTC)
         prices = historical_agile_prices(day_start, AGILE_REGION_A_2025_05_25_PENCE)
         cheapest_slot = find_cheapest_slot(
             prices,
@@ -105,7 +105,7 @@ class FindCheapestPresentationTests(unittest.TestCase):
         )
 
     def test_returns_none_without_a_cheapest_slot(self):
-        now = datetime(2025, 5, 25, 10, 17, tzinfo=timezone.utc)
+        now = datetime(2025, 5, 25, 10, 17, tzinfo=UTC)
 
         self.assertIsNone(
             build_find_cheapest_presentation(
@@ -118,10 +118,10 @@ class FindCheapestPresentationTests(unittest.TestCase):
         )
 
     def test_uses_missing_timer_copy_when_cheapest_slot_exists_without_timer_data(self):
-        now = datetime(2025, 5, 25, 10, 17, tzinfo=timezone.utc)
+        now = datetime(2025, 5, 25, 10, 17, tzinfo=UTC)
         cheapest_slot = {
-            "start": datetime(2025, 5, 25, 11, 0, tzinfo=timezone.utc),
-            "end": datetime(2025, 5, 25, 12, 0, tzinfo=timezone.utc),
+            "start": datetime(2025, 5, 25, 11, 0, tzinfo=UTC),
+            "end": datetime(2025, 5, 25, 12, 0, tzinfo=UTC),
             "average_price_gbp": -0.05,
         }
 

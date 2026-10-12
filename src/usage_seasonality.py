@@ -1,7 +1,5 @@
-from __future__ import annotations
-
 import calendar
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 from .uk_time import UK_TIMEZONE, latest_complete_local_day
 
@@ -19,9 +17,9 @@ def build_daily_usage_archive(samples: list[dict]) -> list[dict]:
         if interval_start is None or consumption is None:
             continue
         try:
-            start = datetime.fromisoformat(interval_start.replace("Z", "+00:00"))
+            start = datetime.fromisoformat(interval_start)
             if start.tzinfo is None:
-                start = start.replace(tzinfo=timezone.utc)
+                start = start.replace(tzinfo=UTC)
             day_key = start.astimezone(UK_TIMEZONE).date().isoformat()
             totals[day_key] = totals.get(day_key, 0.0) + float(consumption)
         except (TypeError, ValueError):
@@ -34,7 +32,7 @@ def build_daily_usage_archive(samples: list[dict]) -> list[dict]:
 
 
 def merge_daily_usage_archive(cached_archive, fresh_archive, now=None):
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     cutoff = now.astimezone(UK_TIMEZONE).date() - timedelta(days=USAGE_ARCHIVE_DAYS)
     by_date = {}
     for record in [*(cached_archive or []), *(fresh_archive or [])]:

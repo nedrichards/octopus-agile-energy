@@ -1,7 +1,5 @@
-from __future__ import annotations
-
 from bisect import bisect_right
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from .price_bands import (
     PRICE_BAND_HIGH,
@@ -16,9 +14,9 @@ from .uk_time import UK_TIMEZONE
 def parse_octopus_datetime(value):
     if not value:
         return None
-    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    parsed = datetime.fromisoformat(value)
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
     return parsed
 
 
@@ -148,7 +146,7 @@ def _prepare_tariff_lookup(tariff_periods):
     prepared = []
     for period in tariff_periods:
         valid_from = period.get("valid_from")
-        valid_to = period.get("valid_to") or datetime.max.replace(tzinfo=timezone.utc)
+        valid_to = period.get("valid_to") or datetime.max.replace(tzinfo=UTC)
         tariff_code = period.get("tariff_code")
         if valid_from and tariff_code:
             prepared.append((valid_from, valid_to, tariff_code))
@@ -160,7 +158,7 @@ def _prepare_record_lookup(records):
     prepared = []
     for record in records:
         valid_from = parse_octopus_datetime(record.get("valid_from"))
-        valid_to = parse_octopus_datetime(record.get("valid_to")) or datetime.max.replace(tzinfo=timezone.utc)
+        valid_to = parse_octopus_datetime(record.get("valid_to")) or datetime.max.replace(tzinfo=UTC)
         if valid_from:
             prepared.append((valid_from, valid_to, record))
     ranges = sorted(prepared, key=lambda item: item[0])

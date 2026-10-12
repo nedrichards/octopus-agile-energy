@@ -1,6 +1,6 @@
 import sys
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -69,8 +69,8 @@ class PriceChartPresentationTests(unittest.TestCase):
             get_price_axis_bounds([])
 
     def test_price_index_follows_a_slot_when_the_window_moves(self):
-        first = datetime(2026, 7, 25, 10, 0, tzinfo=timezone.utc)
-        selected = datetime(2026, 7, 25, 10, 30, tzinfo=timezone.utc)
+        first = datetime(2026, 7, 25, 10, 0, tzinfo=UTC)
+        selected = datetime(2026, 7, 25, 10, 30, tzinfo=UTC)
         prices = [
             {'valid_from': first},
             {'valid_from': selected},
@@ -79,7 +79,7 @@ class PriceChartPresentationTests(unittest.TestCase):
         self.assertEqual(find_price_index_by_start(prices, selected), 1)
 
     def test_price_index_clears_a_slot_that_left_the_window(self):
-        selected = datetime(2026, 7, 25, 10, 30, tzinfo=timezone.utc)
+        selected = datetime(2026, 7, 25, 10, 30, tzinfo=UTC)
 
         self.assertEqual(find_price_index_by_start([], selected), -1)
 
@@ -99,8 +99,8 @@ class PriceChartPresentationTests(unittest.TestCase):
 
     def test_day_markers_use_local_dates(self):
         values = [
-            datetime(2026, 7, 25, 22, 30, tzinfo=timezone.utc),
-            datetime(2026, 7, 25, 23, 0, tzinfo=timezone.utc),
+            datetime(2026, 7, 25, 22, 30, tzinfo=UTC),
+            datetime(2026, 7, 25, 23, 0, tzinfo=UTC),
         ]
 
         london = ZoneInfo("Europe/London")

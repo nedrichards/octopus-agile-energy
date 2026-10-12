@@ -1,7 +1,5 @@
-from __future__ import annotations
-
 import calendar
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 from .price_bands import (
     HIGH_PRICE_THRESHOLD_GBP,
@@ -424,11 +422,11 @@ def _parse_samples(samples: list[dict]):
         if interval_start is None or consumption is None:
             continue
         try:
-            start = datetime.fromisoformat(interval_start.replace("Z", "+00:00"))
+            start = datetime.fromisoformat(interval_start)
             if start.tzinfo is None:
-                start = start.replace(tzinfo=timezone.utc)
+                start = start.replace(tzinfo=UTC)
             local_start = start.astimezone(UK_TIMEZONE)
-            parsed_by_start[start.astimezone(timezone.utc)] = {
+            parsed_by_start[start.astimezone(UTC)] = {
                 "start": start,
                 "local_start": local_start,
                 "day_key": local_start.date().isoformat(),
@@ -456,7 +454,7 @@ def _band_for_hour(hour: int):
 
 
 def _format_half_hour_end(start_text: str):
-    start = datetime.strptime(start_text, "%H:%M").replace(tzinfo=timezone.utc)
+    start = datetime.strptime(start_text, "%H:%M").replace(tzinfo=UTC)
     return (start + timedelta(minutes=30)).strftime("%H:%M")
 
 

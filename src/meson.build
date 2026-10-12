@@ -4,6 +4,9 @@ gnome = import('gnome')
 python = import('python')
 
 py_install = python.find_installation('python3')
+if not py_install.language_version().version_compare('>=3.14')
+  error('Agile Rates requires Python 3.14 from the GNOME 51 runtime')
+endif
 
 conf = configuration_data()
 conf.set('PYTHON', py_install.full_path())
@@ -30,6 +33,7 @@ install_data(
     '__init__.py',
     'application_id.py',
     'main.py',
+    'markup.py',
     'utils.py',
     'secrets_manager.py',
     'find_cheapest_presentation.py',

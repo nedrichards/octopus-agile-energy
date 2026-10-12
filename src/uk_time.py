@@ -1,4 +1,4 @@
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 UK_TIMEZONE = ZoneInfo("Europe/London")
@@ -8,7 +8,7 @@ def expected_half_hours_for_local_day(day: date) -> int:
     """Return the number of half-hours in a Great Britain civil day."""
     local_start = datetime.combine(day, time.min, tzinfo=UK_TIMEZONE)
     local_end = datetime.combine(day + timedelta(days=1), time.min, tzinfo=UK_TIMEZONE)
-    duration = local_end.astimezone(timezone.utc) - local_start.astimezone(timezone.utc)
+    duration = local_end.astimezone(UTC) - local_start.astimezone(UTC)
     return round(duration.total_seconds() / (30 * 60))
 
 
@@ -19,9 +19,9 @@ def latest_complete_local_day(synced_at: str | datetime | None) -> date | None:
 
     try:
         if isinstance(synced_at, str):
-            synced_at = datetime.fromisoformat(synced_at.replace("Z", "+00:00"))
+            synced_at = datetime.fromisoformat(synced_at)
         if synced_at.tzinfo is None:
-            synced_at = synced_at.replace(tzinfo=timezone.utc)
+            synced_at = synced_at.replace(tzinfo=UTC)
     except (TypeError, ValueError):
         return None
 

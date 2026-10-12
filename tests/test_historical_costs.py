@@ -1,12 +1,12 @@
 import sys
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.historical_costs import build_daily_costs, build_tariff_periods, get_usage_period
+from src.historical_costs import build_daily_costs, build_tariff_periods, get_usage_period, parse_octopus_datetime
 from src.price_bands import PRICE_BAND_VERSION
 
 from price_fixtures import (
@@ -17,6 +17,20 @@ from price_fixtures import (
 
 
 class HistoricalCostsTests(unittest.TestCase):
+    def test_parse_timestamp_preserves_clock_change_instants(self):
+        for text, expected in (
+            ("2026-10-25T00:30:00Z", datetime(2026, 10, 25, 0, 30, tzinfo=UTC)),
+            ("2026-10-25T01:30:00+01:00", datetime(2026, 10, 25, 0, 30, tzinfo=UTC)),
+            ("2026-10-25T01:30:00+00:00", datetime(2026, 10, 25, 1, 30, tzinfo=UTC)),
+            ("2026-10-25T01:30:00", datetime(2026, 10, 25, 1, 30, tzinfo=UTC)),
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(parse_octopus_datetime(text), expected)
+
+    def test_parse_timestamp_rejects_malformed_text(self):
+        with self.assertRaises(ValueError):
+            parse_octopus_datetime("2026-10-25T00:30:00ZZ")
+
     def test_get_usage_period_uses_interval_end_when_available(self):
         samples = [
             {
@@ -33,8 +47,8 @@ class HistoricalCostsTests(unittest.TestCase):
 
         start, end = get_usage_period(samples)
 
-        self.assertEqual(start, datetime(2026, 3, 20, 0, 0, tzinfo=timezone.utc))
-        self.assertEqual(end, datetime(2026, 3, 22, 0, 0, tzinfo=timezone.utc))
+        self.assertEqual(start, datetime(2026, 3, 20, 0, 0, tzinfo=UTC))
+        self.assertEqual(end, datetime(2026, 3, 22, 0, 0, tzinfo=UTC))
 
     def test_build_tariff_periods_clips_agreements_to_requested_range(self):
         account_data = {
@@ -57,13 +71,13 @@ class HistoricalCostsTests(unittest.TestCase):
 
         periods = build_tariff_periods(
             account_data,
-            datetime(2026, 3, 1, tzinfo=timezone.utc),
-            datetime(2026, 3, 2, tzinfo=timezone.utc),
+            datetime(2026, 3, 1, tzinfo=UTC),
+            datetime(2026, 3, 2, tzinfo=UTC),
         )
 
         self.assertEqual(len(periods), 1)
-        self.assertEqual(periods[0]["valid_from"], datetime(2026, 3, 1, tzinfo=timezone.utc))
-        self.assertEqual(periods[0]["valid_to"], datetime(2026, 3, 2, tzinfo=timezone.utc))
+        self.assertEqual(periods[0]["valid_from"], datetime(2026, 3, 1, tzinfo=UTC))
+        self.assertEqual(periods[0]["valid_to"], datetime(2026, 3, 2, tzinfo=UTC))
 
     def test_build_daily_costs_matches_usage_to_rates_and_standing_charge(self):
         tariff_code = "E-1R-AGILE-FLEX-22-11-25-C"
@@ -74,8 +88,8 @@ class HistoricalCostsTests(unittest.TestCase):
         tariff_periods = [
             {
                 "tariff_code": tariff_code,
-                "valid_from": datetime(2026, 3, 20, 0, 0, tzinfo=timezone.utc),
-                "valid_to": datetime(2026, 3, 21, 0, 0, tzinfo=timezone.utc),
+                "valid_from": datetime(2026, 3, 20, 0, 0, tzinfo=UTC),
+                "valid_to": datetime(2026, 3, 21, 0, 0, tzinfo=UTC),
             }
         ]
         rates = {
@@ -124,8 +138,8 @@ class HistoricalCostsTests(unittest.TestCase):
         ]
         tariff_periods = [{
             "tariff_code": tariff_code,
-            "valid_from": datetime(2026, 7, 1, tzinfo=timezone.utc),
-            "valid_to": datetime(2026, 7, 3, tzinfo=timezone.utc),
+            "valid_from": datetime(2026, 7, 1, tzinfo=UTC),
+            "valid_to": datetime(2026, 7, 3, tzinfo=UTC),
         }]
         rates = {tariff_code: [
             {
@@ -149,8 +163,8 @@ class HistoricalCostsTests(unittest.TestCase):
         ]
         tariff_periods = [{
             "tariff_code": tariff_code,
-            "valid_from": datetime(2026, 3, 20, 0, 0, tzinfo=timezone.utc),
-            "valid_to": datetime(2026, 3, 21, 0, 0, tzinfo=timezone.utc),
+            "valid_from": datetime(2026, 3, 20, 0, 0, tzinfo=UTC),
+            "valid_to": datetime(2026, 3, 21, 0, 0, tzinfo=UTC),
         }]
         rates = {
             tariff_code: [
@@ -189,8 +203,8 @@ class HistoricalCostsTests(unittest.TestCase):
         ]
         tariff_periods = [{
             "tariff_code": tariff_code,
-            "valid_from": datetime(2026, 3, 20, 0, 0, tzinfo=timezone.utc),
-            "valid_to": datetime(2026, 3, 21, 0, 0, tzinfo=timezone.utc),
+            "valid_from": datetime(2026, 3, 20, 0, 0, tzinfo=UTC),
+            "valid_to": datetime(2026, 3, 21, 0, 0, tzinfo=UTC),
         }]
         rates = {
             tariff_code: [
@@ -230,8 +244,8 @@ class HistoricalCostsTests(unittest.TestCase):
         ]
         tariff_periods = [{
             "tariff_code": tariff_code,
-            "valid_from": datetime(2026, 7, 25, tzinfo=timezone.utc),
-            "valid_to": datetime(2026, 7, 26, tzinfo=timezone.utc),
+            "valid_from": datetime(2026, 7, 25, tzinfo=UTC),
+            "valid_to": datetime(2026, 7, 26, tzinfo=UTC),
         }]
         rates = {
             tariff_code: [
@@ -251,7 +265,7 @@ class HistoricalCostsTests(unittest.TestCase):
 
     def test_build_daily_costs_allows_negative_energy_costs_to_offset_standing_charge(self):
         tariff_code = "E-1R-AGILE-24-10-01-A"
-        day_start = datetime(2025, 5, 25, 0, 0, tzinfo=timezone.utc)
+        day_start = datetime(2025, 5, 25, 0, 0, tzinfo=UTC)
         samples = [
             {"interval_start": f"2025-05-25T{hour:02d}:{minute:02d}:00Z", "consumption": 1.0}
             for hour, minute in [(12, 0), (12, 30), (13, 0), (13, 30), (14, 0), (14, 30)]
@@ -259,7 +273,7 @@ class HistoricalCostsTests(unittest.TestCase):
         tariff_periods = [{
             "tariff_code": tariff_code,
             "valid_from": day_start,
-            "valid_to": datetime(2025, 5, 26, 0, 0, tzinfo=timezone.utc),
+            "valid_to": datetime(2025, 5, 26, 0, 0, tzinfo=UTC),
         }]
         rates = {tariff_code: historical_agile_rate_records(day_start, AGILE_REGION_A_2025_05_25_PENCE)}
         standing = {
@@ -281,7 +295,7 @@ class HistoricalCostsTests(unittest.TestCase):
 
     def test_build_daily_costs_counts_missing_rates_without_dropping_high_peak_usage(self):
         tariff_code = "E-1R-AGILE-24-10-01-A"
-        day_start = datetime(2025, 4, 7, 0, 0, tzinfo=timezone.utc)
+        day_start = datetime(2025, 4, 7, 0, 0, tzinfo=UTC)
         samples = [
             {"interval_start": "2025-04-07T17:00:00Z", "consumption": 1.0},
             {"interval_start": "2025-04-07T17:30:00Z", "consumption": 1.0},
@@ -290,7 +304,7 @@ class HistoricalCostsTests(unittest.TestCase):
         tariff_periods = [{
             "tariff_code": tariff_code,
             "valid_from": day_start,
-            "valid_to": datetime(2025, 4, 8, 0, 0, tzinfo=timezone.utc),
+            "valid_to": datetime(2025, 4, 8, 0, 0, tzinfo=UTC),
         }]
         rates = {
             tariff_code: [
@@ -326,13 +340,13 @@ class HistoricalCostsTests(unittest.TestCase):
         tariff_periods = [
             {
                 "tariff_code": old_tariff,
-                "valid_from": datetime(2026, 3, 20, 0, 0, tzinfo=timezone.utc),
-                "valid_to": datetime(2026, 3, 20, 12, 0, tzinfo=timezone.utc),
+                "valid_from": datetime(2026, 3, 20, 0, 0, tzinfo=UTC),
+                "valid_to": datetime(2026, 3, 20, 12, 0, tzinfo=UTC),
             },
             {
                 "tariff_code": new_tariff,
-                "valid_from": datetime(2026, 3, 20, 12, 0, tzinfo=timezone.utc),
-                "valid_to": datetime(2026, 3, 21, 0, 0, tzinfo=timezone.utc),
+                "valid_from": datetime(2026, 3, 20, 12, 0, tzinfo=UTC),
+                "valid_to": datetime(2026, 3, 21, 0, 0, tzinfo=UTC),
             },
         ]
         rates = {

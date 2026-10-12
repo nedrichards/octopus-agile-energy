@@ -1,6 +1,6 @@
 import logging
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from urllib.parse import quote, urlencode
 
 import requests
@@ -38,14 +38,14 @@ def get_account_data(account_number):
 
 
 def fetch_recent_usage_samples(account_data, period_from=None, now=None):
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     if period_from is None:
         period_from = now - timedelta(days=USAGE_HISTORY_DAYS)
     return _fetch_usage_samples(account_data, period_from, now)
 
 
 def fetch_daily_usage_archive(account_data, period_from=None, now=None):
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     if period_from is None:
         period_from = now - timedelta(days=USAGE_ARCHIVE_DAYS)
     samples = _fetch_usage_samples(account_data, period_from, now)
@@ -102,7 +102,7 @@ def _fetch_usage_samples(account_data, period_from, now, group_by=None):
 
 def get_usage_refresh_start(cached_data, now=None):
     """Return the bounded start time for a full or incremental usage refresh."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     history_start = now - timedelta(days=USAGE_HISTORY_DAYS)
     cached_data = _compatible_usage_cache(cached_data)
     if not cached_data:
@@ -125,13 +125,13 @@ def get_usage_refresh_start(cached_data, now=None):
         second=0,
         microsecond=0,
     )
-    overlap_start = overlap_start_local.astimezone(timezone.utc)
+    overlap_start = overlap_start_local.astimezone(UTC)
     return max(history_start, overlap_start)
 
 
 def get_usage_archive_refresh_start(cached_data, now=None):
     """Return a bounded start for a compact, local-day seasonal refresh."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     archive_start = now - timedelta(days=USAGE_ARCHIVE_DAYS)
     cached_data = _compatible_usage_cache(cached_data)
     if not cached_data:
@@ -150,7 +150,7 @@ def get_usage_archive_refresh_start(cached_data, now=None):
 
     overlap_day = max(archive_dates) - timedelta(days=USAGE_REFRESH_OVERLAP_DAYS)
     overlap_start = datetime.combine(overlap_day, datetime.min.time(), tzinfo=UK_TIMEZONE)
-    return max(archive_start, overlap_start.astimezone(timezone.utc))
+    return max(archive_start, overlap_start.astimezone(UTC))
 
 
 def merge_usage_history(
@@ -161,7 +161,7 @@ def merge_usage_history(
     fresh_daily_archive=None,
 ):
     """Merge refreshed overlap data into a bounded, current usage cache payload."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     history_start = now - timedelta(days=USAGE_HISTORY_DAYS)
     cached_data = _compatible_usage_cache(cached_data) or {}
 
@@ -225,12 +225,12 @@ def _parse_sample_start(sample):
     if not value:
         return None
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value)
     except (TypeError, ValueError):
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def fetch_all_consumption_pages(initial_url):
@@ -361,7 +361,7 @@ def fetch_all_tariff_pages(initial_url):
 
 
 def _format_octopus_datetime(value):
-    return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _has_active_agreement(meter_point, now):
@@ -371,8 +371,8 @@ def _has_active_agreement(meter_point, now):
         if not valid_from:
             continue
 
-        start = datetime.fromisoformat(valid_from.replace("Z", "+00:00"))
-        end = datetime.fromisoformat(valid_to.replace("Z", "+00:00")) if valid_to else None
+        start = datetime.fromisoformat(valid_from)
+        end = datetime.fromisoformat(valid_to) if valid_to else None
         if start <= now and (end is None or now < end):
             return True
 

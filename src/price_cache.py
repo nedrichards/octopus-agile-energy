@@ -1,4 +1,4 @@
-from datetime import datetime, time, timedelta, timezone
+from datetime import UTC, datetime, time, timedelta
 
 from .uk_time import UK_TIMEZONE
 
@@ -22,12 +22,12 @@ def expected_rates_horizon(now: datetime) -> datetime:
         time.min,
         tzinfo=UK_TIMEZONE,
     )
-    return local_horizon.astimezone(timezone.utc)
+    return local_horizon.astimezone(UTC)
 
 
 def rates_cover_expected_horizon(rates, now: datetime, tariff_type: str = "") -> bool:
     """Return whether rates continuously cover now through the expected horizon."""
-    now_utc = now.astimezone(timezone.utc)
+    now_utc = now.astimezone(UTC)
     minute = 0 if now_utc.minute < 30 else 30
     cursor = now_utc.replace(minute=minute, second=0, microsecond=0)
     horizon = expected_rates_horizon(now)
@@ -35,20 +35,20 @@ def rates_cover_expected_horizon(rates, now: datetime, tariff_type: str = "") ->
         # Agile's published day ends at 23:00 GB time, not midnight.
         # Keep the request period wider so any extra published rates are retained.
         local_horizon = horizon.astimezone(UK_TIMEZONE)
-        horizon = (local_horizon - timedelta(hours=1)).astimezone(timezone.utc)
+        horizon = (local_horizon - timedelta(hours=1)).astimezone(UTC)
     intervals = []
     for rate in rates or ():
         try:
             valid_from = rate["valid_from"]
             valid_to = rate["valid_to"]
             if isinstance(valid_from, str):
-                valid_from = datetime.fromisoformat(valid_from.replace("Z", "+00:00"))
+                valid_from = datetime.fromisoformat(valid_from)
             if isinstance(valid_to, str):
-                valid_to = datetime.fromisoformat(valid_to.replace("Z", "+00:00"))
+                valid_to = datetime.fromisoformat(valid_to)
             if valid_from.tzinfo is None:
-                valid_from = valid_from.replace(tzinfo=timezone.utc)
+                valid_from = valid_from.replace(tzinfo=UTC)
             if valid_to.tzinfo is None:
-                valid_to = valid_to.replace(tzinfo=timezone.utc)
+                valid_to = valid_to.replace(tzinfo=UTC)
         except (AttributeError, KeyError, TypeError, ValueError):
             continue
         if valid_to > valid_from:
@@ -81,7 +81,7 @@ def next_price_release_check(now: datetime) -> datetime:
 
 def get_price_request_period(now: datetime) -> tuple[datetime, datetime]:
     """Return the smallest useful current-and-forecast API period."""
-    now_utc = now.astimezone(timezone.utc)
+    now_utc = now.astimezone(UTC)
     minute = 0 if now_utc.minute < 30 else 30
     period_from = now_utc.replace(minute=minute, second=0, microsecond=0)
     return period_from, expected_rates_horizon(now)

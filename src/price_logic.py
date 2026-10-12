@@ -1,4 +1,4 @@
-from datetime import datetime, time, timedelta, timezone
+from datetime import UTC, datetime, time, timedelta
 from itertools import pairwise
 
 try:
@@ -154,8 +154,8 @@ def build_dual_register_price_windows(
     Expands day/night unit-rate records into the half-hour windows used by the chart.
     The Economy 7 switching times are treated as UTC clock times.
     """
-    current = _floor_to_half_hour(period_start.astimezone(timezone.utc))
-    period_end = period_end.astimezone(timezone.utc)
+    current = _floor_to_half_hour(period_start.astimezone(UTC))
+    period_end = period_end.astimezone(UTC)
     day_rate = _representative_register_rate(day_rates, current, period_end)
     night_rate = _representative_register_rate(night_rates, current, period_end)
     prices = []
@@ -212,11 +212,11 @@ def _representative_register_rate(rates, period_start, period_end):
 
 def _parse_rate_window(rate):
     try:
-        valid_from = datetime.fromisoformat(rate['valid_from'].replace('Z', '+00:00'))
+        valid_from = datetime.fromisoformat(rate['valid_from'])
         valid_to = (
-            datetime.fromisoformat(rate['valid_to'].replace('Z', '+00:00'))
+            datetime.fromisoformat(rate['valid_to'])
             if rate.get('valid_to')
-            else datetime.max.replace(tzinfo=timezone.utc)
+            else datetime.max.replace(tzinfo=UTC)
         )
     except (KeyError, ValueError, TypeError):
         return None

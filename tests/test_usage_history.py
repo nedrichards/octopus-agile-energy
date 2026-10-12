@@ -1,6 +1,6 @@
 import sys
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import ANY, patch
 from urllib.parse import parse_qs, urlparse
@@ -25,11 +25,11 @@ from src.usage_seasonality import USAGE_ARCHIVE_DAYS
 
 class UsageHistoryTests(unittest.TestCase):
     def setUp(self):
-        self.now = datetime(2026, 7, 25, 12, 0, tzinfo=timezone.utc)
+        self.now = datetime(2026, 7, 25, 12, 0, tzinfo=UTC)
 
     def test_fetch_historical_unit_rates_expands_dual_register_tariff(self):
-        period_start = datetime(2026, 5, 13, 0, 0, tzinfo=timezone.utc)
-        period_end = datetime(2026, 5, 13, 1, 0, tzinfo=timezone.utc)
+        period_start = datetime(2026, 5, 13, 0, 0, tzinfo=UTC)
+        period_end = datetime(2026, 5, 13, 1, 0, tzinfo=UTC)
         day_rates = [{
             "valid_from": "2026-01-01T00:00:00Z",
             "valid_to": None,
@@ -103,7 +103,7 @@ class UsageHistoryTests(unittest.TestCase):
 
         refresh_start = get_usage_refresh_start(cached_data, self.now)
 
-        self.assertEqual(refresh_start, datetime(2026, 7, 16, 23, 0, tzinfo=timezone.utc))
+        self.assertEqual(refresh_start, datetime(2026, 7, 16, 23, 0, tzinfo=UTC))
 
     def test_incompatible_cache_falls_back_to_full_history_window(self):
         cached_data = {
@@ -210,7 +210,7 @@ class UsageHistoryTests(unittest.TestCase):
 
         refresh_start = get_usage_archive_refresh_start(cached_data, self.now)
 
-        self.assertEqual(refresh_start, datetime(2026, 7, 16, 23, 0, tzinfo=timezone.utc))
+        self.assertEqual(refresh_start, datetime(2026, 7, 16, 23, 0, tzinfo=UTC))
 
     def test_consumption_only_archive_gets_full_cost_backfill(self):
         cached_data = {
@@ -263,7 +263,7 @@ class UsageHistoryTests(unittest.TestCase):
                 }],
             }],
         }
-        refresh_start = datetime(2026, 7, 17, 10, 30, tzinfo=timezone.utc)
+        refresh_start = datetime(2026, 7, 17, 10, 30, tzinfo=UTC)
 
         with patch("src.usage_history.fetch_all_consumption_pages", return_value=[{"consumption": 1.0}]) as fetch:
             samples = fetch_recent_usage_samples(account_data, period_from=refresh_start, now=self.now)

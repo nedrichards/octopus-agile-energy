@@ -5,8 +5,6 @@ be tested independently.  Coordinates received from the portal are used only
 in memory for the lookup and are never logged or persisted.
 """
 
-from __future__ import annotations
-
 import json
 import math
 import secrets

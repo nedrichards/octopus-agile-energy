@@ -1,5 +1,5 @@
 import unittest
-from datetime import date, timedelta
+from datetime import UTC, date, timedelta
 
 from src.uk_time import expected_half_hours_for_local_day
 from src.usage_insights import (
@@ -74,10 +74,10 @@ class TrailingPaidRateTests(unittest.TestCase):
         self.assertEqual(result["2026-04-30"], 20)
 
     def test_daily_archive_retains_costs_beyond_recent_samples(self):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         day = dict(self.day(date(2025, 1, 1)), kwh=10)
-        archive = merge_daily_usage_archive([day], [], datetime(2026, 9, 7, tzinfo=timezone.utc))
+        archive = merge_daily_usage_archive([day], [], datetime(2026, 9, 7, tzinfo=UTC))
         self.assertEqual(archive[0]["energy_cost_gbp"], 2)
         self.assertEqual(archive[0]["matched_kwh"], 10)
 

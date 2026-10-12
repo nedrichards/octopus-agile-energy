@@ -29,14 +29,23 @@ flatpak run com.nedrichards.octopusagile
 
 ## Development
 
-This application targets GNOME 50 and is best developed through the Flatpak SDK. That keeps GTK, libadwaita, Python, Meson, and native tooling in the same environment used to build the app.
+This application targets GNOME 51 and supports its Python 3.14 runtime only.
+Develop through the Flatpak SDK to keep GTK, libadwaita, Python, Meson, and native
+tooling in the same environment used to build the app. Ruff and lint CI target
+Python 3.14; source changes can use features available through that version.
+
+Use native deferred annotations without `from __future__ import annotations`,
+`datetime.UTC` for UTC instants, and `datetime.fromisoformat()` directly for API
+timestamps (including the `Z` suffix). For dynamic Pango markup, use the
+`markup()` helper with a t-string: it preserves literal tags and escapes every
+interpolated value after formatting.
 
 ### Prerequisites
 
-Install Flatpak and Flatpak Builder, then install the GNOME 50 runtime and SDK if your system does not already have them:
+Install Flatpak and Flatpak Builder, then install the GNOME 51 runtime and SDK if your system does not already have them:
 
 ```bash
-flatpak install flathub org.gnome.Platform//50 org.gnome.Sdk//50
+flatpak install flathub org.gnome.Platform//51 org.gnome.Sdk//51
 ```
 
 ### Flatpak Test And Debug Loop
@@ -93,11 +102,11 @@ Ruff requires version 0.16.10, matching `requirements-dev.txt` and CI. A differe
 version fails immediately; update both pins together when upgrading Ruff.
 
 ```bash
-flatpak run --command=sh --filesystem="$PWD" --share=network org.gnome.Sdk//50
+flatpak run --command=sh --filesystem="$PWD" --share=network org.gnome.Sdk//51
 python3 -m pip install --target=/tmp/octopusagile-test-tools -r requirements-dev.txt
-PYTHONPATH=/tmp/octopusagile-test-tools:$PWD/build-dir/files/lib/python3.13/site-packages python3 -m compileall -q src tests
-PYTHONPATH=/tmp/octopusagile-test-tools:$PWD/build-dir/files/lib/python3.13/site-packages python3 -m ruff check src tests
-PYTHONPATH=/tmp/octopusagile-test-tools:$PWD/build-dir/files/lib/python3.13/site-packages python3 -m pytest
+PYTHONPATH=/tmp/octopusagile-test-tools:$PWD/build-dir/files/lib/python3.14/site-packages python3 -m compileall -q src tests
+PYTHONPATH=/tmp/octopusagile-test-tools:$PWD/build-dir/files/lib/python3.14/site-packages python3 -m ruff check src tests
+PYTHONPATH=/tmp/octopusagile-test-tools:$PWD/build-dir/files/lib/python3.14/site-packages python3 -m pytest
 ```
 
 The Python minor-version directory follows the GNOME SDK and can change when the runtime is upgraded. The authoritative `flatpak-builder` command above runs the Meson unit suite automatically without this extra setup.

@@ -1,6 +1,6 @@
 import sys
 import unittest
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -33,7 +33,7 @@ class UsageSeasonalityTests(unittest.TestCase):
         self.assertEqual(archive, [{"date": "2026-07-02", "kwh": 3.0}])
 
     def test_archive_merge_replaces_overlap_and_prunes_old_days(self):
-        now = datetime(2026, 8, 16, tzinfo=timezone.utc)
+        now = datetime(2026, 8, 16, tzinfo=UTC)
         merged = merge_daily_usage_archive(
             [
                 {"date": "2020-07-01", "kwh": 9.0},

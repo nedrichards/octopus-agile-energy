@@ -6,6 +6,7 @@ gi.require_version('Pango', '1.0')
 gi.require_version('PangoCairo', '1.0')
 import math
 import time
+from itertools import pairwise
 
 import cairo
 from gi.repository import Gdk, Gtk, Pango, PangoCairo
@@ -767,12 +768,12 @@ class PriceChartWidget(Gtk.Overlay):
             cr.stroke()
 
             cr.set_line_width(2.6 if not self.compact else 2.25)
-            for i in range(len(points) - 1):
+            for i, (start, end) in enumerate(pairwise(points)):
                 price = self.prices[i]['price_gbp']
                 base_color = self._get_price_color(price_colors, price)
                 cr.set_source_rgba(base_color[0], base_color[1], base_color[2], 0.92)
-                cr.move_to(points[i][0], points[i][1])
-                cr.line_to(points[i + 1][0], points[i + 1][1])
+                cr.move_to(*start)
+                cr.line_to(*end)
                 cr.stroke()
 
             self._draw_highlight_line_ribbon(cr, points, highlighted_indices)
@@ -1025,19 +1026,19 @@ class PriceChartWidget(Gtk.Overlay):
         drew_segment = False
         cr.set_line_width(7.0 if not self.compact else 6.0)
         cr.set_source_rgba(0.92, 0.70, 0.14, 0.20)
-        for index in range(len(points) - 1):
+        for index, (start, end) in enumerate(pairwise(points)):
             if index in highlighted and index + 1 in highlighted:
-                cr.move_to(points[index][0], points[index][1])
-                cr.line_to(points[index + 1][0], points[index + 1][1])
+                cr.move_to(*start)
+                cr.line_to(*end)
                 cr.stroke()
                 drew_segment = True
 
         cr.set_line_width(3.4 if not self.compact else 3.0)
         cr.set_source_rgba(1.0, 0.84, 0.30, 0.70)
-        for index in range(len(points) - 1):
+        for index, (start, end) in enumerate(pairwise(points)):
             if index in highlighted and index + 1 in highlighted:
-                cr.move_to(points[index][0], points[index][1])
-                cr.line_to(points[index + 1][0], points[index + 1][1])
+                cr.move_to(*start)
+                cr.line_to(*end)
                 cr.stroke()
 
         if not drew_segment:

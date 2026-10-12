@@ -1,5 +1,5 @@
 import math
-from datetime import timezone
+from datetime import UTC
 
 try:
     from .uk_time import UK_TIMEZONE
@@ -39,7 +39,7 @@ def format_uk_time_window(start_time, end_time, separator="-"):
 
 def format_time_from_now(target_time, now):
     seconds_from_now = (
-        target_time.astimezone(timezone.utc) - now.astimezone(timezone.utc)
+        target_time.astimezone(UTC) - now.astimezone(UTC)
     ).total_seconds()
     minutes_from_now = max(0, math.ceil(seconds_from_now / 60))
 
