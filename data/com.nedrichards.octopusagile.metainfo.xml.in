@@ -67,6 +67,16 @@
   </screenshots>
 
   <releases>
+    <release version="1.0.32" date="2026-10-12">
+      <description>
+        <p>This release modernises Agile Rates for GNOME 51 and its Python 3.14 runtime.</p>
+        <ul>
+          <li>Parse electricity price and usage timestamps more efficiently</li>
+          <li>Use automatically escaped templates for dynamic text in formatted labels</li>
+          <li>Simplify chart rendering and keep development checks aligned with the runtime</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.31" date="2026-09-30">
       <description>
         <p>This release improves usage refresh recovery and keeps your choices stable while data loads.</p>
