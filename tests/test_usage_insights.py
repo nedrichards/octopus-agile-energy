@@ -36,7 +36,7 @@ class UsageInsightsTests(unittest.TestCase):
     def test_builds_usage_pattern_insights(self):
         samples = self._daily_samples(7, lambda _day: 4.8)
         daily_costs = [{
-            "date": f"2026-03-{day+1:02d}",
+            "date": f"2026-03-{day + 1:02d}",
             "sample_count": 48,
             "missing_rate_count": 0,
             "matched_kwh": 10.0,
@@ -179,7 +179,7 @@ class UsageInsightsTests(unittest.TestCase):
             for slot in range(48):
                 samples.append({
                     "interval_start": (
-                        f"2026-03-{day+1:02d}T{slot // 2:02d}:"
+                        f"2026-03-{day + 1:02d}T{slot // 2:02d}:"
                         f"{'30' if slot % 2 else '00'}:00Z"
                     ),
                     "consumption": value,

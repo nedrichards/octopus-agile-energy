@@ -96,6 +96,7 @@ class OctopusAgileApp(Adw.Application):
         self.window.present()
         self._requested_main_view = None
 
+
 def main(*args):
     """
     Main function to initialize and run the Agile Rates application.
@@ -120,6 +121,7 @@ def main(*args):
     )
 
     return app.run()
+
 
 if __name__ == '__main__':
     main()

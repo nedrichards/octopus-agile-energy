@@ -20,6 +20,7 @@ SECRET_ATTRIBUTES = {
     "application": "com.nedrichards.octopusagile"
 }
 
+
 def store_api_key(api_key: str) -> bool:
     """
     Securely stores the API key in the system keyring.
@@ -38,6 +39,7 @@ def store_api_key(api_key: str) -> bool:
     except GLib.Error as exc:
         logger.error("Failed to store API key in secret service: %s", type(exc).__name__)
         return False
+
 
 def get_api_key(*, raise_on_error=False) -> str | None:
     """
@@ -88,6 +90,7 @@ def save_api_key_async(api_key, on_saved):
                               "Octopus Energy API Key", api_key, None, finished, None)
     else:
         Secret.password_clear(SECRET_SCHEMA, SECRET_ATTRIBUTES, None, finished, None)
+
 
 def clear_api_key() -> bool:
     """

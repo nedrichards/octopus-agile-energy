@@ -109,7 +109,7 @@ def build_rolling_average(values: list[float], window_size: int = 7) -> list[flo
         raise ValueError("window_size must be positive")
 
     rolling = []
-    for index, _value in enumerate(values):
+    for index in range(len(values)):
         window = values[max(0, index - window_size + 1):index + 1]
         rolling.append(sum(window) / len(window))
     return rolling

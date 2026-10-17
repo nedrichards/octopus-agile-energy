@@ -36,6 +36,7 @@ from ..utils import CacheManager, weak_callback
 
 logger = logging.getLogger(__name__)
 
+
 class PreferencesDialog(Adw.PreferencesDialog):
     TARIFF_TYPES: ClassVar[list[str]] = ["Agile", "Go", "Intelligent Go"]
     TARIFF_TYPE_CODES: ClassVar[dict[str, str]] = {
@@ -53,7 +54,6 @@ class PreferencesDialog(Adw.PreferencesDialog):
         parts = [part for part in normalized.split('-') if part]
         return token in parts
 
-
     def __init__(self, settings, **kwargs):
         super().__init__(**kwargs)
         self.set_title("Preferences")
@@ -69,7 +69,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         )
         # self.all_regions now stores full names for display in dropdown
         self.all_regions = sorted(self.REGION_CODE_TO_NAME.values())
-        self.region_to_tariffs = {} # To be populated by API data for these regions
+        self.region_to_tariffs = {}  # To be populated by API data for these regions
         self._load_generation = 0
         self._auto_detect_generation = 0
         self.location_portal = None
@@ -79,7 +79,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
 
         self.setup_ui()
         get_api_key_async(weak_callback(self._apply_existing_api_key))
-        self.load_tariffs_and_regions() # Initiate loading of tariff data
+        self.load_tariffs_and_regions()  # Initiate loading of tariff data
 
         self.connect("closed", weak_callback(self.on_closed))
 
@@ -442,7 +442,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
             logger.debug("Historical usage cost refresh failed: %s", type(exc).__name__)
         except requests.exceptions.RequestException as exc:
             logger.debug("Historical usage cost network error: %s", type(exc).__name__)
-        except Exception as exc:  # ruff: ignore[BLE001] Optional cost enrichment must not fail the refresh.
+        except Exception as exc:  # noqa: BLE001 - Optional cost enrichment must not fail the refresh.
             logger.debug("Unexpected historical usage cost error: %s", type(exc).__name__)
         return None
 
@@ -681,7 +681,6 @@ class PreferencesDialog(Adw.PreferencesDialog):
         selected_display_name = self._get_selected_string(self.region_row)
         selected_region_code = self.REGION_NAME_TO_CODE.get(selected_display_name, None)
 
-
         if selected_region_code and selected_region_code in self.region_to_tariffs:
             tariffs = self.region_to_tariffs[selected_region_code]
             tariff_names = [t['full_name'] for t in tariffs]
@@ -697,7 +696,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
                     if tariff_data['code'] == saved_tariff_code:
                         self.tariff_row.set_selected(i)
                         break
-                else: # Tariff not found for this region, default to first
+                else:  # Tariff not found for this region, default to first
                     if tariffs:
                         self.tariff_row.set_selected(0)
                         self.settings.set_string("selected-tariff-code", tariffs[0]['code'])
@@ -714,7 +713,6 @@ class PreferencesDialog(Adw.PreferencesDialog):
             self.tariff_row.set_model(Gtk.StringList.new(["No Tariffs Available"]))
             self.tariff_row.set_sensitive(False)
             self.tariff_row.set_subtitle("No region selected or no tariffs found.")
-
 
     def _show_load_error(self, message):
         """Displays an error message in the preferences window if loading fails."""

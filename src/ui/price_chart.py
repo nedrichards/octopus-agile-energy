@@ -360,7 +360,8 @@ class PriceChartWidget(Gtk.Overlay):
 
         layout = self.create_pango_layout(text)
         attributes = Pango.AttrList()
-        if scale != 1.0:
+        # Exactly 1.0 requests Pango's default scale; every other value is explicit.
+        if scale != 1.0:  # ruff: ignore[float-equality-comparison]
             attributes.insert(Pango.attr_scale_new(scale))
         if weight is not None:
             attributes.insert(Pango.attr_weight_new(weight))
@@ -439,7 +440,7 @@ class PriceChartWidget(Gtk.Overlay):
             else:
                 energy *= decay_factor
 
-            if abs(target - energy) > 0.01 or (target == 0.0 and energy > 0.01):
+            if abs(target - energy) > 0.01:
                 keep_animating = True
 
             self.slot_energies[index] = energy
@@ -802,7 +803,7 @@ class PriceChartWidget(Gtk.Overlay):
             cr.move_to(day_transition_x, self.margin_top)
             cr.line_to(day_transition_x, self.margin_top + chart_height + 5)
             cr.stroke()
-            cr.set_dash([]) # Reset dash
+            cr.set_dash([])  # Reset dash
 
             # Day label
             day_layout = self._create_text_layout(day_label, scale=0.9)

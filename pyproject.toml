@@ -1,11 +1,18 @@
 [tool.ruff]
+required-version = "==0.17.1"
 line-length = 120
 target-version = "py314"
 src = ["src", "tests"]
 extend-exclude = ["build-dir", "repo", ".flatpak-builder"]
 
 [tool.ruff.lint]
-extend-select = ["E", "F", "W", "I", "UP"]
+extend-select = [
+    "E", "F", "W", "I", "UP",
+    "B", "G", "LOG", "PGH003", "PGH004",
+    "S113", "S301", "S307", "S324", "S501", "S506",
+    # Preserve the timezone checks removed from Ruff's defaults in 0.17.
+    "DTZ001", "DTZ005", "DTZ006", "DTZ007", "DTZ011", "DTZ012", "DTZ901",
+]
 ignore = ["E402", "E501"]
 
 [tool.pytest.ini_options]

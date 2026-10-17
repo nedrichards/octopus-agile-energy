@@ -1,4 +1,5 @@
 """A separate, keyboard-accessible rolling energy-price history chart."""
+import math
 import weakref
 
 import cairo
@@ -231,6 +232,7 @@ class PaidRateChart(Gtk.Box):
         rgb = (accent.red, accent.green, accent.blue) if found else fg
         low, high = self._period_data["bounds"]
         left, top, plot_width, plot_height = 52, 18, max(1, width - 68), height - 48
+
         def label(text, x, y, align=0):
             layout = area.create_pango_layout(text)
             attrs = Pango.AttrList()
@@ -272,8 +274,9 @@ class PaidRateChart(Gtk.Box):
                 cr.line_to(*point)
             cr.stroke()
             if len(segment) == 1:
-                cr.arc(*segment[0], 3, 0, 6.2832)
+                cr.arc(*segment[0], 3, 0, math.tau)
                 cr.fill()
+
     def _draw_selection(self, area, cr, width, height):
         if not self.points:
             return
@@ -293,5 +296,5 @@ class PaidRateChart(Gtk.Box):
         if selected_value is not None:
             y = top + (high - selected_value) / (high - low) * plot_height
             cr.set_source_rgb(*rgb)
-            cr.arc(x, y, 4.5, 0, 6.2832)
+            cr.arc(x, y, 4.5, 0, math.tau)
             cr.fill()

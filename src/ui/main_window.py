@@ -86,6 +86,7 @@ PRICE_REFRESH_WATCHDOG_SECONDS = 60
 SUBTLE_ANIMATION_DURATION_MS = 180
 MAIN_VIEW_NAMES = frozenset(("prices", "plan", "usage"))
 
+
 class MainWindow(Adw.ApplicationWindow):
     """
     The main application window, inheriting from Adw.ApplicationWindow for LibAdwaita styling.
@@ -625,7 +626,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         # Root vertical box that will hold the header bar and the main scrollable content.
         root_vbox = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        root_vbox.append(header_bar) # Header bar is the first child of the root box.
+        root_vbox.append(header_bar)  # Header bar is the first child of the root box.
 
         # Main content area. Individual sections decide whether they should clamp.
         overall_content_box = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=20)
@@ -1120,7 +1121,7 @@ class MainWindow(Adw.ApplicationWindow):
         view_switcher.set_margin_top(6)
         view_switcher.set_margin_bottom(6)
         root_vbox.append(view_switcher)
-        root_vbox.append(self.main_view_stack) # Replaces single-page content with adaptive sections.
+        root_vbox.append(self.main_view_stack)  # Replaces single-page content with adaptive sections.
 
         # Current price display card.
         self.price_card_stack = Gtk.Stack.new()
@@ -1170,7 +1171,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         # Chart section with a styled background
         chart_box = Gtk.Box.new(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        chart_box.add_css_class("chart-background") # Apply new background style
+        chart_box.add_css_class("chart-background")  # Apply new background style
         self.chart_box = chart_box
 
         self.chart_scroller = Gtk.ScrolledWindow.new()
@@ -1333,14 +1334,14 @@ class MainWindow(Adw.ApplicationWindow):
         # Status label for persistent error messages.
         self.status_label = Gtk.Label.new()
         self.status_label.set_halign(Gtk.Align.CENTER)
-        self.status_label.add_css_class("error") # Style with red text for errors.
+        self.status_label.add_css_class("error")  # Style with red text for errors.
         self.status_label.set_accessible_role(Gtk.AccessibleRole.STATUS)
         bottom_content_box.append(self.status_label)
 
         # Use Adw.ToastOverlay to display temporary messages, wrapping the entire content.
         self.toast_overlay = Adw.ToastOverlay.new()
-        self.toast_overlay.set_child(root_vbox) # The root_vbox (containing header and scrolled content) is the child.
-        self.set_content(self.toast_overlay) # Set the toast overlay as the main window content.
+        self.toast_overlay.set_child(root_vbox)  # The root_vbox (containing header and scrolled content) is the child.
+        self.set_content(self.toast_overlay)  # Set the toast overlay as the main window content.
         self.main_view_stack.set_visible_child_name(
             self._initial_main_view or self._get_saved_main_view_name()
         )
@@ -1665,7 +1666,6 @@ class MainWindow(Adw.ApplicationWindow):
         # Resizing only changes the data horizon when the number of slots changes.
         if self.current_price_data and self._chart_slot_capacity != get_chart_slot_count(width):
             self.update_current_price()
-
 
     def on_chart_click(self, chart, index):
         if chart is not self.plan_price_chart or not (0 <= index < len(chart.prices)):
@@ -2398,7 +2398,7 @@ class MainWindow(Adw.ApplicationWindow):
             self._chart_slot_capacity = chart_slot_count
             self.chart_prices = [p for p in self.all_prices if display_from <= p['valid_from'] < display_to]
 
-            current_index_in_chart = 0 # Current price is always the first in the chart view
+            current_index_in_chart = 0  # Current price is always the first in the chart view
             self.update_display(current_rate, self.chart_prices, current_index_in_chart)
         else:
             future_prices = [price for price in self.all_prices if price['valid_to'] > now_utc]
@@ -2796,13 +2796,11 @@ class MainWindow(Adw.ApplicationWindow):
             self._fade_widget_in(self.usage_chart_scroller)
             self._usage_chart_signature = chart_signature
 
-
     def _get_price_data_signature(self, prices):
         return tuple(
             (price.get("valid_from"), price.get("price_gbp"))
             for price in prices
         )
-
 
     def _set_usage_empty_state(self, title, description):
         self._cancel_usage_loading_delay()
@@ -2964,7 +2962,7 @@ class MainWindow(Adw.ApplicationWindow):
         except requests.exceptions.RequestException as exc:
             logger.debug("Background usage refresh network error: %s", type(exc).__name__)
             GLib.idle_add(self._finish_usage_history_background_refresh, False, True)
-        except Exception as exc:  # ruff: ignore[BLE001] Background task boundary reports unexpected failures.
+        except Exception as exc:  # noqa: BLE001 - Background task boundary reports unexpected failures.
             logger.debug("Unexpected background usage refresh error: %s", type(exc).__name__)
             GLib.idle_add(self._finish_usage_history_background_refresh, False, True)
 
@@ -2975,7 +2973,7 @@ class MainWindow(Adw.ApplicationWindow):
             logger.debug("Historical usage cost refresh failed: %s", type(exc).__name__)
         except requests.exceptions.RequestException as exc:
             logger.debug("Historical usage cost network error: %s", type(exc).__name__)
-        except Exception as exc:  # ruff: ignore[BLE001] Optional cost enrichment must not fail the refresh.
+        except Exception as exc:  # noqa: BLE001 - Optional cost enrichment must not fail the refresh.
             logger.debug("Unexpected historical usage cost error: %s", type(exc).__name__)
         return None
 
@@ -2990,7 +2988,7 @@ class MainWindow(Adw.ApplicationWindow):
             logger.debug("Seasonal usage refresh failed: %s", type(exc).__name__)
         except requests.exceptions.RequestException as exc:
             logger.debug("Seasonal usage network error: %s", type(exc).__name__)
-        except Exception as exc:  # ruff: ignore[BLE001] Optional seasonal enrichment must not fail usage.
+        except Exception as exc:  # noqa: BLE001 - Optional seasonal enrichment must not fail usage.
             logger.debug("Unexpected seasonal usage error: %s", type(exc).__name__)
         return None
 
@@ -3067,7 +3065,6 @@ class MainWindow(Adw.ApplicationWindow):
             self.usage_graph_mode = "kwh"
             self.usage_kwh_button.set_active(True)
 
-
     def _update_spend_accuracy_ui(self, daily_costs, synced_at, complete_count=None):
         if complete_count is None:
             complete_count = len(self._get_complete_daily_costs(daily_costs, synced_at))
@@ -3101,7 +3098,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.cost_trend_row.set_subtitle(
             "Unavailable until historical rates cover 14 complete days."
         )
-
 
     def _set_usage_chart_layout(self, width):
         compact = is_compact_width(width)
@@ -3193,7 +3189,6 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _queue_usage_chart_interaction_draw(self):
         self.usage_chart_interaction_area.queue_draw()
-
 
     def _get_usage_chart_series(self, insight, daily_costs):
         prepared = insight.get("chart_series", {}).get((self.usage_period_mode, self.usage_graph_mode))
@@ -3384,10 +3379,8 @@ class MainWindow(Adw.ApplicationWindow):
 
         return True
 
-
     def _get_complete_daily_costs(self, daily_costs, synced_at):
         return get_complete_daily_costs(daily_costs, synced_at)
-
 
     def _refresh_standing_charge_background(self, selected_tariff_code):
         if selected_tariff_code in self._standing_charge_fetches:
