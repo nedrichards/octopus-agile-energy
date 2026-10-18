@@ -66,7 +66,36 @@
             "sources": [
                 {
                     "type": "dir",
-                    "path": "."
+                    "path": ".",
+                    "skip": [
+                      ".git",
+                      ".flatpak-builder*",
+                      "flatpak-repo",
+                      "build",
+                      "build-dir",
+                      "build-dir-release",
+                      "build-flatpak*",
+                      "build-prod",
+                      "_build*",
+                      "flatpak-build*",
+                      "repo",
+                      "target",
+                      ".venv",
+                      "venv",
+                      "__pycache__",
+                      ".pytest_cache",
+                      ".ruff_cache",
+                      ".agents",
+                      ".codex",
+                      ".aws",
+                      ".idea",
+                      ".vscode",
+                      ".env",
+                      ".env.*",
+                      "*.flatpak",
+                      "*.syscap",
+                      "*.log"
+                    ]
                 }
             ]
         }

@@ -53,31 +53,18 @@ flatpak install flathub org.gnome.Platform//51 org.gnome.Sdk//51
 The development manifest builds from the local checkout and runs the Meson test suite inside the GNOME SDK sandbox:
 
 ```bash
-flatpak-builder --user --install --force-clean build-dir com.nedrichards.octopusagile.Devel.json
+./scripts/local-flatpak.sh
 flatpak run com.nedrichards.octopusagile.Devel
 ```
 
 The `octopusagile` module in `com.nedrichards.octopusagile.Devel.json` has `run-tests` enabled, so the build fails if `meson test` fails inside the Flatpak environment.
 
-If `rofiles-fuse` is not usable in your development environment, add Flatpak Builder's fallback flag:
+The script disables rofiles-fuse, uses a single staging location, and removes
+temporary build directories on exit. See [local builds and updates](docs/local-flatpak.md)
+for the durable update repository and cleanup policy. For an installed sandbox shell:
 
 ```bash
-flatpak-builder --disable-rofiles-fuse --user --install --force-clean build-dir com.nedrichards.octopusagile.Devel.json
-```
-
-For a one-off command inside the built sandbox, run:
-
-```bash
-flatpak-builder --run build-dir com.nedrichards.octopusagile.Devel.json sh
-```
-
-Useful commands from that shell:
-
-```bash
-meson test -C /run/build/octopusagile/_flatpak_build --print-errorlogs
-com.nedrichards.octopusagile
-python3 -m compileall /app
-G_MESSAGES_DEBUG=all com.nedrichards.octopusagile
+flatpak run --user --command=sh com.nedrichards.octopusagile.Devel
 ```
 
 To inspect logs from an installed run:
@@ -107,14 +94,16 @@ rules. During Ruff upgrades, review `python3 -m ruff check --preview src tests`
 separately.
 
 ```bash
-flatpak run --command=sh --filesystem="$PWD" --share=network org.gnome.Sdk//51
+app_site="$(flatpak info --user --show-location com.nedrichards.octopusagile.Devel)/files/lib/python3.14/site-packages"
+flatpak run --user --command=sh --filesystem="$PWD" --filesystem="$app_site:ro" \
+  --env=OCTOPUSAGILE_APP_SITE="$app_site" --share=network org.gnome.Sdk//51
 python3 -m pip install --target=/tmp/octopusagile-test-tools -r requirements-dev.txt
-PYTHONPATH=/tmp/octopusagile-test-tools:$PWD/build-dir/files/lib/python3.14/site-packages python3 -m compileall -q src tests
-PYTHONPATH=/tmp/octopusagile-test-tools:$PWD/build-dir/files/lib/python3.14/site-packages python3 -m ruff check src tests
-PYTHONPATH=/tmp/octopusagile-test-tools:$PWD/build-dir/files/lib/python3.14/site-packages python3 -m pytest
+PYTHONPATH=/tmp/octopusagile-test-tools:$OCTOPUSAGILE_APP_SITE python3 -m compileall -q src tests
+PYTHONPATH=/tmp/octopusagile-test-tools:$OCTOPUSAGILE_APP_SITE python3 -m ruff check src tests
+PYTHONPATH=/tmp/octopusagile-test-tools:$OCTOPUSAGILE_APP_SITE python3 -m pytest
 ```
 
-The Python minor-version directory follows the GNOME SDK and can change when the runtime is upgraded. The authoritative `flatpak-builder` command above runs the Meson unit suite automatically without this extra setup.
+The Python minor-version directory follows the GNOME SDK and can change when the runtime is upgraded. The authoritative local build script above runs the Meson unit suite automatically without this extra setup.
 
 The Flatpak Meson suite also runs a real GTK startup check on an isolated
 Broadway display. It constructs the main window and maps Prices, Plan, and Usage
@@ -143,7 +132,7 @@ GNOME Builder can also build and run the project through Flatpak. Open the check
 To build and run the pinned production manifest:
 
 ```bash
-flatpak-builder --user --install --force-clean build-dir com.nedrichards.octopusagile.json
+./scripts/local-flatpak.sh production
 flatpak run com.nedrichards.octopusagile
 ```
 

@@ -8,3 +8,6 @@ __pycache__/
 build/
 build-dir/
 repo/
+
+# Durable local Flatpak update repository (keep when cleaning build state)
+/flatpak-repo/

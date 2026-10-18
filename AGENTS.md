@@ -53,8 +53,7 @@ The development Flatpak build is the authoritative environment for application,
 GTK, schema, resource, packaging, or release changes:
 
 ```bash
-flatpak-builder --disable-rofiles-fuse --user --install --force-clean build-dir \
-  com.nedrichards.octopusagile.Devel.json
+./scripts/local-flatpak.sh
 flatpak run com.nedrichards.octopusagile.Devel
 ```
 
@@ -102,3 +101,32 @@ Flag changes that:
 - put secrets, account data, or generated output under version control;
 - change the production manifest pin outside an explicit release; or
 - claim Flatpak or UI verification when only host-side checks were run.
+
+## Local Flatpak build storage
+
+Use `./scripts/local-flatpak.sh` (defaults to development) for local checkout
+builds and updates. Use `./scripts/local-flatpak.sh production` only when the
+production manifest is intended. See `docs/local-flatpak.md`.
+Use the normal manifests and keep their test gates enabled.
+
+- Keep the durable update repository at `flatpak-repo/`. Never place it under
+  `.flatpak-builder/` or another disposable build/cache directory.
+- Use `.flatpak-builder/` for Builder state and `.flatpak-builder/staging` as
+  the single staging location for both profiles. Build sequentially. Do not
+  create per-task, per-validation or timestamped build/state/repository trees.
+- Use `--delete-build-dirs` and clean module working directories and staging
+  after success, failure and ordinary interruption, as the script does. Keep
+  the reusable cache and downloads. Do not use `--keep-build-dirs` for routine
+  automated builds. Debug retention needs an explicit task-specific reason
+  and cleanup when finished.
+- Do not run GNOME Builder or raw Builder commands concurrently with the
+  script. Interactive GNOME Builder development remains supported via the
+  `.Devel` manifest; prefer the script for automated validation and deployment.
+- Keep directory-source `skip` lists excluding generated build directories,
+  `target`, `.flatpak-builder*` and `flatpak-repo`, so artifacts are not copied
+  into subsequent builds.
+- Verify the installed app and its update origin after deployment. Never
+  re-export an installed `export/` directory.
+
+There is no enforced storage budget. Do not change Rust incremental/debug
+settings as part of storage housekeeping without a separate request.
