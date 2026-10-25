@@ -67,6 +67,16 @@
   </screenshots>
 
   <releases>
+    <release version="1.0.33" date="2026-10-25">
+      <description>
+        <p>This release makes price-band transitions smoother and improves the chart's planning highlights.</p>
+        <ul>
+          <li>Blend colours briefly at price-band boundaries while keeping each half-hour's price identity clear</li>
+          <li>Make hover highlighting more subtle and consistent with the underlying price line</li>
+          <li>Keep cheapest-window shading and labels clear across positive and negative prices</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.32" date="2026-10-12">
       <description>
         <p>This release modernises Agile Rates for GNOME 51 and its Python 3.14 runtime.</p>
