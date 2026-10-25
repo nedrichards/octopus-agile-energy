@@ -6,7 +6,6 @@ gi.require_version('Pango', '1.0')
 gi.require_version('PangoCairo', '1.0')
 import math
 import time
-from itertools import pairwise
 
 import cairo
 from gi.repository import Gdk, Gtk, Pango, PangoCairo
@@ -25,6 +24,7 @@ from ..price_chart_presentation import (
     get_day_transition_markers,
     get_flyout_horizontal_position,
     get_price_axis_bounds,
+    get_slot_color_stops,
 )
 from ..price_formatting import format_gbp, format_unit_price_gbp
 from ..time_formatting import format_uk_time, format_uk_time_window
@@ -593,7 +593,6 @@ class PriceChartWidget(Gtk.Overlay):
         highlight_x_end = None
         comparison_x_start = None
         comparison_x_end = None
-        highlighted_indices = []
         points = []
         slot_bounds = []
         min_index = self._min_price_index
@@ -615,7 +614,6 @@ class PriceChartWidget(Gtk.Overlay):
                 and self.highlight_end_time
                 and self.highlight_start_time <= price_data['valid_from'] < self.highlight_end_time
             ):
-                highlighted_indices.append(i)
                 highlight_x_start = (
                     bar_x_start
                     if highlight_x_start is None
@@ -660,7 +658,6 @@ class PriceChartWidget(Gtk.Overlay):
             "highlight_x_end": highlight_x_end,
             "comparison_x_start": comparison_x_start,
             "comparison_x_end": comparison_x_end,
-            "highlighted_indices": highlighted_indices,
             "day_transitions": day_transitions,
             "min_index": min_index,
             "max_index": max_index,
@@ -679,7 +676,6 @@ class PriceChartWidget(Gtk.Overlay):
         chart_zero_y = geometry["chart_zero_y"]
         points = geometry["points"]
         slot_bounds = geometry["slot_bounds"]
-        highlighted_indices = geometry["highlighted_indices"]
         style_context = self.get_style_context()
         fg_color = style_context.get_color()
 
@@ -722,6 +718,7 @@ class PriceChartWidget(Gtk.Overlay):
             current_grid_price += step
 
         price_colors = self._get_price_colors(style_context)
+        price_source = self._get_price_source(price_colors, chart_width)
         self._draw_comparison_range(
             cr,
             fg_color,
@@ -737,22 +734,18 @@ class PriceChartWidget(Gtk.Overlay):
             chart_height,
         )
 
-        for i, price_data in enumerate(self.prices):
-            price = price_data['price_gbp']
-            bar_x_start, bar_x_end = slot_bounds[i]
-            bar_width = bar_x_end - bar_x_start + 1
-            base_color = self._get_price_color(price_colors, price)
-            fill_alpha = 0.035
-            if i == self.current_price_index:
-                fill_alpha = 0.075
+        # One silhouette avoids hairline gaps between adjacent slot fills.
+        self._draw_price_area_fill(cr, price_source, 0.035, points, chart_zero_y, chart_width)
+        if 0 <= self.current_price_index < len(points):
+            bar_x_start, bar_x_end = slot_bounds[self.current_price_index]
             self._draw_slot_area_fill(
                 cr,
-                base_color,
-                fill_alpha,
+                price_source,
+                get_composited_overlay_alpha(0.035, 0.075),
                 points,
-                i,
-                bar_x_start + 0.5,
-                bar_x_start + max(1, bar_width - 1),
+                self.current_price_index,
+                bar_x_start,
+                bar_x_end + 1,
                 chart_zero_y,
             )
 
@@ -769,15 +762,12 @@ class PriceChartWidget(Gtk.Overlay):
             cr.stroke()
 
             cr.set_line_width(2.6 if not self.compact else 2.25)
-            for i, (start, end) in enumerate(pairwise(points)):
-                price = self.prices[i]['price_gbp']
-                base_color = self._get_price_color(price_colors, price)
-                cr.set_source_rgba(base_color[0], base_color[1], base_color[2], 0.92)
-                cr.move_to(*start)
-                cr.line_to(*end)
-                cr.stroke()
+            cr.set_source(price_source)
+            cr.move_to(*points[0])
+            for point in points[1:]:
+                cr.line_to(*point)
+            cr.stroke()
 
-            self._draw_highlight_line_ribbon(cr, points, highlighted_indices)
             cr.restore()
 
         if 0 <= self.current_price_index < len(points):
@@ -835,6 +825,7 @@ class PriceChartWidget(Gtk.Overlay):
         style_context = self.get_style_context()
         fg_color = style_context.get_color()
         price_colors = self._get_price_colors(style_context)
+        price_source = self._get_price_source(price_colors, geometry["chart_width"])
         animations_enabled = self._animations_enabled()
 
         active_indices = self._active_energy_indices | {
@@ -843,7 +834,6 @@ class PriceChartWidget(Gtk.Overlay):
             if 0 <= index < len(self.prices)
         }
         for index in sorted(active_indices):
-            price_data = self.prices[index]
             if animations_enabled:
                 energy = self.slot_energies[index] if index < len(self.slot_energies) else 0.0
             else:
@@ -864,16 +854,16 @@ class PriceChartWidget(Gtk.Overlay):
                 )
 
             base_alpha = 0.075 if index == self.current_price_index else 0.035
-            target_alpha = max(base_alpha, 0.035 + (0.18 * energy))
+            target_alpha = max(base_alpha, 0.035 + (0.12 * energy))
             overlay_alpha = get_composited_overlay_alpha(base_alpha, target_alpha)
             self._draw_slot_area_fill(
                 cr,
-                self._get_price_color(price_colors, price_data['price_gbp']),
+                price_source,
                 overlay_alpha,
                 points,
                 index,
-                bar_x_start + 0.5,
-                bar_x_start + max(1, bar_width - 1),
+                bar_x_start,
+                bar_x_end + 1,
                 chart_zero_y,
             )
 
@@ -1014,44 +1004,34 @@ class PriceChartWidget(Gtk.Overlay):
         cr.fill()
         cr.restore()
 
-    def _draw_highlight_line_ribbon(self, cr, points, highlighted_indices):
-        if not highlighted_indices:
-            return
-
-        highlighted = set(highlighted_indices)
-
+    def _draw_price_area_fill(self, cr, price_source, alpha, points, zero_y, chart_width):
         cr.save()
-        cr.set_line_join(cairo.LINE_JOIN_ROUND)
-        cr.set_line_cap(cairo.LINE_CAP_ROUND)
-
-        drew_segment = False
-        cr.set_line_width(7.0 if not self.compact else 6.0)
-        cr.set_source_rgba(0.92, 0.70, 0.14, 0.20)
-        for index, (start, end) in enumerate(pairwise(points)):
-            if index in highlighted and index + 1 in highlighted:
-                cr.move_to(*start)
-                cr.line_to(*end)
-                cr.stroke()
-                drew_segment = True
-
-        cr.set_line_width(3.4 if not self.compact else 3.0)
-        cr.set_source_rgba(1.0, 0.84, 0.30, 0.70)
-        for index, (start, end) in enumerate(pairwise(points)):
-            if index in highlighted and index + 1 in highlighted:
-                cr.move_to(*start)
-                cr.line_to(*end)
-                cr.stroke()
-
-        if not drew_segment:
-            index = highlighted_indices[0]
-            if 0 <= index < len(points):
-                cr.arc(points[index][0], points[index][1], 8.0, 0, math.tau)
-                cr.set_source_rgba(1.0, 0.84, 0.30, 0.24)
-                cr.fill()
-
+        cr.move_to(self.margin_left, points[0][1])
+        for point in points:
+            cr.line_to(*point)
+        right_x = self.margin_left + chart_width
+        cr.line_to(right_x, points[-1][1])
+        cr.line_to(right_x, zero_y)
+        cr.line_to(self.margin_left, zero_y)
+        cr.close_path()
+        cr.clip()
+        self._paint_price_area(cr, price_source, alpha, zero_y)
         cr.restore()
 
-    def _draw_slot_area_fill(self, cr, base_color, alpha, points, index, left_x, right_x, zero_y):
+    def _paint_price_area(self, cr, price_source, alpha, zero_y):
+        # Share the horizontal colour source with the stroke; fade only opacity
+        # vertically, including below zero when electricity prices are negative.
+        _left, top, _right, bottom = cr.clip_extents()
+        top = min(top, zero_y)
+        bottom = max(bottom, zero_y, top + 1)
+        fade = cairo.LinearGradient(0, top, 0, bottom)
+        fade.add_color_stop_rgba(0, 0, 0, 0, alpha)
+        fade.add_color_stop_rgba((zero_y - top) / (bottom - top), 0, 0, 0, alpha * 0.42)
+        fade.add_color_stop_rgba(1, 0, 0, 0, alpha)
+        cr.set_source(price_source)
+        cr.mask(fade)
+
+    def _draw_slot_area_fill(self, cr, price_source, alpha, points, index, left_x, right_x, zero_y):
         if alpha <= 0.001 or not points or not (0 <= index < len(points)):
             return
 
@@ -1070,23 +1050,7 @@ class PriceChartWidget(Gtk.Overlay):
         cr.close_path()
         cr.clip()
 
-        line_mid_y = (left_y + center_y + right_y) / 3
-        gradient_top = min(left_y, center_y, right_y, zero_y)
-        gradient_bottom = max(left_y, center_y, right_y, zero_y)
-        if abs(gradient_bottom - gradient_top) < 1:
-            gradient_bottom = gradient_top + 1
-
-        gradient = cairo.LinearGradient(0, gradient_top, 0, gradient_bottom)
-        if line_mid_y < zero_y:
-            gradient.add_color_stop_rgba(0, base_color[0], base_color[1], base_color[2], alpha)
-            gradient.add_color_stop_rgba(1, base_color[0], base_color[1], base_color[2], alpha * 0.42)
-        else:
-            gradient.add_color_stop_rgba(0, base_color[0], base_color[1], base_color[2], alpha * 0.42)
-            gradient.add_color_stop_rgba(1, base_color[0], base_color[1], base_color[2], alpha)
-
-        cr.set_source(gradient)
-        cr.rectangle(left_x, gradient_top, max(1, right_x - left_x), gradient_bottom - gradient_top)
-        cr.fill()
+        self._paint_price_area(cr, price_source, alpha, zero_y)
         cr.restore()
 
     def _interpolated_slot_edge_y(self, points, index, edge):
@@ -1116,6 +1080,13 @@ class PriceChartWidget(Gtk.Overlay):
 
     def _get_price_color(self, price_colors, price):
         return price_colors[get_price_band(price)]
+
+    def _get_price_source(self, price_colors, chart_width):
+        source = cairo.LinearGradient(self.margin_left, 0, self.margin_left + chart_width, 0)
+        slot_colors = [self._get_price_color(price_colors, price['price_gbp']) for price in self.prices]
+        for offset, color in get_slot_color_stops(slot_colors, chart_width / len(self.prices)):
+            source.add_color_stop_rgb(offset, *color)
+        return source
 
     def _draw_feature_blob(self, cr, price_colors, x, y, price, active=False, radius=5.8):
         base_color = self._get_price_color(price_colors, price)

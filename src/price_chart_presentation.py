@@ -34,6 +34,28 @@ def get_composited_overlay_alpha(base_alpha, target_alpha):
     return (target_alpha - base_alpha) / (1 - base_alpha)
 
 
+def get_slot_color_stops(slot_colors, slot_width, transition_width=12.0):
+    """Keep slot colours solid, with a short shared blend at band boundaries."""
+    if not slot_colors:
+        return []
+    if slot_width <= 0 or transition_width < 0:
+        raise ValueError("slot width must be positive and transition width non-negative")
+
+    width = len(slot_colors) * slot_width
+    half_blend = min(transition_width / 2, slot_width / 4)
+    stops = [(0.0, slot_colors[0])]
+    for index in range(1, len(slot_colors)):
+        previous, current = slot_colors[index - 1:index + 1]
+        if previous != current:
+            boundary = index * slot_width
+            stops.extend([
+                ((boundary - half_blend) / width, previous),
+                ((boundary + half_blend) / width, current),
+            ])
+    stops.append((1.0, slot_colors[-1]))
+    return stops
+
+
 def find_price_index_by_start(prices, target_time):
     """Find a visible slot by its stable start time, or return -1."""
     if target_time is None:

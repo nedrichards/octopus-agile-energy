@@ -13,10 +13,30 @@ from price_chart_presentation import (
     get_day_transition_markers,
     get_flyout_horizontal_position,
     get_price_axis_bounds,
+    get_slot_color_stops,
 )
 
 
 class PriceChartPresentationTests(unittest.TestCase):
+    def test_colour_blend_is_short_and_centred_on_the_slot_boundary(self):
+        green, orange = (0.2, 0.8, 0.2), (1.0, 0.6, 0.0)
+        stops = get_slot_color_stops([green, orange], 40)
+
+        self.assertEqual(stops, [(0.0, green), (34 / 80, green), (46 / 80, orange), (1.0, orange)])
+
+    def test_colour_blends_leave_each_dense_slot_centre_in_its_own_band(self):
+        blue, green, red = (0.2, 0.4, 0.8), (0.2, 0.8, 0.2), (0.8, 0.2, 0.2)
+        stops = get_slot_color_stops([blue, green, red], 8)
+
+        self.assertEqual(stops, [(0.0, blue), (6 / 24, blue), (10 / 24, green),
+                                 (14 / 24, green), (18 / 24, red), (1.0, red)])
+
+    def test_same_band_and_single_slot_need_no_intermediate_colours(self):
+        green = (0.2, 0.8, 0.2)
+        for colors in ([green], [green] * 48):
+            self.assertEqual(get_slot_color_stops(colors, 20), [(0.0, green), (1.0, green)])
+        self.assertEqual(get_slot_color_stops([], 20), [])
+
     def test_animation_factors_preserve_motion_speed_across_refresh_rates(self):
         two_frame_rise, two_frame_decay = get_animation_factors(2.0)
 

@@ -1,0 +1,235 @@
+<div id="agile-chart-designs" class="viz-carousel viz-dotted-background" aria-label="Price chart designs">
+  <section data-variant="Short blends" aria-label="Short blends">
+    <div class="agile-preview" data-design="blend" aria-label="Short boundary blends">
+      <div class="agile-title">Price forecast <span>Short blends · implemented</span></div>
+      <label class="agile-planner"><input type="checkbox" checked> Planner overlays</label>
+      <svg class="agile-plot" role="img" aria-label="Illustrative half-hour electricity prices with short colour blends"></svg>
+      <div class="agile-legend"></div>
+      <label class="agile-inspect">Inspect half-hour <output></output><input type="range" min="0" max="31" value="7" aria-label="Inspect half-hour in short blends chart"></label>
+    </div>
+  </section>
+  <section data-variant="Quiet line" aria-label="Quiet line" hidden>
+    <div class="agile-preview" data-design="quiet" aria-label="Neutral line and colour markers">
+      <div class="agile-title">Price forecast <span>Neutral line · colour markers</span></div>
+      <label class="agile-planner"><input type="checkbox" checked> Planner overlays</label>
+      <svg class="agile-plot" role="img" aria-label="Illustrative prices with a neutral line and small price-band markers"></svg>
+      <div class="agile-legend"></div>
+      <label class="agile-inspect">Inspect half-hour <output></output><input type="range" min="0" max="31" value="7" aria-label="Inspect half-hour in quiet line chart"></label>
+    </div>
+  </section>
+  <section data-variant="Half-hour steps" aria-label="Half-hour steps" hidden>
+    <div class="agile-preview" data-design="steps" aria-label="Stepped half-hour tariff line">
+      <div class="agile-title">Price forecast <span>Each price holds for its whole slot</span></div>
+      <label class="agile-planner"><input type="checkbox" checked> Planner overlays</label>
+      <svg class="agile-plot" role="img" aria-label="Illustrative prices drawn as constant half-hour steps"></svg>
+      <div class="agile-legend"></div>
+      <label class="agile-inspect">Inspect half-hour <output></output><input type="range" min="0" max="31" value="7" aria-label="Inspect half-hour in stepped chart"></label>
+    </div>
+  </section>
+  <section data-variant="Current drawing" aria-label="Current drawing" hidden>
+    <div class="agile-preview" data-design="original" aria-label="Original segment drawing">
+      <div class="agile-title">Price forecast <span>Original · for comparison</span></div>
+      <label class="agile-planner"><input type="checkbox" checked> Planner overlays</label>
+      <svg class="agile-plot" role="img" aria-label="Original drawing with hard segment colour changes and stronger hover fill"></svg>
+      <div class="agile-legend"></div>
+      <label class="agile-inspect">Inspect half-hour <output></output><input type="range" min="0" max="31" value="7" aria-label="Inspect half-hour in original chart"></label>
+    </div>
+  </section>
+</div>
+<style>
+  #agile-chart-designs .agile-preview {
+    color-scheme: light dark;
+    --agile-bg: light-dark(#fafafa, #242424);
+    --agile-fg: light-dark(#2e3436, #eeeeec);
+    --agile-muted: light-dark(#666b6d, #b5b5b3);
+    --agile-tooltip: light-dark(#303030, #eeeeec);
+    --agile-tooltip-fg: light-dark(#ffffff, #202020);
+    --agile-blue: #1c71d8; --agile-green: #26a269;
+    --agile-orange: #ff7800; --agile-red: #c01c28;
+    --agile-gold: #ebb324;
+    background: var(--agile-bg); color: var(--agile-fg);
+    border-radius: 14px; padding: 18px 12px 16px;
+    font: 14px/1.4 system-ui, sans-serif; min-width: 0;
+  }
+  #agile-chart-designs .agile-title { font-weight: 600; margin: 0 6px 10px; display:flex; flex-wrap:wrap; gap:4px 12px; }
+  #agile-chart-designs .agile-title span { font-size: 12px; font-weight:400; color:var(--agile-muted); }
+  #agile-chart-designs .agile-plot { display: block; width:100%; height:294px; touch-action:pan-y; }
+  #agile-chart-designs .agile-plot text { fill: var(--agile-fg); font-family:system-ui,sans-serif; font-size:12px; }
+  #agile-chart-designs .agile-legend { display:flex; gap:6px 18px; flex-wrap:wrap; margin:8px 6px 18px; color:var(--agile-muted); font-size:12px; }
+  #agile-chart-designs .agile-legend span { display:inline-flex; align-items:center; gap:6px; }
+  #agile-chart-designs .agile-legend i { width:7px; height:7px; border-radius:50%; background:var(--band); }
+  #agile-chart-designs .agile-inspect { display:flex; flex-wrap:wrap; gap:8px; margin:0 6px; align-items:center; font-size:12px; color:var(--agile-muted); }
+  #agile-chart-designs output { color:var(--agile-fg); margin-left:auto; font-variant-numeric:tabular-nums; }
+  #agile-chart-designs input[type="range"] { width:100%; accent-color:var(--agile-muted); }
+  #agile-chart-designs .agile-planner { display:flex; gap:6px; align-items:center; margin:0 6px 6px; font-size:12px; }
+  #agile-chart-designs input[type="checkbox"] { accent-color:var(--agile-muted); }
+  #agile-chart-designs .agile-plot .agile-tip text { fill:var(--agile-tooltip-fg); }
+  @media (max-width:440px) {
+    #agile-chart-designs .agile-title span { flex-basis:100%; }
+    #agile-chart-designs output { flex-basis:100%; margin-left:0; }
+  }
+</style>
+<script>
+(() => {
+  const root = document.getElementById('agile-chart-designs');
+  const ns = 'http://www.w3.org/2000/svg';
+  const prices = [12,14,17,19,21,23,25,27,30,33,29,26,24,20,18,16,9,3,-2,-4,-1,3,8,14,19,22,25,28,31,27,24,18];
+  const bands = ['Negative', 'Low', 'Medium', 'High'];
+  const hues = ['blue', 'green', 'orange', 'red'];
+  const band = p => p < 0 ? 0 : p < 20 ? 1 : p < 26.5 ? 2 : 3;
+  const color = p => `var(--agile-${hues[band(p)]})`;
+  const time = i => `${String(Math.floor((720+i*30)/60)%24).padStart(2,'0')}:${i%2 ? '30' : '00'}`;
+  const saved = window.openai?.widgetState?.privateContent || {};
+  let inspected = Number.isInteger(saved.slot) && saved.slot >= 0 && saved.slot < prices.length ? saved.slot : 18;
+  let planner = typeof saved.planner === 'boolean' ? saved.planner : true;
+  const state = { blendWidth:12 };
+  const charts = [];
+  function node(tag, attrs={}, text) {
+    const el = document.createElementNS(ns, tag);
+    for (const [key,value] of Object.entries(attrs)) el.setAttribute(key,value);
+    if (text !== undefined) el.textContent = text;
+    return el;
+  }
+  function persist() {
+    window.openai?.setWidgetState?.({modelContent:{slot:inspected, pricePence:prices[inspected],planner}, privateContent:{slot:inspected,planner}})?.catch(()=>{});
+  }
+  function render(chart) {
+    const {box, svg, design, id} = chart;
+    const width = Math.max(270, svg.getBoundingClientRect().width);
+    if (svg.getBoundingClientRect().width === 0) return;
+    const height = 294, left = 48, right = width-12, top=36, bottom=252;
+    const slot = (right-left)/prices.length;
+    const low = Math.min(0,...prices), high = Math.max(...prices);
+    const y = p => bottom-(p-low)/(high-low)*(bottom-top);
+    const x = i => left+(i+.5)*slot;
+    const zero = y(0);
+    svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    svg.replaceChildren(node('title',{},'Illustrative electricity prices, 12:00 to 04:00. Hover or use the half-hour control to inspect.'));
+    const defs = node('defs');
+    const gradient = node('linearGradient',{id:`${id}-color`,gradientUnits:'userSpaceOnUse',x1:left,x2:right,y1:0,y2:0});
+    const addStop = (px,col) => gradient.append(node('stop',{offset:(px-left)/(right-left),'stop-color':col}));
+    addStop(left,color(prices[0]));
+    for(let i=1;i<prices.length;i++) {
+      if(band(prices[i])===band(prices[i-1])) continue;
+      const boundary = left+i*slot;
+      const half = design==='steps' ? 0 : Math.min(state.blendWidth/2,slot/4);
+      addStop(boundary-half,color(prices[i-1])); addStop(boundary+half,color(prices[i]));
+    }
+    addStop(right,color(prices.at(-1))); defs.append(gradient);
+    svg.append(defs);
+    for(let p=0;p<=30;p+=10) {
+      svg.append(node('line',{x1:left,x2:right,y1:y(p),y2:y(p),stroke:'var(--agile-fg)','stroke-opacity':p===0 ? .2:.1}));
+      svg.append(node('text',{x:left-8,y:y(p)+4,'text-anchor':'end',opacity:.65},`${p}p`));
+    }
+    svg.append(node('text',{x:left,y:16,opacity:.65},'p/kWh'));
+    const ticks = width<440 ? [0,8,16,24] : [0,6,12,18,24,30];
+    for(const i of ticks) svg.append(node('text',{x:x(i),y:height-9,'text-anchor':'middle',opacity:.65},time(i)));
+    let line = `M ${x(0)} ${y(prices[0])}`;
+    if(design==='steps') {
+      line = `M ${left} ${y(prices[0])}`;
+      for(let i=0;i<prices.length;i++) {
+        line += ` H ${left+(i+1)*slot}`;
+        if(i+1<prices.length) line += ` V ${y(prices[i+1])}`;
+      }
+    } else for(let i=1;i<prices.length;i++) line += ` L ${x(i)} ${y(prices[i])}`;
+    const area = design==='steps' ? `${line} L ${right} ${zero} L ${left} ${zero} Z` :
+      `M ${left} ${y(prices[0])} L ${x(0)} ${y(prices[0])} ${line.substring(line.indexOf(' L'))} L ${right} ${y(prices.at(-1))} L ${right} ${zero} L ${left} ${zero} Z`;
+    const source = design==='quiet' ? 'var(--agile-fg)' : `url(#${id}-color)`;
+    if(planner) {
+      svg.append(node('rect',{x:left+4*slot,y:top+4,width:7*slot-1,height:bottom-top-8,rx:8,fill:'var(--agile-fg)','fill-opacity':.06,stroke:'var(--agile-fg)','stroke-opacity':.46,'stroke-width':1.4,'stroke-dasharray':'5 3'}));
+      svg.append(node('rect',{x:left+16*slot,y:top+2,width:7*slot-1,height:bottom-top-4,rx:9,fill:'var(--agile-gold)','fill-opacity':.10,stroke:'var(--agile-gold)','stroke-opacity':.3}));
+    }
+    svg.append(node('path',{d:area,fill:source,opacity:.035}));
+    const i = inspected, px=x(i), py=y(prices[i]), sx=left+i*slot, ex=sx+slot;
+    svg.append(node('rect',{x:sx+.5,y:top+2,width:Math.max(1,slot-1),height:bottom-top-4,fill:'var(--agile-fg)',opacity:.07}));
+    const edgeL=design==='steps' ? py : i===0 ? py : (py+y(prices[i-1]))/2;
+    const edgeR=design==='steps' ? py : i===prices.length-1 ? py : (py+y(prices[i+1]))/2;
+    const hoverArea=`M ${sx} ${edgeL} L ${px} ${py} L ${ex} ${edgeR} L ${ex} ${zero} L ${sx} ${zero} Z`;
+    svg.append(node('path',{d:hoverArea,fill:design==='original' ? color(prices[i]) : source,opacity:design==='original' ? .18:design==='quiet' ? .05:.12}));
+    svg.append(node('path',{d:line,fill:'none',stroke:'var(--agile-fg)','stroke-opacity':.18,'stroke-width':4.6,'stroke-linejoin':'round','stroke-linecap':'round'}));
+    const ribbon = () => {
+      if(!planner) return;
+      let path=`M ${x(16)} ${y(prices[16])}`;
+      for(let j=17;j<=22;j++) path+=design==='steps' ? ` H ${left+j*slot} V ${y(prices[j])} H ${x(j)}` : ` L ${x(j)} ${y(prices[j])}`;
+      for(const [stroke,opacity,weight] of [['var(--agile-gold)',.2,7],['#ffd64d',.7,3.4]]) svg.append(node('path',{d:path,fill:'none',stroke,'stroke-opacity':opacity,'stroke-width':weight,'stroke-linecap':'round','stroke-linejoin':'round'}));
+    };
+    if(design==='original') {
+      for(let j=0;j<prices.length-1;j++) svg.append(node('path',{d:`M ${x(j)} ${y(prices[j])} L ${x(j+1)} ${y(prices[j+1])}`,fill:'none',stroke:color(prices[j]),'stroke-width':2.6,'stroke-linecap':'round'}));
+    } else {
+      svg.append(node('path',{d:line,fill:'none',stroke:source,'stroke-opacity':design==='quiet' ? .65:1,'stroke-width':2.6,'stroke-linejoin':'round','stroke-linecap':'round'}));
+    }
+    if(design==='original') ribbon();
+    if(planner) {
+      const label=node('g',{class:'agile-tip'});
+      const lx=Math.max(left,Math.min(right-126,left+19.5*slot-63));
+      label.append(node('rect',{x:lx,y:top+6,width:126,height:21,rx:7,fill:'var(--agile-tooltip)'}));
+      label.append(node('text',{x:lx+63,y:top+21,'text-anchor':'middle'},'Cheapest 3h 30m'));
+      svg.append(label);
+    }
+    if(design==='quiet') for(let j=0;j<prices.length;j++) svg.append(node('circle',{cx:x(j),cy:y(prices[j]),r:j===i ? 4.5:2.4,fill:color(prices[j])}));
+    for(const j of [0,prices.indexOf(Math.min(...prices)),prices.indexOf(Math.max(...prices))]) {
+      svg.append(node('circle',{cx:x(j),cy:y(prices[j]),r:9,fill:color(prices[j]),opacity:.12}));
+      svg.append(node('circle',{cx:x(j),cy:y(prices[j]),r:5.1,fill:color(prices[j])}));
+    }
+    const tipW = 150, tipH=76;
+    let tx = px+14;
+    if(tx+tipW>right) tx=px-tipW-14;
+    tx=Math.max(left,Math.min(tx,right-tipW));
+    let ty=py-tipH-12;
+    if(ty<top+4) ty=py+12;
+    ty=Math.min(bottom-tipH,Math.max(top+4,ty));
+    const anchor=px<tx ? tx:tx+tipW;
+    svg.append(node('line',{x1:px,y1:py,x2:anchor,y2:Math.max(ty+10,Math.min(py,ty+tipH-10)),stroke:'var(--agile-fg)','stroke-opacity':.32}));
+    const tip=node('g',{class:'agile-tip'});
+    tip.append(node('rect',{x:tx,y:ty,width:tipW,height:tipH,rx:7,fill:'var(--agile-tooltip)'}));
+    tip.append(node('text',{x:tx+9,y:ty+20,'font-weight':600},`${time(i)} – ${time(i+1)}`));
+    tip.append(node('text',{x:tx+9,y:ty+41},`${prices[i]}p/kWh`));
+    tip.append(node('text',{x:tx+9,y:ty+62,opacity:.75},planner && i>=16 && i<23 ? 'Cheapest 3h 30m' : `${bands[band(prices[i])]} price`));
+    svg.append(tip);
+    box.querySelector('output').textContent = `${time(i)} – ${time(i+1)} · ${prices[i]}p/kWh · ${bands[band(prices[i])]}`;
+    box.querySelector('input[type="range"]').value=i;
+    box.querySelector('input[type="checkbox"]').checked=planner;
+    chart.layout={left,right,slot};
+  }
+  root.querySelectorAll('.agile-preview').forEach((box,index)=>{
+    const svg=box.querySelector('svg'), design=box.dataset.design;
+    const chart={box,svg,design,id:`agile-design-${index}`}; charts.push(chart);
+    const legend=box.querySelector('.agile-legend');
+    ['Negative < 0p','Low < 20p','Medium 20–26.5p','High ≥ 26.5p'].forEach((label,i)=>{
+      const span=document.createElement('span');
+      const dot=document.createElement('i'); dot.setAttribute('aria-hidden','true');
+      dot.style.setProperty('--band',`var(--agile-${hues[i]})`);
+      span.append(dot,document.createTextNode(label)); legend.append(span);
+    });
+    box.querySelector('input[type="range"]').addEventListener('input',event=>{
+      inspected=Number(event.target.value); charts.forEach(render); persist();
+    });
+    box.querySelector('input[type="checkbox"]').addEventListener('change',event=>{
+      planner=event.target.checked; charts.forEach(render); persist();
+    });
+    svg.addEventListener('pointermove',event=>{
+      if(!chart.layout) return;
+      const px=event.clientX-svg.getBoundingClientRect().left;
+      const {left,right,slot}=chart.layout;
+      if(px<left || px>right) return;
+      const next=Math.min(prices.length-1,Math.floor((px-left)/slot));
+      if(next!==inspected) { inspected=next; charts.forEach(render); }
+    });
+    svg.addEventListener('pointerup',persist);
+    svg.addEventListener('pointerleave',persist);
+    new ResizeObserver(()=>render(chart)).observe(svg);
+    render(chart);
+  });
+  window.addEventListener('openai:set_globals',event=>{
+    const slot=event.detail?.globals?.widgetState?.privateContent?.slot;
+    const plan=event.detail?.globals?.widgetState?.privateContent?.planner;
+    if(Number.isInteger(slot) && slot>=0 && slot<prices.length) inspected=slot;
+    if(typeof plan==='boolean') planner=plan;
+    charts.forEach(render);
+  });
+  if(globalThis.Tweak) {
+    const tweak=new Tweak({container:charts[0].box,onChange:()=>charts.forEach(render)});
+    tweak.addSlider(state,'blendWidth',{label:'Boundary blend',min:0,max:24,step:1,unit:'px'});
+  }
+})();
+</script>
