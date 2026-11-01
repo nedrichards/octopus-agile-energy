@@ -1,4 +1,5 @@
 import sys
+import time
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -413,7 +414,7 @@ class UsageRefreshTests(unittest.TestCase):
             )
         )
 
-        with patch("src.ui.main_window.time.time", return_value=101.0):
+        with patch("src.ui.main_window.time", Mock(wraps=time, time=Mock(return_value=101.0))):
             self.assertFalse(MainWindow._usage_cache_is_fresh(window, "A-TEST"))
 
     def test_current_usage_cache_with_archive_can_be_fresh(self):
@@ -432,7 +433,7 @@ class UsageRefreshTests(unittest.TestCase):
             )
         )
 
-        with patch("src.ui.main_window.time.time", return_value=101.0):
+        with patch("src.ui.main_window.time", Mock(wraps=time, time=Mock(return_value=101.0))):
             self.assertTrue(MainWindow._usage_cache_is_fresh(window, "A-TEST"))
 
     def test_seasonal_view_keeps_cost_modes_disabled(self):

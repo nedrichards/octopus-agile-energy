@@ -1,3 +1,4 @@
+import time
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -19,11 +20,12 @@ class UsageRefreshRecoveryTests(unittest.TestCase):
 
     def test_retry_is_throttled_but_not_blocked_for_the_session(self):
         window = self.window()
-        with patch("src.ui.main_window.time.monotonic", return_value=99), \
+        with patch("src.ui.main_window.time", Mock(wraps=time, monotonic=Mock(return_value=99))), \
                 patch("src.ui.main_window.threading.Thread") as worker:
             self.assertFalse(MainWindow.refresh_usage_history_background(window))
             worker.assert_not_called()
-        with patch("src.ui.main_window.time.monotonic", return_value=101), \
+            self.assertEqual(time.monotonic.__module__, "time")
+        with patch("src.ui.main_window.time", Mock(wraps=time, monotonic=Mock(return_value=101))), \
                 patch("src.ui.main_window.threading.Thread") as worker:
             self.assertTrue(MainWindow.refresh_usage_history_background(window))
             worker.return_value.start.assert_called_once()
@@ -31,7 +33,7 @@ class UsageRefreshRecoveryTests(unittest.TestCase):
 
     def test_manual_refresh_bypasses_retry_delay_but_not_an_active_worker(self):
         window = self.window()
-        with patch("src.ui.main_window.time.monotonic", return_value=99), \
+        with patch("src.ui.main_window.time", Mock(wraps=time, monotonic=Mock(return_value=99))), \
                 patch("src.ui.main_window.threading.Thread") as worker:
             self.assertTrue(MainWindow.refresh_usage_history_background(window, force=True))
             self.assertFalse(MainWindow.refresh_usage_history_background(window, force=True))
