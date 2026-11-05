@@ -32,7 +32,7 @@ from ..price_logic import build_dual_register_price_windows, build_fixed_start_p
 from ..price_logic import find_cheapest_slot as calculate_cheapest_slot
 from ..price_logic import find_cheapest_timer_slot as calculate_cheapest_timer_slot
 from ..secrets_manager import get_api_key
-from ..uk_time import UK_TIMEZONE, is_complete_usage_day
+from ..uk_time import UK_TIMEZONE, expected_half_hours_for_local_day, is_complete_usage_day
 from ..usage_history import (
     USAGE_CACHE_VERSION,
     build_historical_usage_costs,
@@ -42,6 +42,7 @@ from ..usage_history import (
     get_usage_archive_refresh_start,
     get_usage_refresh_start,
     merge_usage_history,
+    repair_usage_history,
 )
 from ..usage_insights import build_usage_dashboard_data
 from ..usage_presentation import (
@@ -2588,7 +2589,9 @@ class MainWindow(Adw.ApplicationWindow):
                     if signature == previous_signature:
                         result["state"] = "unchanged"
                     else:
-                        daily_costs = cached_data.get("daily_costs", [])
+                        checked_days = cached_data.get("repair_checked_days", {})
+                        daily_costs = [dict(day, last_checked=checked_days.get(day.get("date")))
+                                       for day in cached_data.get("daily_costs", [])]
                         synced_at = cached_data.get("synced_at")
                         insight = build_usage_dashboard_data(
                             cached_data.get("samples", []), synced_at, daily_costs,
@@ -2951,6 +2954,10 @@ class MainWindow(Adw.ApplicationWindow):
                     now=datetime.now(UTC),
                     fresh_daily_archive=fresh_daily_archive,
                 )
+                try:
+                    refreshed_data = repair_usage_history(account_data, refreshed_data, force=force)
+                except (OctopusApiError, requests.exceptions.RequestException) as exc:
+                    logger.debug("Usage gap recheck failed: %s", type(exc).__name__)
                 cache_key = f"octopus_usage_{account_number}"
                 self.usage_cache_manager.set(cache_key, refreshed_data)
                 GLib.idle_add(self._finish_usage_history_background_refresh, True)
@@ -3252,13 +3259,18 @@ class MainWindow(Adw.ApplicationWindow):
             if day.get("day_count", 0) < day.get("expected_days", 0):
                 return "Partial month"
             return "Complete month"
+        notes = []
         if day.get("missing_rate_count", 0):
-            return "Historical rates incomplete"
-        if day.get("sample_count") and not is_complete_usage_day(
-            day.get("date"),
-            day.get("sample_count", 0),
+            notes.append(f"Prices missing for {day['missing_rate_count']} readings")
+        if day.get("sample_count") is not None and not is_complete_usage_day(
+            day.get("date"), day.get("sample_count", 0),
         ):
-            return "Partial usage day"
+            expected = expected_half_hours_for_local_day(datetime.fromisoformat(day["date"]).date())
+            notes.append(f"{day['sample_count']} of {expected} readings available")
+        if notes:
+            if day.get("last_checked"):
+                notes.append(f"Last rechecked {day['last_checked'][:10]}")
+            return " · ".join(notes)
         if day.get("total_cost_gbp") is not None:
             return "Matched historical rates"
         return ""
@@ -3440,15 +3452,9 @@ class MainWindow(Adw.ApplicationWindow):
         if total_cost is not None:
             lines.append(f"Total: {format_gbp(total_cost)}")
 
-        if day.get("missing_rate_count", 0):
-            lines.append("Historical rates incomplete")
-        elif day.get("sample_count") and not is_complete_usage_day(
-            day.get("date"),
-            day.get("sample_count", 0),
-        ):
-            lines.append("Partial usage day")
-        elif total_cost is not None:
-            lines.append("Matched historical rates")
+        quality_note = self._describe_usage_day_quality(day)
+        if quality_note:
+            lines.append(quality_note)
 
         tooltip.set_markup("\n".join(lines))
         return True

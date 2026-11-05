@@ -186,7 +186,13 @@ energy charges by their consumption; standing charges are excluded. Windows
 with missing readings or rates appear as gaps. Click or drag sideways across the chart, or use Left,
 Right, Home, and End to inspect dates. The first history refresh after upgrading
 backfills historical half-hour readings and tariffs and can take longer than
-normal; subsequent refreshes use an overlap. Only daily cost totals are retained
+normal; subsequent refreshes use a seven-day overlap. Once a week, automatic refresh also
+rechecks older gaps within the last 120 days, fetching only affected ranges within
+one 14-day span. Toolbar Refresh triggers this bounded recheck immediately.
+Preferences’ **Recheck older usage history** also checks gaps across the stored
+five-year archive, with the same limit; repeat it to work through further gaps.
+Complete older days stay cached. Missing readings are never treated as zero usage.
+Only daily cost totals are retained
 for the longer history, alongside the existing consumption archive.
 
 ### Account scope

@@ -109,6 +109,7 @@ def get_usage_chart_series(insight, daily_costs, period_mode="recent", graph_mod
                 "standing_charge_gbp": day.get("standing_charge_gbp"),
                 "missing_rate_count": day.get("missing_rate_count"),
                 "sample_count": day.get("sample_count"),
+                "last_checked": day.get("last_checked"),
             })
         return (
             list(insight["chart_points"]),

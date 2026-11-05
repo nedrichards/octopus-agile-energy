@@ -5,11 +5,11 @@ from urllib.parse import quote, urlencode
 
 import requests
 
-from .historical_costs import build_daily_costs, build_tariff_periods, get_usage_period
+from .historical_costs import build_daily_costs, build_tariff_periods, get_usage_period, parse_octopus_datetime
 from .octopus_api import OctopusApiError, get_json
 from .price_bands import PRICE_BAND_VERSION
 from .price_logic import build_dual_register_price_windows, extract_product_code
-from .uk_time import UK_TIMEZONE
+from .uk_time import UK_TIMEZONE, is_complete_usage_day
 from .usage_seasonality import (
     USAGE_ARCHIVE_DAYS,
     build_daily_usage_archive,
@@ -153,6 +153,76 @@ def get_usage_archive_refresh_start(cached_data, now=None):
     return max(archive_start, overlap_start.astimezone(UTC))
 
 
+def get_usage_repair_ranges(cached_data, now=None, force=False, older=False):
+    """Select gaps within one 14-day calendar span, rotating checked gaps last."""
+    now = now or datetime.now(UTC)
+    cached_data = _compatible_usage_cache(cached_data)
+    if not cached_data:
+        return []
+    last_check = parse_octopus_datetime(cached_data.get("repair_synced_at"))
+    if not force and last_check and now - last_check < timedelta(days=7):
+        return []
+    today = now.astimezone(UK_TIMEZONE).date()
+    cutoff = today - timedelta(days=USAGE_ARCHIVE_DAYS if older else USAGE_HISTORY_DAYS)
+    records = {record["date"]: record for record in cached_data["daily_usage_archive"]}
+    records.update({record["date"]: record for record in cached_data["daily_costs"]})
+    if not records:
+        return []
+    first_day = max(cutoff, datetime.fromisoformat(min(records)).date())
+    recent_start = get_usage_refresh_start(cached_data, now).astimezone(UK_TIMEZONE).date()
+    checked = cached_data.get("repair_checked_days", {})
+    gaps = []
+    day = first_day
+    while day < recent_start:
+        record = records.get(day.isoformat(), {})
+        if (not is_complete_usage_day(day.isoformat(), record.get("sample_count", 0))
+                or record.get("missing_rate_count", 0)
+                or "energy_cost_gbp" not in record):
+            gaps.append(day)
+        day += timedelta(days=1)
+    if not gaps:
+        return []
+    anchor = min(gaps, key=lambda day: (checked.get(day.isoformat(), ""), day))
+    selected = [day for day in gaps if anchor <= day < anchor + timedelta(days=14)]
+    ranges = []
+    for day in selected:
+        start = datetime.combine(day, datetime.min.time(), tzinfo=UK_TIMEZONE)
+        end = start + timedelta(days=1)
+        if ranges and ranges[-1][1] == start:
+            ranges[-1] = (ranges[-1][0], end)
+        else:
+            ranges.append((start, end))
+    return ranges
+
+
+def repair_usage_history(account_data, cached_data, now=None, force=False, older=False):
+    """Retry bounded gaps; preserve cached readings and costs on request failure."""
+    now = now or datetime.now(UTC)
+    ranges = get_usage_repair_ranges(cached_data, now, force, older)
+    if not ranges:
+        return cached_data
+    result = cached_data
+    checked = dict(cached_data.get("repair_checked_days", {}))
+    for start, end in ranges:
+        samples = _fetch_usage_samples(account_data, start.astimezone(UTC), end.astimezone(UTC))
+        # The consumption API can return overlapping intervals: keep this range only.
+        samples = [sample for sample in samples
+                   if (instant := _parse_sample_start(sample)) is not None and start <= instant < end]
+        costs = build_historical_usage_costs(account_data, samples)
+        costs_by_date = {cost["date"]: cost for cost in costs}
+        archive = [dict(day, **costs_by_date.get(day["date"], {}))
+                   for day in build_daily_usage_archive(samples)]
+        result = merge_usage_history(result, samples, costs, now, fresh_daily_archive=archive)
+        day = start.date()
+        while day < end.date():
+            checked[day.isoformat()] = now.isoformat()
+            day += timedelta(days=1)
+    cutoff = (now.astimezone(UK_TIMEZONE).date() - timedelta(days=USAGE_ARCHIVE_DAYS)).isoformat()
+    result["repair_checked_days"] = {day: stamp for day, stamp in checked.items() if day >= cutoff}
+    result["repair_synced_at"] = now.isoformat()
+    return result
+
+
 def merge_usage_history(
     cached_data,
     fresh_samples,
@@ -193,6 +263,8 @@ def merge_usage_history(
                 daily_costs_by_date[day_key] = day
 
     return {
+        "repair_checked_days": cached_data.get("repair_checked_days", {}),
+        "repair_synced_at": cached_data.get("repair_synced_at"),
         "samples": merged_samples,
         "daily_costs": [daily_costs_by_date[day] for day in sorted(daily_costs_by_date)],
         "daily_usage_archive": merge_daily_usage_archive(

@@ -31,6 +31,7 @@ from ..usage_history import (
     get_usage_archive_refresh_start,
     get_usage_refresh_start,
     merge_usage_history,
+    repair_usage_history,
 )
 from ..utils import CacheManager, weak_callback
 
@@ -178,7 +179,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self.auto_detect_status.set_accessible_role(Gtk.AccessibleRole.STATUS)
         api_group.add(self.auto_detect_status)
 
-        self.refresh_usage_button = Gtk.Button.new_with_label("Refresh usage history")
+        self.refresh_usage_button = Gtk.Button.new_with_label("Recheck older usage history")
         self.refresh_usage_button.set_margin_top(8)
         self.refresh_usage_button.connect("clicked", weak_callback(self.on_refresh_usage_clicked))
         api_group.add(self.refresh_usage_button)
@@ -420,6 +421,13 @@ class PreferencesDialog(Adw.PreferencesDialog):
                 now=datetime.now(UTC),
                 fresh_daily_archive=fresh_daily_archive,
             )
+            try:
+                refreshed_data = repair_usage_history(account_data, refreshed_data, force=True, older=True)
+            except (OctopusApiError, requests.exceptions.RequestException) as exc:
+                logger.debug("Older usage recheck failed: %s", type(exc).__name__)
+                GLib.idle_add(self._set_usage_status, "Recent usage refreshed; older history recheck failed. Try again later.")
+                self.usage_cache_manager.set(cache_key, refreshed_data)
+                return
             self.usage_cache_manager.set(cache_key, refreshed_data)
             GLib.idle_add(
                 self._set_usage_status,
