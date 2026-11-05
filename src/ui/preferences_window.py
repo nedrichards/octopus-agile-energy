@@ -118,7 +118,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         group.add(self.region_row)
         self.region_handler_id = self.region_row.connect("notify::selected", weak_callback(self.on_region_selected))
 
-        self.location_button = Gtk.Button.new_with_label("Use My Location")
+        self.location_button = Gtk.Button.new_with_label("Use my location")
         self.location_button.set_margin_top(12)
         self.location_button.set_tooltip_text("Find my electricity region")
         self.location_button.connect("clicked", weak_callback(self.on_location_suggestion_clicked))
@@ -129,6 +129,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         )
         self.location_status.set_xalign(0)
         self.location_status.set_wrap(True)
+        self.location_status.set_margin_top(12)
         self.location_status.set_margin_bottom(12)
         self.location_status.add_css_class("dim-label")
         self.location_status.set_accessible_role(Gtk.AccessibleRole.STATUS)
@@ -154,20 +155,16 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self._key_changed_handler = self.api_key_entry.connect("changed", weak_callback(self.on_api_key_changed))
         api_group.add(self.api_key_entry)
 
-        self.account_number_row = Adw.ActionRow.new()
-        self.account_number_row.set_title("Account Number")
-        self.account_number_row.set_subtitle("Used for API auto-detection (e.g. A-12345678)")
-        self.account_number_entry = Gtk.Entry.new()
-        self.account_number_entry.set_hexpand(True)
-        self.account_number_entry.set_placeholder_text("A-12345678")
+        self.account_number_row = Adw.EntryRow.new()
+        self.account_number_row.set_title("Account number")
+        self.account_number_row.set_tooltip_text("Used for account features (e.g. A-12345678)")
+        self.account_number_entry = self.account_number_row
         self.account_number_entry.set_text(self.settings.get_string("octopus-account-number"))
         self.account_number_entry.connect("changed", weak_callback(self.on_account_number_changed))
-        self.account_number_row.add_suffix(self.account_number_entry)
-        self.account_number_row.set_activatable_widget(self.account_number_entry)
         api_group.add(self.account_number_row)
 
         self.auto_detect_button = Gtk.Button.new_with_label("Auto-detect tariff from account")
-        self.auto_detect_button.set_margin_top(8)
+        self.auto_detect_button.set_margin_top(12)
         self.auto_detect_button.set_margin_bottom(4)
         self.auto_detect_button.connect("clicked", weak_callback(self.on_auto_detect_clicked))
         api_group.add(self.auto_detect_button)
@@ -179,17 +176,24 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self.auto_detect_status.set_accessible_role(Gtk.AccessibleRole.STATUS)
         api_group.add(self.auto_detect_status)
 
+        usage_group = Adw.PreferencesGroup.new()
+        usage_group.set_title("Usage history")
+        usage_group.set_description(
+            "Refresh recent usage and recheck up to 14 days of older gaps. Repeat to check further gaps."
+        )
+        page.add(usage_group)
+
         self.refresh_usage_button = Gtk.Button.new_with_label("Recheck older usage history")
-        self.refresh_usage_button.set_margin_top(8)
+        self.refresh_usage_button.set_margin_top(12)
         self.refresh_usage_button.connect("clicked", weak_callback(self.on_refresh_usage_clicked))
-        api_group.add(self.refresh_usage_button)
+        usage_group.add(self.refresh_usage_button)
 
         self.usage_status = Gtk.Label.new("")
         self.usage_status.set_xalign(0)
         self.usage_status.add_css_class("dim-label")
         self.usage_status.set_wrap(True)
         self.usage_status.set_accessible_role(Gtk.AccessibleRole.STATUS)
-        api_group.add(self.usage_status)
+        usage_group.add(self.usage_status)
 
     def _apply_existing_api_key(self, api_key):
         if self._closed or self._credential_revision:
