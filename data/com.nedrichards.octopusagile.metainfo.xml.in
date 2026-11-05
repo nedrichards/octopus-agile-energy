@@ -67,6 +67,16 @@
   </screenshots>
 
   <releases>
+    <release version="1.0.34" date="2026-11-05">
+      <description>
+        <p>This release helps recover missing usage history and makes Preferences clearer.</p>
+        <ul>
+          <li>Recheck older gaps weekly in small batches, with manual checks for the stored history</li>
+          <li>Show missing reading counts, missing prices and the last recheck date for incomplete days</li>
+          <li>Improve Preferences spacing, group usage-history controls and simplify account-number entry</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.33" date="2026-10-25">
       <description>
         <p>This release makes price-band transitions smoother and improves the chart's planning highlights.</p>
