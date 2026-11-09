@@ -11,3 +11,13 @@ Dispatch `Publish Release Flatpaks` from the default branch with an existing `vX
 GitHub bundles are sideloadable packages. Flathub updates continue through the Flathub repository review process. This workflow does not submit to or publish on Flathub.
 
 GitHub repository settings also enable dependency vulnerability alerts, Dependabot security updates, and weekly CodeQL default setup. Security updates propose pull requests; they do not merge them or publish app releases. The default CodeQL configuration lives in GitHub settings, alongside these versioned maintenance workflows.
+
+Scheduled and default-branch manual dependency-health runs also propose updates
+to bundled dependencies in both JSON manifests using the existing checker's
+edit-only mode. The maintenance script copies only dependency URLs and SHA256
+checksums; application source pins and runtime settings are preserved.
+The read-only reporting job still fails for outdated dependencies and errors.
+A separate default-branch job opens one reusable update PR; PR checks cannot
+publish updates. Enable Actions PR creation in repository settings. Checks on
+bot-created PRs may require approval in GitHub. No additional requirements file
+or standalone generator is used.

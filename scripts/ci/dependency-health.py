@@ -24,11 +24,44 @@ def modules(items, parent):
             yield from modules(item.get("modules", []), parent)
 
 
+def apply_updates(filenames, checked):
+    """Copy only checked dependency URL and checksum fields into real manifests."""
+    updates = {}
+    for module in checked["modules"]:
+        for source in module["sources"]:
+            key = json.dumps(source["x-checker-data"], sort_keys=True)
+            value = {field: source[field] for field in ("url", "sha256")}
+            if key in updates and updates[key] != value:
+                raise ValueError("Conflicting checker results")
+            updates[key] = value
+    pending = []
+    for filename in filenames:
+        path = Path(filename)
+        original = path.read_text()
+        manifest = json.loads(original)
+        for module in modules(manifest["modules"], path.parent):
+            for source in module.get("sources", []):
+                if not isinstance(source, dict) or source.get("type") != "file" or not source.get("x-checker-data"):
+                    continue
+                key = json.dumps(source["x-checker-data"], sort_keys=True)
+                if key not in updates:
+                    raise ValueError("Missing checker result")
+                source.update(updates[key])
+        if manifest != json.loads(original):
+            pending.append((path, json.dumps(manifest, indent=4) + "\n"))
+    for path, content in pending:
+        path.write_text(content)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("manifests", nargs="+")
     parser.add_argument("--prepare-only", action="store_true")
+    parser.add_argument("--apply-updates", type=Path)
     args = parser.parse_args()
+    if args.apply_updates:
+        apply_updates(args.manifests, json.loads(args.apply_updates.read_text()))
+        return 0
     failed = False
     seen = set()
     external = []
