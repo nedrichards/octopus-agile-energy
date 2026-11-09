@@ -152,5 +152,33 @@ class ReleaseTests(unittest.TestCase):
             self.prepare()
 
 
+
+class DependencyUpdateTests(unittest.TestCase):
+    def test_updates_both_manifests_without_changing_app_pin(self):
+        root = HERE.parent.parent
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = []
+            before = []
+            for name in ("com.nedrichards.octopusagile.Devel.json", "com.nedrichards.octopusagile.json"):
+                path = Path(tmp) / name
+                path.write_text((root / name).read_text())
+                paths.append(path)
+                before.append(json.loads(path.read_text()))
+            sources = json.loads(json.dumps(before[0]["modules"][0]["sources"]))
+            for source in sources:
+                source.update(url="https://files.pythonhosted.org/updated.whl", sha256="a" * 64)
+            health.apply_updates(paths, {"modules": [{"sources": sources}]})
+            for path, original in zip(paths, before):
+                updated = json.loads(path.read_text())
+                self.assertEqual(updated["modules"][1:], original["modules"][1:])
+                self.assertEqual(updated["runtime-version"], original["runtime-version"])
+                self.assertEqual(updated["modules"][0]["sources"], sources)
+            once = [path.read_text() for path in paths]
+            health.apply_updates(paths, {"modules": [{"sources": sources}]})
+            self.assertEqual(once, [path.read_text() for path in paths])
+            with self.assertRaises(ValueError):
+                health.apply_updates(paths, {"modules": []})
+            self.assertEqual(once, [path.read_text() for path in paths])
+
 if __name__ == "__main__":
     unittest.main()

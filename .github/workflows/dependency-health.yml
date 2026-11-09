@@ -52,3 +52,44 @@ jobs:
           if [ -f dependency-health.log ]; then
             { echo '### Dependency health'; echo '```text'; cat dependency-health.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           fi
+
+  updates:
+    if: >-
+      github.event_name != 'pull_request' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    permissions:
+      contents: write
+      pull-requests: write
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Prepare dependency-only checker input
+        run: python3 scripts/ci/dependency-health.py com.nedrichards.octopusagile.Devel.json com.nedrichards.octopusagile.json --prepare-only
+      - name: Update bundled dependency sources
+        run: |
+          set -o pipefail
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" ghcr.io/flathub/flatpak-external-data-checker:latest \
+            --edit-only /work/dependency-sources.json 2>&1 | tee dependency-update.log
+          python3 scripts/ci/dependency-health.py com.nedrichards.octopusagile.Devel.json com.nedrichards.octopusagile.json --apply-updates dependency-sources.json
+      - name: Propose bundled dependency updates
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: automation/flatpak-dependencies
+          commit-message: 'build(flatpak): update bundled dependencies'
+          title: 'Update bundled Flatpak dependencies'
+          body: |
+            Updates bundled dependency URLs and checksums from dependency-health.
+            Both manifests are updated together. Application source pins and runtime settings are preserved.
+          add-paths: |
+            com.nedrichards.octopusagile.Devel.json
+            com.nedrichards.octopusagile.json
+      - name: Preserve update report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dependency-update
+          path: dependency-update.log
+          retention-days: 14
+          if-no-files-found: warn
