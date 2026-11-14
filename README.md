@@ -230,3 +230,5 @@ Development of this project has been assisted by a variety of AI coding tools.
 
 Dependency checks, CI artifacts, and release packaging are described in
 [Maintenance](docs/maintenance.md).
+
+For hosted checks and artifacts, see [continuous integration](docs/CI.md).
