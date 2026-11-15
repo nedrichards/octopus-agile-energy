@@ -85,7 +85,7 @@ gsettings reset-recursively com.nedrichards.octopusagile
 
 Run source checks inside the GNOME SDK rather than against the host Python and GTK stack. The installed development build supplies the same pinned Python dependencies used by the application; install the development-only tools into a temporary SDK path first.
 
-Ruff requires version 0.17.3, matching `requirements-dev.txt` and CI. A different
+Ruff requires version 0.17.4, matching `requirements-dev.txt` and CI. A different
 version fails immediately; update `required-version` in `pyproject.toml` and the
 dependency pin together when upgrading Ruff.
 
